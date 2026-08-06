@@ -12,11 +12,16 @@ import com.browser.adblocker.downloader.download.M3u8Stream
 import com.browser.adblocker.downloader.download.VideoDownloader
 import com.browser.adblocker.downloader.ui.BrowserScreen
 import com.browser.adblocker.downloader.ui.components.DownloadBottomSheet
+import com.browser.adblocker.downloader.ui.components.HistoryBottomSheet
+import com.browser.adblocker.downloader.ui.components.HistoryItem
+import org.json.JSONArray
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.WebExtension
+import java.io.File
+import java.net.URLEncoder
 import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
@@ -38,8 +43,15 @@ class MainActivity : ComponentActivity() {
     private val downloadProgress = mutableIntStateOf(0)
     private val downloadSegmentText = mutableStateOf("")
 
+    // History state
+    private val historyList = mutableStateListOf<HistoryItem>()
+    private val showHistorySheet = mutableStateOf(false)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Load saved history
+        loadHistory()
 
         // 1. Initialize GeckoView Runtime and Session
         runtime = GeckoRuntime.create(this)
@@ -74,7 +86,7 @@ class MainActivity : ComponentActivity() {
             }
         )
 
-        // 3. Configure Progress and Navigation Delegates
+        // 3. Configure Progress, Content and Navigation Delegates
         session.progressDelegate = object : GeckoSession.ProgressDelegate {
             override fun onPageStart(session: GeckoSession, url: String) {
                 runOnUiThread {
@@ -82,6 +94,22 @@ class MainActivity : ComponentActivity() {
                     hlsStreams.clear()
                     adBlockCount.intValue = 0
                     urlInput.value = url
+
+                    // Add to history list on page start
+                    val cleanUrl = url.trim()
+                    if (cleanUrl.isNotEmpty() && !cleanUrl.startsWith("about:")) {
+                        if (historyList.firstOrNull()?.url != cleanUrl) {
+                            historyList.add(0, HistoryItem(
+                                title = "",
+                                url = cleanUrl,
+                                timestamp = System.currentTimeMillis()
+                            ))
+                            if (historyList.size > 100) {
+                                historyList.removeLast()
+                            }
+                            saveHistory()
+                        }
+                    }
                 }
             }
 
@@ -97,6 +125,21 @@ class MainActivity : ComponentActivity() {
                 session: GeckoSession,
                 securityInfo: GeckoSession.ProgressDelegate.SecurityInformation
             ) {}
+        }
+
+        session.contentDelegate = object : GeckoSession.ContentDelegate {
+            override fun onTitleChange(session: GeckoSession, title: String?) {
+                title?.let { nonNullTitle ->
+                    runOnUiThread {
+                        val currentUrl = urlInput.value
+                        val index = historyList.indexOfFirst { it.url == currentUrl }
+                        if (index != -1) {
+                            historyList[index] = historyList[index].copy(title = nonNullTitle)
+                            saveHistory()
+                        }
+                    }
+                }
+            }
         }
 
         session.navigationDelegate = object : GeckoSession.NavigationDelegate {
@@ -127,6 +170,7 @@ class MainActivity : ComponentActivity() {
             val forwardEnabled by remember { canGoForward }
             
             var openSheet by remember { showBottomSheet }
+            var openHistory by remember { showHistorySheet }
             val downloading by remember { isDownloading }
             val currentProgress by remember { downloadProgress }
             val segmentText by remember { downloadSegmentText }
@@ -136,13 +180,8 @@ class MainActivity : ComponentActivity() {
                 urlInput = urlText,
                 onUrlInputChanged = { urlText = it },
                 onSearch = {
-                    var target = urlText.trim()
-                    if (target.isNotEmpty()) {
-                        if (!target.startsWith("http://") && !target.startsWith("https://")) {
-                            target = "https://www.google.com/search?q=" + target.replace(" ", "+")
-                        }
-                        session.loadUri(target)
-                    }
+                    val resolvedUrl = resolveInputUrl(urlText)
+                    session.loadUri(resolvedUrl)
                 },
                 adBlockCount = blockedCount,
                 detectedVideosCount = videosCount,
@@ -152,7 +191,8 @@ class MainActivity : ComponentActivity() {
                 onBackClick = { if (backEnabled) session.goBack() },
                 onForwardClick = { if (forwardEnabled) session.goForward() },
                 onHomeClick = { session.loadUri("https://google.com") },
-                onDownloadClick = { handleDownloadFabClick() }
+                onDownloadClick = { handleDownloadFabClick() },
+                onHistoryClick = { openHistory = true }
             )
 
             if (openSheet) {
@@ -168,6 +208,22 @@ class MainActivity : ComponentActivity() {
                     },
                     onDownloadSelected = { url, quality ->
                         triggerDownload(url, quality)
+                    }
+                )
+            }
+
+            if (openHistory) {
+                HistoryBottomSheet(
+                    historyList = historyList,
+                    onDismissRequest = { openHistory = false },
+                    onHistoryItemClick = { url ->
+                        session.loadUri(url)
+                        openHistory = false
+                    },
+                    onClearHistory = {
+                        historyList.clear()
+                        saveHistory()
+                        Toast.makeText(this, "History cleared", Toast.LENGTH_SHORT).show()
                     }
                 )
             }
@@ -281,6 +337,74 @@ class MainActivity : ComponentActivity() {
             )
             showBottomSheet.value = false
         }
+    }
+
+    // Smart Address Bar Input Parser
+    private fun resolveInputUrl(input: String): String {
+        val trimmed = input.trim()
+        if (trimmed.isEmpty()) return "https://google.com"
+
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://") || trimmed.startsWith("about:")) {
+            return trimmed
+        }
+
+        // Check if it matches a standard domain format without spaces
+        val domainPattern = Regex("^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(/.*)?$")
+        if (domainPattern.matches(trimmed) && !trimmed.contains(" ")) {
+            return "https://$trimmed"
+        }
+
+        // Fallback to Google Search
+        return try {
+            "https://www.google.com/search?q=" + URLEncoder.encode(trimmed, "UTF-8")
+        } catch (e: Exception) {
+            "https://www.google.com/search?q=" + trimmed.replace(" ", "+")
+        }
+    }
+
+    // History Persistence
+    private fun saveHistory() {
+        try {
+            val file = File(filesDir, "history.json")
+            val jsonArray = JSONArray()
+            for (item in historyList) {
+                val obj = JSONObject()
+                obj.put("title", item.title)
+                obj.put("url", item.url)
+                obj.put("timestamp", item.timestamp)
+                jsonArray.put(obj)
+            }
+            file.writeText(jsonArray.toString())
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun loadHistory() {
+        try {
+            val file = File(filesDir, "history.json")
+            if (file.exists()) {
+                val content = file.readText()
+                val jsonArray = JSONArray(content)
+                historyList.clear()
+                for (i in 0 until jsonArray.length()) {
+                    val obj = jsonArray.getJSONObject(i)
+                    historyList.add(
+                        HistoryItem(
+                            obj.optString("title", ""),
+                            obj.getString("url"),
+                            obj.getLong("timestamp")
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    fun openHistorySheet() {
+        showHistorySheet.value = true
     }
 
     override fun onDestroy() {

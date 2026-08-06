@@ -59,7 +59,12 @@ async function updateBlocklist() {
 }
 
 // Check every 24 hours
-setInterval(updateBlocklist, 24 * 60 * 60 * 1000);
+browser.alarms?.create("update-blocklist", { periodInMinutes: 1440 });
+browser.alarms?.onAlarm.addListener((alarm) => {
+    if (alarm.name === "update-blocklist") {
+        updateBlocklist();
+    }
+});
 
 // Helper function to check if domain is blocked
 function isDomainBlocked(hostname) {
@@ -78,7 +83,7 @@ function isDomainBlocked(hostname) {
     return false;
 }
 
-// Request Interception for Ad Blocking and Video Detection
+// 1. Request Interception for Ad Blocking
 browser.webRequest.onBeforeRequest.addListener(
     function(details) {
         try {
@@ -97,26 +102,6 @@ browser.webRequest.onBeforeRequest.addListener(
                 });
                 return { cancel: true };
             }
-
-            // Detect Videos from Network Stream Requests
-            const isMedia = details.type === "media";
-            const isVideoExt = urlString.match(/\.(mp4|webm|m3u8|mpd)(\?.*)?$/i);
-            
-            if (isMedia || isVideoExt) {
-                // Determine format
-                let format = "MP4";
-                if (urlString.includes(".m3u8")) format = "HLS (M3U8)";
-                else if (urlString.includes(".mpd")) format = "DASH (MPD)";
-                else if (urlString.includes(".webm")) format = "WEBM";
-
-                // Notify native Kotlin app of video detection
-                browser.runtime.sendNativeMessage("browser-app", {
-                    action: "video_detected",
-                    url: urlString,
-                    title: "Network Stream (" + format + ")",
-                    format: format
-                });
-            }
         } catch (e) {
             console.error("Error in onBeforeRequest: ", e);
         }
@@ -124,6 +109,64 @@ browser.webRequest.onBeforeRequest.addListener(
     },
     { urls: ["<all_urls>"] },
     ["blocking"]
+);
+
+// 2. Response Headers Interception for MSE/YouTube/Blob Video Detection
+browser.webRequest.onHeadersReceived.addListener(
+    function(details) {
+        try {
+            const urlString = details.url;
+            
+            // Check for YouTube Video Streams
+            if (urlString.includes("googlevideo.com/videoplayback")) {
+                // Determine resolution or audio/video from URL parameters
+                let format = "MP4 Video";
+                if (urlString.includes("mime=audio")) {
+                    // Skip audio chunks to avoid adding them as separate download options
+                    return { responseHeaders: details.responseHeaders };
+                }
+                
+                browser.runtime.sendNativeMessage("browser-app", {
+                    action: "video_detected",
+                    url: urlString,
+                    title: "YouTube Video Stream",
+                    format: "MP4 (YouTube)"
+                });
+                return { responseHeaders: details.responseHeaders };
+            }
+
+            // Inspect Content-Type headers for generic web video streams
+            const headers = details.responseHeaders;
+            const contentTypeHeader = headers.find(h => h.name.toLowerCase() === "content-type");
+            
+            if (contentTypeHeader) {
+                const contentType = contentTypeHeader.value.toLowerCase();
+                
+                if (contentType.startsWith("video/") || 
+                    contentType.includes("mpegurl") || 
+                    contentType.includes("m3u8") ||
+                    contentType.includes("application/dash+xml")) {
+                    
+                    let format = "MP4";
+                    if (contentType.includes("mpegurl") || contentType.includes("m3u8")) format = "HLS (M3U8)";
+                    else if (contentType.includes("dash")) format = "DASH (MPD)";
+                    else if (contentType.includes("webm")) format = "WEBM";
+
+                    browser.runtime.sendNativeMessage("browser-app", {
+                        action: "video_detected",
+                        url: urlString,
+                        title: "Web Video Stream",
+                        format: format
+                    });
+                }
+            }
+        } catch (e) {
+            console.error("Error in onHeadersReceived: ", e);
+        }
+        return { responseHeaders: details.responseHeaders };
+    },
+    { urls: ["<all_urls>"] },
+    ["responseHeaders"]
 );
 
 // Listen for messages from content.js (HTML5 video playing events)

@@ -29,7 +29,6 @@ import androidx.compose.ui.unit.sp
 import com.browser.adblocker.downloader.ui.components.BrowserGeckoView
 import org.mozilla.geckoview.GeckoSession
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun BrowserScreen(
     session: GeckoSession,
@@ -44,7 +43,8 @@ fun BrowserScreen(
     onBackClick: () -> Unit,
     onForwardClick: () -> Unit,
     onHomeClick: () -> Unit,
-    onDownloadClick: () -> Unit
+    onDownloadClick: () -> Unit,
+    onHistoryClick: () -> Unit
 ) {
     // Pulsing animation for the Video Download FAB
     val infiniteTransition = rememberInfiniteTransition(label = "pulse")
@@ -61,33 +61,31 @@ fun BrowserScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF13131A))
+            .background(Color(0xFF0F0F15))
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top Bar: Address bar, search, adblock shield
+            // Top Address Bar Area
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    .padding(start = 12.dp, end = 12.dp, top = 8.dp, bottom = 4.dp)
             ) {
-                // Home Button
-                IconButton(
-                    onClick = onHomeClick,
-                    colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
-                ) {
-                    Icon(imageVector = Icons.Default.Home, contentDescription = "Home")
-                }
-
-                // Address Input
+                // Address Bar Container with glowing border
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(44.dp)
-                        .clip(RoundedCornerShape(22.dp))
-                        .background(Color(0xFF252538))
-                        .border(1.dp, Color(0xFF38385C), RoundedCornerShape(22.dp))
+                        .height(46.dp)
+                        .clip(RoundedCornerShape(23.dp))
+                        .background(Color(0xFF1B1B27))
+                        .border(
+                            1.dp,
+                            Brush.horizontalGradient(
+                                colors = listOf(Color(0x8000FFCC), Color(0x33FFFFFF))
+                            ),
+                            RoundedCornerShape(23.dp)
+                        )
                         .padding(horizontal = 16.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
@@ -98,7 +96,7 @@ fun BrowserScreen(
                         Icon(
                             imageVector = Icons.Default.Search,
                             contentDescription = null,
-                            tint = Color.Gray,
+                            tint = Color(0xFF00FFCC),
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -126,35 +124,33 @@ fun BrowserScreen(
                                     .size(18.dp)
                                     .clickable { onUrlInputChanged("") }
                             )
+                            Spacer(modifier = Modifier.width(8.dp))
+                        }
+
+                        // Compact Ad Block Shield inside the address bar (like Brave)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(Color(0x26FF3B30))
+                                .border(1.dp, Color(0x4DFF3B30), RoundedCornerShape(12.dp))
+                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = Color(0xFFFF3B30),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                text = adBlockCount.toString(),
+                                color = Color.White,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold
+                            )
                         }
                     }
-                }
-
-                Spacer(modifier = Modifier.width(8.dp))
-
-                // AdBlock uBlock-style Shield
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .height(36.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(Color(0x33FF3B30))
-                        .border(1.dp, Color(0x66FF3B30), RoundedCornerShape(18.dp))
-                        .padding(horizontal = 10.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Shield,
-                        contentDescription = "Blocked Ads",
-                        tint = Color(0xFFFF3B30),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = adBlockCount.toString(),
-                        color = Color.White,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold
-                    )
                 }
             }
 
@@ -172,7 +168,7 @@ fun BrowserScreen(
                 Spacer(modifier = Modifier.height(3.dp))
             }
 
-            // WebView viewport (GeckoView)
+            // GeckoView Area
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -183,17 +179,27 @@ fun BrowserScreen(
                     modifier = Modifier.fillMaxSize()
                 )
             }
+        }
 
-            // Bottom Navigation Bar
+        // Premium Floating Glassmorphic Bottom Navigation Bar
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .padding(bottom = 20.dp, start = 24.dp, end = 24.dp)
+                .fillMaxWidth()
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceAround,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .navigationBarsPadding()
-                    .background(Color(0xFF1E1E2C))
-                    .padding(vertical = 8.dp)
+                    .height(64.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(Color(0xD91B1B27)) // Semi-transparent glass background
+                    .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(32.dp)) // Crisp white border line
+                    .padding(horizontal = 8.dp)
             ) {
+                // Back Button
                 IconButton(
                     onClick = onBackClick,
                     enabled = canGoBack,
@@ -204,14 +210,32 @@ fun BrowserScreen(
                 ) {
                     Icon(imageVector = Icons.Default.ArrowBack, contentDescription = "Back")
                 }
-                
+
+                // Refresh Button
                 IconButton(
                     onClick = { session.reload() },
                     colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
                 ) {
                     Icon(imageVector = Icons.Default.Refresh, contentDescription = "Refresh")
                 }
-                
+
+                // Home Button (with standard browser navigation styling)
+                IconButton(
+                    onClick = onHomeClick,
+                    colors = IconButtonDefaults.iconButtonColors(contentColor = Color(0xFF00FFCC))
+                ) {
+                    Icon(imageVector = Icons.Default.Home, contentDescription = "Home")
+                }
+
+                // History Clock Button
+                IconButton(
+                    onClick = onHistoryClick,
+                    colors = IconButtonDefaults.iconButtonColors(contentColor = Color.White)
+                ) {
+                    Icon(imageVector = Icons.Default.History, contentDescription = "History")
+                }
+
+                // Forward Button
                 IconButton(
                     onClick = onForwardClick,
                     enabled = canGoForward,
@@ -230,12 +254,12 @@ fun BrowserScreen(
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 80.dp, end = 24.dp)
+                    .padding(bottom = 100.dp, end = 24.dp)
             ) {
                 FloatingActionButton(
                     onClick = onDownloadClick,
                     containerColor = Color(0xFF00FFCC),
-                    contentColor = Color(0xFF13131A),
+                    contentColor = Color(0xFF0F0F15),
                     shape = CircleShape,
                     modifier = Modifier
                         .scale(scale)
@@ -254,7 +278,7 @@ fun BrowserScreen(
                         .align(Alignment.TopEnd)
                         .offset(x = 4.dp, y = (-4).dp)
                         .size(20.dp)
-                        .background(Color.Red, CircleShape),
+                        .background(Color(0xFFFF3B30), CircleShape),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
