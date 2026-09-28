@@ -1,13 +1,12 @@
 /**
  * AI Free Content Script
- * Handles: Google AI Overview removal, Reader mode extraction
+ * Handles: Google AI Overview removal, Reader mode extraction, SPA Scroll Restoration (YouTube, etc.)
  * Ad blocking → real uBlock Origin
  * Dark mode → real Dark Reader
  */
 
 // ── 1. Google AI Overview Blocker ──────────────────────────────────────────
 const AI_OVERVIEW_SELECTORS = [
-    // 2024-2026 Google AI Overview containers
     "#Odp5De", "div[jsname='yDeuDf']", ".hdzaWe",
     "div[jscontroller*='GenerativeSearch']",
     "div[aria-label*='AI Overview']", "div[aria-label*='AI overview']",
@@ -67,7 +66,81 @@ function watchForGoogleAiOverview() {
     observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
-// ── 2. Reader Mode Article Extraction ──────────────────────────────────────
+// ── 2. SPA Scroll Restoration Engine (YouTube, Twitter, Reddit, etc.) ──────
+function initSpaScrollRestoration() {
+    const scrollMap = new Map();
+    let isRestoring = false;
+
+    function getScrollY() {
+        return window.scrollY || document.documentElement.scrollTop || (document.body ? document.body.scrollTop : 0);
+    }
+
+    function saveCurrentPos() {
+        const y = getScrollY();
+        if (y > 0 && !location.pathname.startsWith('/watch')) {
+            scrollMap.set(location.href, y);
+            try {
+                sessionStorage.setItem('__spa_scroll_' + location.pathname, y.toString());
+            } catch (e) {}
+        }
+    }
+
+    // Capture scroll continuously
+    window.addEventListener('scroll', () => {
+        if (!isRestoring) {
+            saveCurrentPos();
+        }
+    }, { passive: true });
+
+    // Capture on clicks (before SPA navigation begins)
+    document.addEventListener('click', () => {
+        saveCurrentPos();
+    }, true);
+
+    // Restore on popstate (back button)
+    window.addEventListener('popstate', () => {
+        const targetUrl = location.href;
+        let savedY = scrollMap.get(targetUrl);
+        if (savedY === undefined) {
+            try {
+                const stored = sessionStorage.getItem('__spa_scroll_' + location.pathname);
+                if (stored) savedY = parseInt(stored, 10);
+            } catch (e) {}
+        }
+
+        if (savedY !== undefined && savedY > 0) {
+            isRestoring = true;
+            let attempts = 0;
+            const maxAttempts = 30; // ~1.5 seconds
+
+            function tryScroll() {
+                attempts++;
+                const docH = Math.max(
+                    document.documentElement.scrollHeight,
+                    document.body ? document.body.scrollHeight : 0
+                );
+
+                if (docH >= savedY || attempts >= maxAttempts) {
+                    window.scrollTo({ top: savedY, behavior: 'instant' });
+                    if (document.documentElement) document.documentElement.scrollTop = savedY;
+                    if (document.body) document.body.scrollTop = savedY;
+
+                    // Release lock after YouTube's initial animation settles
+                    setTimeout(() => { isRestoring = false; }, 300);
+                } else {
+                    requestAnimationFrame(tryScroll);
+                }
+            }
+
+            requestAnimationFrame(tryScroll);
+            setTimeout(tryScroll, 100);
+            setTimeout(tryScroll, 300);
+            setTimeout(tryScroll, 600);
+        }
+    });
+}
+
+// ── 3. Reader Mode Article Extraction ──────────────────────────────────────
 function extractArticleContent(doc) {
     try {
         const documentClone = doc.cloneNode(true);
@@ -126,8 +199,9 @@ function extractArticleContent(doc) {
     }
 }
 
-// ── 3. Init ────────────────────────────────────────────────────────────────
+// ── 4. Init ────────────────────────────────────────────────────────────────
 watchForGoogleAiOverview();
+initSpaScrollRestoration();
 
 window.addEventListener("DOMContentLoaded", () => {
     removeAiNodes(document);
