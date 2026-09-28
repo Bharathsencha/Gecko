@@ -45,6 +45,9 @@ class FreeVpnManager(
     var statusText by mutableStateOf(if (preferencesRepo.vpnEnabled) "Secured & Connected" else "Disconnected")
         private set
 
+    var statusIcon by mutableStateOf(if (preferencesRepo.vpnEnabled) "🟢" else "🔴")
+        private set
+
     val livePings = mutableStateMapOf<String, Int>()
 
     var onConfigChanged: ((enabled: Boolean, host: String, port: Int, type: String) -> Unit)? = null
@@ -76,22 +79,52 @@ class FreeVpnManager(
         if (isEnabled) {
             disconnect(runtime, tabs)
         } else {
-            connect(selectedCountry, runtime, tabs)
+            verifyAndConnect(selectedCountry, runtime, tabs)
+        }
+    }
+
+    fun verifyAndConnect(country: VpnCountry, runtime: GeckoRuntime?, tabs: List<TabModel>) {
+        selectedCountry = country
+        statusText = "Verifying…"
+        statusIcon = "🟡"
+        scope.launch {
+            val reachable = VpnPingManager.testConnectivity(country.host, country.port)
+            if (reachable) {
+                isEnabled = true
+                statusText = "Secured (${country.city}) ✓"
+                statusIcon = "🟢"
+                preferencesRepo.setVpnPreference(enabled = true, countryCode = country.code)
+                notifyConfigChange(enabled = true, country = country, tabs = tabs)
+                refreshPings()
+            } else {
+                // Try to find a live fallback proxy before giving up
+                VpnPingManager.discoverLiveProxies(VpnCountry.COUNTRIES)
+                val fallbackReachable = VpnPingManager.testConnectivity(country.host, country.port)
+                if (fallbackReachable) {
+                    isEnabled = true
+                    statusText = "Secured (${country.city}) ✓"
+                    statusIcon = "🟢"
+                    preferencesRepo.setVpnPreference(enabled = true, countryCode = country.code)
+                    notifyConfigChange(enabled = true, country = country, tabs = tabs)
+                    refreshPings()
+                } else {
+                    // Server truly unreachable — do NOT change proxy state
+                    isEnabled = false
+                    statusText = "Server offline — try another"
+                    statusIcon = "🔴"
+                }
+            }
         }
     }
 
     fun connect(country: VpnCountry, runtime: GeckoRuntime?, tabs: List<TabModel>) {
-        selectedCountry = country
-        isEnabled = true
-        statusText = "Secured (${country.city})"
-        preferencesRepo.setVpnPreference(enabled = true, countryCode = country.code)
-        notifyConfigChange(enabled = true, country = country, tabs = tabs)
-        refreshPings()
+        verifyAndConnect(country, runtime, tabs)
     }
 
     fun disconnect(runtime: GeckoRuntime?, tabs: List<TabModel>) {
         isEnabled = false
         statusText = "Disconnected"
+        statusIcon = "🔴"
         preferencesRepo.setVpnPreference(enabled = false, countryCode = selectedCountry.code)
         notifyConfigChange(enabled = false, country = selectedCountry, tabs = tabs)
     }
@@ -100,8 +133,7 @@ class FreeVpnManager(
         selectedCountry = country
         preferencesRepo.setVpnPreference(enabled = isEnabled, countryCode = country.code)
         if (isEnabled) {
-            statusText = "Secured (${country.city})"
-            notifyConfigChange(enabled = true, country = country, tabs = tabs)
+            verifyAndConnect(country, runtime, tabs)
         }
     }
 

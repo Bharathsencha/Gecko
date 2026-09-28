@@ -71,6 +71,8 @@ fun TopAddressBar(
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit,
     onReload: () -> Unit,
+    isBookmarked: Boolean = false,
+    onToggleBookmark: () -> Unit = {},
     historySuggestions: List<HistoryItem> = emptyList(),
     modifier: Modifier = Modifier
 ) {
@@ -290,7 +292,7 @@ fun TopAddressBar(
 
             Spacer(modifier = Modifier.width(10.dp))
 
-            // Action Capsule: History + Settings
+            // Action Capsule: Bookmark + History + Settings
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -306,6 +308,25 @@ fun TopAddressBar(
                     )
                     .padding(horizontal = 2.dp)
             ) {
+                IconButton(
+                    onClick = {
+                        onToggleBookmark()
+                    },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Icon(
+                        imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                        contentDescription = if (isBookmarked) "Bookmarked" else "Bookmark this page",
+                        tint = if (isBookmarked) AccentCyan else TextPrimary,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .width(1.dp)
+                        .height(18.dp)
+                        .background(BorderSubtle)
+                )
                 IconButton(
                     onClick = {
                         keyboardController?.hide()

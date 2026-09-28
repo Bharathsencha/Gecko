@@ -61,12 +61,18 @@ fun BrowserMainScreen(
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showPasswordsSheet by remember { mutableStateOf(false) }
     var showHistoryPage by remember { mutableStateOf(false) }
+    var showBookmarksPage by remember { mutableStateOf(false) }
 
     var pendingInsecureHttpUrl by remember { mutableStateOf<String?>(null) }
     var pendingInsecureProceedCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
 
     val activeTab = tabManager.activeTab
     var urlText by remember(activeTab?.url) { mutableStateOf(activeTab?.url ?: "about:home") }
+
+    val isCurrentPageBookmarked = remember(activeTab?.url, favoritesRepo.favorites.size) {
+        val cur = activeTab?.url ?: ""
+        cur.isNotBlank() && cur != "about:home" && favoritesRepo.favorites.any { it.url == cur }
+    }
 
     val activeDownloadsCount = downloadManager.downloadsList.count { it.status == DownloadStatus.DOWNLOADING }
     val isHomePage = activeTab == null || activeTab.url == "about:home"
@@ -96,9 +102,12 @@ fun BrowserMainScreen(
         }
     }
 
-    // Intercept back button when full-screen History Page is displayed
+    // Intercept back button when full-screen History or Bookmarks Page is displayed
     BackHandler(enabled = showHistoryPage) {
         showHistoryPage = false
+    }
+    BackHandler(enabled = showBookmarksPage) {
+        showBookmarksPage = false
     }
 
     Box(
@@ -124,6 +133,18 @@ fun BrowserMainScreen(
                 onOpenHistory = { showHistoryPage = true },
                 onReload = {
                     activeTab?.session?.reload()
+                },
+                isBookmarked = isCurrentPageBookmarked,
+                onToggleBookmark = {
+                    val curUrl = activeTab?.url ?: ""
+                    if (curUrl.isNotBlank() && curUrl != "about:home") {
+                        val existing = favoritesRepo.favorites.find { it.url == curUrl }
+                        if (existing != null) {
+                            favoritesRepo.removeFavorite(existing)
+                        } else {
+                            favoritesRepo.addFavorite(activeTab?.title ?: curUrl, curUrl)
+                        }
+                    }
                 },
                 historySuggestions = historySuggestions
             )
@@ -189,6 +210,7 @@ fun BrowserMainScreen(
                         shareUrl(context, tab.title, tab.url)
                     }
                 },
+                onOpenBookmarks = { showBookmarksPage = true },
                 onOpenDownloads = { showDownloadsSheet = true },
                 onOpenTabs = { showTabSwitcher = true },
                 onSwipeLeft = { tabManager.nextTab() },
@@ -208,6 +230,24 @@ fun BrowserMainScreen(
                     showHistoryPage = false
                 },
                 onClose = { showHistoryPage = false },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Dedicated Full Screen Bookmarks Page
+        if (showBookmarksPage) {
+            BookmarksPage(
+                favorites = favoritesRepo.favorites,
+                onNavigate = { targetUrl ->
+                    activeTab?.let { tab ->
+                        tabManager.loadUri(tab, targetUrl, runtime)
+                    }
+                    showBookmarksPage = false
+                },
+                onRemove = { favoriteItem ->
+                    favoritesRepo.removeFavorite(favoriteItem)
+                },
+                onBack = { showBookmarksPage = false },
                 modifier = Modifier.fillMaxSize()
             )
         }

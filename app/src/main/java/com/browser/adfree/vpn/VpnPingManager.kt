@@ -127,4 +127,19 @@ object VpnPingManager {
         }.awaitAll()
         results.toMap()
     }
+
+    /**
+     * Verifies that a proxy endpoint is reachable by attempting a real TCP connection.
+     * Returns true if the socket connects within 3 seconds, false otherwise.
+     */
+    suspend fun testConnectivity(host: String, port: Int): Boolean = withContext(Dispatchers.IO) {
+        return@withContext try {
+            val socket = Socket()
+            socket.connect(InetSocketAddress(host, port), 3000)
+            socket.close()
+            true
+        } catch (e: Exception) {
+            false
+        }
+    }
 }

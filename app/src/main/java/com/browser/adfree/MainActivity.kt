@@ -96,8 +96,20 @@ class MainActivity : ComponentActivity() {
             putBoolean("toolkit.telemetry.enabled", false)
             putBoolean("datareporting.healthreport.uploadEnabled", false)
         }
+
+        // Copy user.js prefs to filesDir so GeckoView can load them
+        val userJsFile = java.io.File(filesDir, "user.js")
+        try {
+            assets.open("gecko/user.js").use { input ->
+                userJsFile.outputStream().use { output -> input.copyTo(output) }
+            }
+        } catch (e: Exception) {
+            Log.w("AdFreeBrowser", "Failed to copy user.js: ${e.message}")
+        }
+
         val runtimeSettings = GeckoRuntimeSettings.Builder()
             .extras(geckoPrefs)
+            .configFilePath(userJsFile.absolutePath)
             .globalPrivacyControlEnabled(true)
             .contentBlocking(
                 ContentBlocking.Settings.Builder()

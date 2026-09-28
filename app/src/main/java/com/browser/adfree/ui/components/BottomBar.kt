@@ -51,6 +51,7 @@ fun BottomBar(
     onBack: () -> Unit,
     onForward: () -> Unit,
     onShare: () -> Unit,
+    onOpenBookmarks: () -> Unit,
     onOpenDownloads: () -> Unit,
     onOpenTabs: () -> Unit,
     onSwipeLeft: () -> Unit,
@@ -158,7 +159,19 @@ fun BottomBar(
                 )
             }
 
-            // 4. Downloads Manager Button
+            // 4. Bookmarks Action Button
+            IconButton(
+                onClick = onOpenBookmarks,
+                colors = IconButtonDefaults.iconButtonColors(contentColor = TextPrimary)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Bookmarks,
+                    contentDescription = "Bookmarks",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // 5. Downloads Manager Button
             Box(contentAlignment = Alignment.TopEnd) {
                 IconButton(
                     onClick = onOpenDownloads,

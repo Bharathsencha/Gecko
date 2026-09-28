@@ -355,3 +355,47 @@ browser.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
     return true;
 });
+
+// Remote blocklist auto-update (24h TTL, silent fail)
+async function fetchRemoteBlocklistUpdate() {
+    const CACHE_KEY = "remote_blocklist_cache";
+    const TS_KEY = "remote_blocklist_ts";
+    const TTL = 24 * 60 * 60 * 1000; // 24 hours
+    const UPDATE_URL = "https://raw.githubusercontent.com/Bharathsencha/Gecko/main/blocklist-update.json";
+
+    try {
+        if (!browser.storage || !browser.storage.local) return;
+        const stored = await browser.storage.local.get([CACHE_KEY, TS_KEY]);
+        const cachedTs = stored[TS_KEY] || 0;
+        const now = Date.now();
+
+        if (stored[CACHE_KEY] && (now - cachedTs) < TTL) {
+            applyRemoteBlocklist(stored[CACHE_KEY]);
+            return;
+        }
+
+        const response = await fetch(UPDATE_URL, { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+
+        await browser.storage.local.set({ [CACHE_KEY]: data, [TS_KEY]: now });
+        applyRemoteBlocklist(data);
+    } catch (e) {
+        // Silent fail — built-in blocklist remains active
+    }
+}
+
+function applyRemoteBlocklist(data) {
+    if (!data) return;
+    if (Array.isArray(data.domains)) {
+        data.domains.forEach(d => {
+            if (typeof d === "string" && d.length > 0) {
+                blockedRules.add(d.toLowerCase().trim());
+            }
+        });
+    }
+}
+
+// Initialize remote blocklist update on startup
+fetchRemoteBlocklistUpdate();
+
