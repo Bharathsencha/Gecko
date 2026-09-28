@@ -1,0 +1,103 @@
+{
+  "manifest_version": 2,
+  "name": "uBlock Origin",
+  "version": "1.75.0",
+  "short_name": "uBlock₀",
+  "author": "Raymond Hill & contributors",
+  "description": "Finally, an efficient wide-spectrum content blocker. Easy on CPU and memory.",
+  "background": {
+    "page": "background.html"
+  },
+  "browser_action": {
+    "browser_style": false,
+    "default_area": "navbar",
+    "default_icon": {
+      "16": "img/icon_16.png",
+      "32": "img/icon_32.png",
+      "64": "img/icon_64.png"
+    },
+    "default_popup": "popup-fenix.html",
+    "default_title": "uBlock Origin"
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "uBlock0@raymondhill.net",
+      "strict_min_version": "115.0"
+    },
+    "gecko_android": {
+      "strict_min_version": "115.0"
+    }
+  },
+  "content_scripts": [
+    {
+      "all_frames": true,
+      "js": [
+        "/js/vapi.js",
+        "/js/vapi-client.js",
+        "/js/contentscript.js"
+      ],
+      "match_about_blank": true,
+      "matches": [
+        "http://*/*",
+        "https://*/*",
+        "file://*/*"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "all_frames": false,
+      "js": [
+        "/js/scriptlets/subscriber.js"
+      ],
+      "matches": [
+        "https://easylist.to/*",
+        "https://*.fanboy.co.nz/*",
+        "https://filterlists.com/*",
+        "https://forums.lanik.us/*",
+        "https://github.com/*",
+        "https://*.github.io/*"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "all_frames": false,
+      "js": [
+        "/js/scriptlets/updater.js"
+      ],
+      "matches": [
+        "https://github.com/uBlockOrigin/*",
+        "https://ublockorigin.github.io/*",
+        "https://*.reddit.com/r/uBlockOrigin/*"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "icons": {
+    "128": "img/ublock.svg",
+    "16": "img/ublock.svg",
+    "32": "img/ublock.svg",
+    "48": "img/ublock.svg",
+    "64": "img/ublock.svg",
+    "96": "img/ublock.svg"
+  },
+  "options_ui": {
+    "open_in_tab": true,
+    "page": "dashboard.html"
+  },
+  "permissions": [
+    "alarms",
+    "dns",
+    "menus",
+    "privacy",
+    "storage",
+    "tabs",
+    "unlimitedStorage",
+    "webNavigation",
+    "webRequest",
+    "webRequestBlocking",
+    "<all_urls>"
+  ],
+  "web_accessible_resources": [
+    "/web_accessible_resources/*"
+  ]
+}

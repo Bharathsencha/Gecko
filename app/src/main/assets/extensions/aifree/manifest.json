@@ -1,0 +1,27 @@
+{
+  "manifest_version": 2,
+  "name": "AI Overview Blocker",
+  "version": "2.0.0",
+  "description": "Removes Google AI Overviews and provides reader mode extraction",
+  "permissions": [
+    "storage",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": ["background.js"]
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start",
+      "all_frames": false,
+      "match_about_blank": false
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "aifree-embedded@browser.adfree"
+    }
+  }
+}

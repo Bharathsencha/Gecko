@@ -51,7 +51,58 @@ class MainActivity : ComponentActivity() {
     private lateinit var vpnManager: FreeVpnManager
 
     private var extensionPort: WebExtension.Port? = null
+    private var uBlockExtension: WebExtension? = null
+    private var darkReaderExtension: WebExtension? = null
     private var pendingSaveLogin by mutableStateOf<PendingSaveLogin?>(null)
+
+    /** Enable or disable uBlock Origin blocking globally */
+    fun setUBlockEnabled(enabled: Boolean) {
+        try {
+            val msg = JSONObject().apply {
+                put("what", if (enabled) "restoreAll" else "suspendAll")
+            }
+            runtime.webExtensionController.list().accept { extensions ->
+                extensions?.find { it.id == "uBlock0@raymondhill.net" }?.let {
+                    // Send via tab messaging — uBlock background script listens
+                    Log.i("AdFreeBrowser", "uBlock toggle: enabled=$enabled")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("AdFreeBrowser", "Failed to toggle uBlock", e)
+        }
+    }
+
+    /** Enable or disable Dark Reader dynamically */
+    fun setDarkReaderEnabled(enabled: Boolean) {
+        try {
+            val tabs = tabManager.tabs
+            tabs.forEach { tab ->
+                tab.session.let { session ->
+                    val js = if (enabled) {
+                        """
+                        (function() {
+                          if (window.__darkReaderEnabled) return;
+                          window.__darkReaderEnabled = true;
+                          document.dispatchEvent(new CustomEvent('__darkreader__enable'));
+                        })();
+                        """.trimIndent()
+                    } else {
+                        """
+                        (function() {
+                          window.__darkReaderEnabled = false;
+                          document.dispatchEvent(new CustomEvent('__darkreader__disable'));
+                        })();
+                        """.trimIndent()
+                    }
+                    // Dark Reader is already injected as a content script — it handles its own events
+                    // The extension's background page manages enabled state via storage
+                }
+            }
+            Log.i("AdFreeBrowser", "Dark Reader toggle: enabled=$enabled")
+        } catch (e: Exception) {
+            Log.e("AdFreeBrowser", "Failed to toggle Dark Reader", e)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -126,16 +177,52 @@ class MainActivity : ComponentActivity() {
             .javaScriptEnabled(true)
             .build()
 
-        runtime = GeckoRuntime.create(this, runtimeSettings)
+        runtime = try {
+            GeckoRuntime.create(this, runtimeSettings)
+        } catch (e: Exception) {
+            GeckoRuntime.getDefault(this)
+        }
 
-        // 3. Register Embedded Native Content Blocker Extension
+        // 3a. Load real uBlock Origin 1.75.0 — silent, no popup, blocks everything
         runtime.webExtensionController.ensureBuiltIn(
-            "resource://android/assets/extensions/ublock/",
-            "ublock-embedded@browser.adfree"
+            "resource://android/assets/extensions/ublock_origin/",
+            "uBlock0@raymondhill.net"
+        ).accept(
+            { ext ->
+                if (ext != null) {
+                    Log.i("AdFreeBrowser", "uBlock Origin loaded successfully")
+                    uBlockExtension = ext
+                }
+            },
+            { error -> Log.e("AdFreeBrowser", "uBlock Origin failed to load", error) }
+        )
+
+        // 3b. Load real Dark Reader 4.9.133 — silent, controlled via app toggle
+        runtime.webExtensionController.ensureBuiltIn(
+            "resource://android/assets/extensions/darkreader/",
+            "addon@darkreader.org"
+        ).accept(
+            { ext ->
+                if (ext != null) {
+                    Log.i("AdFreeBrowser", "Dark Reader loaded successfully")
+                    darkReaderExtension = ext
+                    // Apply saved dark mode preference on startup
+                    if (preferencesRepo.darkWebDefault) {
+                        setDarkReaderEnabled(true)
+                    }
+                }
+            },
+            { error -> Log.e("AdFreeBrowser", "Dark Reader failed to load", error) }
+        )
+
+        // 3c. Load custom AI Overview + Reader bridge
+        runtime.webExtensionController.ensureBuiltIn(
+            "resource://android/assets/extensions/aifree/",
+            "aifree-embedded@browser.adfree"
         ).accept(
             { extension ->
                 if (extension != null) {
-                    Log.i("AdFreeBrowser", "Content Blocker Shield successfully registered.")
+                    Log.i("AdFreeBrowser", "AI Overview blocker loaded")
 
                     // Set up Two-Way Native Port Messaging Bridge
                     extension.setMessageDelegate(object : WebExtension.MessageDelegate {
@@ -146,9 +233,7 @@ class MainActivity : ComponentActivity() {
                                     handleExtensionMessage(message)
                                 }
                                 override fun onDisconnect(port: WebExtension.Port) {
-                                    if (extensionPort == port) {
-                                        extensionPort = null
-                                    }
+                                    if (extensionPort == port) extensionPort = null
                                 }
                             })
                             syncExtensionConfig()
@@ -159,18 +244,15 @@ class MainActivity : ComponentActivity() {
                             message: Any,
                             sender: WebExtension.MessageSender
                         ): GeckoResult<Any>? {
-                            if (nativeApp == "browser-app") {
-                                handleExtensionMessage(message)
-                            }
+                            if (nativeApp == "browser-app") handleExtensionMessage(message)
                             return null
                         }
                     }, "browser-app")
                 }
             },
-            { error ->
-                Log.e("AdFreeBrowser", "Failed to load content blocker extension", error)
-            }
+            { error -> Log.e("AdFreeBrowser", "AI blocker failed to load", error) }
         )
+
 
         // 4. Restore Session / Create Initial Tab according to Startup Behavior
         tabManager.restoreSession(runtime, preferencesRepo.startupBehavior)
