@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AndroidBrowser"
+rootProject.name = "AdfreeGeckoBrowser"
 include(":app")
