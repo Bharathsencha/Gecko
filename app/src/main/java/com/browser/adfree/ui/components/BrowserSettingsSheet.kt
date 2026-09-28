@@ -28,11 +28,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.rounded.Check
-import androidx.compose.material.icons.rounded.Lock
-import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material.icons.rounded.Shield
-import androidx.compose.material.icons.rounded.VpnKey
+import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -47,13 +43,13 @@ import androidx.compose.ui.unit.sp
 import com.browser.adfree.model.CookiePolicy
 import com.browser.adfree.model.SearchEngine
 import com.browser.adfree.model.StartupBehavior
-import com.browser.adfree.model.VpnCountry
 import com.browser.adfree.storage.BrowserPreferencesRepository
 import com.browser.adfree.storage.HistoryRepository
 import com.browser.adfree.storage.SecurePasswordRepository
 import com.browser.adfree.tabs.TabManager
 import com.browser.adfree.ui.theme.*
 import com.browser.adfree.vpn.FreeVpnManager
+import org.mozilla.geckoview.ContentBlocking
 import org.mozilla.geckoview.GeckoRuntime
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -75,8 +71,16 @@ fun BrowserSettingsSheet(
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
-        containerColor = SurfaceDark,
-        contentColor = TextPrimary,
+        containerColor = Color(0xFF141416),
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .background(Color(0xFF3A3A3C), RoundedCornerShape(2.dp))
+            )
+        },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
         Column(
@@ -84,49 +88,54 @@ fun BrowserSettingsSheet(
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp)
+                .padding(horizontal = 16.dp, vertical = 6.dp)
         ) {
             // Header
             Row(
-                verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 20.dp)
+                    .padding(horizontal = 4.dp, vertical = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    tint = AccentCyan,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
                 Text(
                     text = "Browser Settings",
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    color = Color.White
                 )
+
+                IconButton(
+                    onClick = onDismissRequest,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(Color(0xFF2C2C2E), CircleShape)
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.Close,
+                        contentDescription = "Close",
+                        tint = Color(0xFF8E8E93),
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
             }
 
+            Spacer(modifier = Modifier.height(14.dp))
+
             // Section 1: Free In-Browser VPN
-            SettingsSectionHeader(title = "FREE IN-BROWSER VPN")
+            SettingsSectionHeader(title = "ENCRYPTED VPN RELAYS")
             SettingsCard {
                 SettingsSwitchRow(
-                    title = "In-Browser Encrypted Relay",
-                    subtitle = if (vpnManager.isEnabled) "Routing via ${vpnManager.selectedCountry.name} (${vpnManager.selectedCountry.city})" else "Auto-disconnects when browser closes",
+                    title = "In-Browser VPN",
+                    subtitle = if (vpnManager.isEnabled) "Routing via ${vpnManager.selectedCountry.name}" else "Auto-disconnects on exit",
                     icon = Icons.Rounded.Public,
                     checked = vpnManager.isEnabled,
                     onCheckedChange = {
                         vpnManager.toggleVpn(runtime, tabManager.tabs)
-                        Toast.makeText(
-                            context,
-                            if (it) "VPN Connected: ${vpnManager.selectedCountry.name}" else "VPN Disconnected",
-                            Toast.LENGTH_SHORT
-                        ).show()
                     }
                 )
 
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
 
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -134,159 +143,176 @@ fun BrowserSettingsSheet(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpenVpnSelector() }
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .padding(horizontal = 16.dp, vertical = 13.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(
                             text = vpnManager.selectedCountry.flag,
-                            fontSize = 22.sp
+                            fontSize = 20.sp
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Column {
                             Text(
-                                text = "Relay Location",
-                                fontSize = 15.sp,
+                                text = vpnManager.selectedCountry.name,
+                                fontSize = 14.5.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
+                                color = Color.White
                             )
                             Text(
-                                text = "${vpnManager.selectedCountry.name} • ${vpnManager.selectedCountry.city}",
-                                fontSize = 12.sp,
-                                color = TextSecondary
+                                text = vpnManager.selectedCountry.city,
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF8E8E93)
                             )
                         }
                     }
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        val ping = vpnManager.getPingForCountry(vpnManager.selectedCountry.code)
                         Surface(
                             shape = RoundedCornerShape(8.dp),
                             color = if (vpnManager.isEnabled) Color(0xFF1A3320) else Color(0xFF2C2C2E)
                         ) {
                             Text(
-                                text = if (vpnManager.isEnabled) "${vpnManager.livePingMs} ms" else "10 Locations",
-                                color = if (vpnManager.isEnabled) Color(0xFF34C759) else TextSecondary,
+                                text = if (vpnManager.isEnabled) "$ping ms" else "10 Locations",
+                                color = if (vpnManager.isEnabled) Color(0xFF34C759) else Color(0xFF8E8E93),
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                             )
                         }
-                        Spacer(modifier = Modifier.width(8.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
                         Icon(
-                            imageVector = Icons.Default.ChevronRight,
+                            imageVector = Icons.Rounded.ChevronRight,
                             contentDescription = null,
-                            tint = TextSecondary,
-                            modifier = Modifier.size(20.dp)
+                            tint = Color(0xFF8E8E93),
+                            modifier = Modifier.size(18.dp)
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // Section 2: Cookie Shield & Privacy
-            SettingsSectionHeader(title = "COOKIE SHIELD & PRIVACY")
+            // Section 2: Cookie Shield (Segmented Pill Selector)
+            SettingsSectionHeader(title = "COOKIE SHIELD")
             SettingsCard {
-                CookiePolicy.values().forEachIndexed { index, policy ->
-                    val isSelected = preferencesRepo.cookiePolicy == policy
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "Cookie Policy",
+                        fontSize = 14.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
 
+                    // 3-Segment Pill Control
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable {
-                                preferencesRepo.setCookiePolicyPreference(policy)
-                                Toast.makeText(context, "Cookie Policy Updated", Toast.LENGTH_SHORT).show()
-                            }
-                            .padding(horizontal = 16.dp, vertical = 14.dp)
+                            .height(40.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF141416))
+                            .padding(3.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 16.dp)
-                        ) {
-                            Text(
-                                text = policy.title,
-                                fontSize = 15.sp,
-                                color = TextPrimary,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = policy.description,
-                                fontSize = 12.sp,
-                                color = TextSecondary,
-                                lineHeight = 16.sp
-                            )
-                        }
+                        CookiePolicy.values().forEach { policy ->
+                            val isSelected = preferencesRepo.cookiePolicy == policy
+                            val label = when (policy) {
+                                CookiePolicy.ACCEPT_NON_TRACKERS -> "Non-Trackers"
+                                CookiePolicy.ACCEPT_FIRST_PARTY -> "1st-Party"
+                                CookiePolicy.REJECT_ALL -> "Block All"
+                            }
 
-                        if (isSelected) {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
-                                contentDescription = "Selected",
-                                tint = AccentCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .fillMaxHeight()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(if (isSelected) Color(0xFF007AFF) else Color.Transparent)
+                                    .clickable {
+                                        preferencesRepo.setCookiePolicyPreference(policy)
+                                        try {
+                                            runtime.settings.contentBlocking.setCookieBehavior(policy.geckoValue)
+                                        } catch (e: Exception) {}
+                                    },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 12.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color.White else Color(0xFF8E8E93)
+                                )
+                            }
                         }
                     }
-                    if (index < CookiePolicy.values().size - 1) {
-                        Divider(color = BorderSubtle, thickness = 0.5.dp)
-                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Text(
+                        text = when (preferencesRepo.cookiePolicy) {
+                            CookiePolicy.ACCEPT_NON_TRACKERS -> "Allows standard logins while blocking cross-site trackers."
+                            CookiePolicy.ACCEPT_FIRST_PARTY -> "Strictly confines cookies to the visited domain."
+                            CookiePolicy.REJECT_ALL -> "Highest privacy shield. Blocks all persistent cookies."
+                        },
+                        fontSize = 11.5.sp,
+                        color = Color(0xFF8E8E93),
+                        lineHeight = 15.sp
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // Section 3: Privacy & Content Shield
-            SettingsSectionHeader(title = "CONTENT & SEARCH SHIELD")
+            // Section 3: Privacy & Search Protection
+            SettingsSectionHeader(title = "PRIVACY & SEARCH SHIELD")
             SettingsCard {
                 SettingsSwitchRow(
-                    title = "Strict Ad & Tracker Shield",
-                    subtitle = "Blocks intrusive ads, telemetry & popups",
+                    title = "Ad & Tracker Shield",
+                    subtitle = "Block network ads, telemetry and miners",
                     icon = Icons.Rounded.Shield,
                     checked = preferencesRepo.adBlockingEnabled,
                     onCheckedChange = {
                         preferencesRepo.setAdBlockingPreference(it)
                         tabManager.updateAdBlocking(it)
-                        Toast.makeText(context, "Content Shield " + (if (it) "Enabled" else "Disabled"), Toast.LENGTH_SHORT).show()
                     }
                 )
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
                 SettingsSwitchRow(
-                    title = "Cosmetic Banner Eradicator",
-                    subtitle = "Suppresses GDPR consent modals & blank ad slots",
-                    icon = Icons.Default.AutoFixHigh,
+                    title = "Consent Banner Eradicator",
+                    subtitle = "Auto-dismiss GDPR and cookie popups",
+                    icon = Icons.Rounded.AutoFixHigh,
                     checked = preferencesRepo.cosmeticBlockingEnabled,
                     onCheckedChange = {
                         preferencesRepo.setCosmeticBlockingPreference(it)
                         tabManager.updateCosmeticBlocking(it)
                     }
                 )
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
                 SettingsSwitchRow(
                     title = "Block Google AI Overviews",
-                    subtitle = "Eliminates generative AI clutter on Google searches",
-                    icon = Icons.Default.Search,
+                    subtitle = "Clean search results without AI clutter",
+                    icon = Icons.Rounded.Search,
                     checked = preferencesRepo.blockAiOverviews,
                     onCheckedChange = {
                         preferencesRepo.setBlockAiOverviewsPreference(it)
                     }
                 )
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
                 SettingsSwitchRow(
                     title = "HTTPS-Only Mode",
-                    subtitle = "Enforces HTTPS default & warns on insecure HTTP",
+                    subtitle = "Warn on unencrypted HTTP connections",
                     icon = Icons.Rounded.Lock,
                     checked = preferencesRepo.httpsOnlyMode,
                     onCheckedChange = {
                         preferencesRepo.setHttpsOnlyModePreference(it)
                     }
                 )
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
                 SettingsSwitchRow(
                     title = "Dark Reader Dynamic Engine",
-                    subtitle = "OLED pitch-black contrast with protected media",
-                    icon = Icons.Default.DarkMode,
+                    subtitle = "High-contrast OLED pitch-black theme",
+                    icon = Icons.Rounded.DarkMode,
                     checked = preferencesRepo.darkWebDefault,
                     onCheckedChange = {
                         preferencesRepo.setDarkWebDefaultPreference(it)
@@ -295,249 +321,278 @@ fun BrowserSettingsSheet(
                 )
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             // Section 4: Passwords & Autofill
             SettingsSectionHeader(title = "PASSWORDS & AUTOFILL")
             SettingsCard {
                 SettingsSwitchRow(
                     title = "Offer to Save Passwords",
-                    subtitle = "Hardware Keystore AES-256-GCM encryption",
-                    icon = Icons.Default.Lock,
+                    subtitle = "Hardware Keystore AES-256 vault",
+                    icon = Icons.Rounded.Lock,
                     checked = preferencesRepo.savePasswordsEnabled,
                     onCheckedChange = { preferencesRepo.setSavePasswordsPreference(it) }
                 )
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
                 SettingsSwitchRow(
                     title = "Auto-fill Logins",
-                    subtitle = "Automatically fill credentials on login pages",
-                    icon = Icons.Default.Key,
+                    subtitle = "Fill saved credentials on login forms",
+                    icon = Icons.Rounded.Key,
                     checked = preferencesRepo.autofillEnabled,
                     onCheckedChange = { preferencesRepo.setAutofillPreference(it) }
                 )
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpenPasswords() }
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .padding(horizontal = 16.dp, vertical = 13.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.Password,
+                            imageVector = Icons.Rounded.Password,
                             contentDescription = null,
-                            tint = AccentCyan,
-                            modifier = Modifier.size(22.dp)
+                            tint = Color(0xFF007AFF),
+                            modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Manage Saved Passwords",
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "${passwordRepo.logins.size} saved accounts",
-                                fontSize = 12.sp,
-                                color = TextSecondary
-                            )
-                        }
+                        Text(
+                            text = "Manage Saved Passwords",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
                     }
-                    Icon(
-                        imageVector = Icons.Default.ChevronRight,
-                        contentDescription = null,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            text = "${passwordRepo.logins.size} saved",
+                            fontSize = 12.sp,
+                            color = Color(0xFF8E8E93)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            imageVector = Icons.Rounded.ChevronRight,
+                            contentDescription = null,
+                            tint = Color(0xFF8E8E93),
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             // Section 5: Startup & Search
-            SettingsSectionHeader(title = "STARTUP & SEARCH ENGINE")
+            SettingsSectionHeader(title = "STARTUP & SEARCH")
             SettingsCard {
-                Text(
-                    text = "Startup Behavior",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentCyan,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                )
-                StartupBehavior.values().forEachIndexed { index, behavior ->
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text(
+                        text = "Startup Behavior",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Side-by-Side Startup Cards
                     Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { preferencesRepo.setStartupBehaviorPreference(behavior) }
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Column(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(end = 16.dp)
-                        ) {
-                            Text(
-                                text = behavior.title,
-                                fontSize = 15.sp,
-                                color = TextPrimary,
-                                fontWeight = if (preferencesRepo.startupBehavior == behavior) FontWeight.Bold else FontWeight.Normal
-                            )
-                            Spacer(modifier = Modifier.height(2.dp))
-                            Text(
-                                text = behavior.description,
-                                fontSize = 12.sp,
-                                color = TextSecondary,
-                                lineHeight = 16.sp
-                            )
-                        }
-
-                        if (preferencesRepo.startupBehavior == behavior) {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
-                                contentDescription = "Selected",
-                                tint = AccentCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
-                    if (index < StartupBehavior.values().size - 1) {
-                        Divider(color = BorderSubtle, thickness = 0.5.dp)
-                    }
-                }
-
-                Divider(color = BorderSubtle, thickness = 1.dp)
-
-                Text(
-                    text = "Default Search Engine",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = AccentCyan,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
-                )
-                SearchEngine.values().forEachIndexed { index, engine ->
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { preferencesRepo.setSearchEnginePreference(engine) }
-                            .padding(horizontal = 16.dp, vertical = 12.dp)
-                    ) {
-                        Text(
-                            text = engine.title,
-                            fontSize = 15.sp,
-                            color = TextPrimary,
-                            fontWeight = if (preferencesRepo.searchEngine == engine) FontWeight.Bold else FontWeight.Normal
-                        )
-                        if (preferencesRepo.searchEngine == engine) {
-                            Icon(
-                                imageVector = Icons.Rounded.Check,
-                                contentDescription = "Selected",
-                                tint = AccentCyan,
-                                modifier = Modifier.size(20.dp)
-                            )
+                        StartupBehavior.values().forEach { behavior ->
+                            val isSelected = preferencesRepo.startupBehavior == behavior
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(if (isSelected) Color(0xFF162536) else Color(0xFF141416))
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isSelected) Color(0xFF007AFF) else Color(0xFF2C2C2E),
+                                        shape = RoundedCornerShape(12.dp)
+                                    )
+                                    .clickable { preferencesRepo.setStartupBehaviorPreference(behavior) }
+                                    .padding(horizontal = 12.dp, vertical = 12.dp)
+                            ) {
+                                Column {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = if (behavior == StartupBehavior.NEW_TAB) "Start Page" else "Resume",
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isSelected) Color.White else Color(0xFF8E8E93)
+                                        )
+                                        if (isSelected) {
+                                            Icon(
+                                                imageVector = Icons.Rounded.Check,
+                                                contentDescription = null,
+                                                tint = Color(0xFF007AFF),
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(3.dp))
+                                    Text(
+                                        text = if (behavior == StartupBehavior.NEW_TAB) "Fresh home page" else "Restore all tabs",
+                                        fontSize = 11.sp,
+                                        color = Color(0xFF8E8E93),
+                                        lineHeight = 14.sp
+                                    )
+                                }
+                            }
                         }
                     }
-                    if (index < SearchEngine.values().size - 1) {
-                        Divider(color = BorderSubtle, thickness = 0.5.dp)
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Text(
+                        text = "Default Search Engine",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        SearchEngine.values().forEach { engine ->
+                            val isSelected = preferencesRepo.searchEngine == engine
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (isSelected) Color(0xFF162536) else Color(0xFF141416))
+                                    .border(
+                                        width = 1.dp,
+                                        color = if (isSelected) Color(0xFF007AFF) else Color(0xFF2C2C2E),
+                                        shape = RoundedCornerShape(10.dp)
+                                    )
+                                    .clickable { preferencesRepo.setSearchEnginePreference(engine) }
+                                    .padding(horizontal = 14.dp, vertical = 11.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = engine.title,
+                                    fontSize = 14.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) Color.White else Color(0xFF8E8E93)
+                                )
+                                if (isSelected) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Check,
+                                        contentDescription = "Selected",
+                                        tint = Color(0xFF007AFF),
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
-            // Section 6: History & Data Wipe
-            SettingsSectionHeader(title = "BROWSING HISTORY & DATA")
+            // Section 6: Browsing Data
+            SettingsSectionHeader(title = "BROWSING DATA")
             SettingsCard {
                 SettingsSwitchRow(
                     title = "Wipe on Exit",
-                    subtitle = "Automatically clears history and cache on browser exit",
-                    icon = Icons.Default.AutoDelete,
+                    subtitle = "Clear history and cache on exit",
+                    icon = Icons.Rounded.AutoDelete,
                     checked = preferencesRepo.wipeOnExit,
                     onCheckedChange = { preferencesRepo.setWipeOnExitPreference(it) }
                 )
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { onOpenHistory() }
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .padding(horizontal = 16.dp, vertical = 13.dp)
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Icon(
-                            imageVector = Icons.Default.History,
+                            imageVector = Icons.Rounded.History,
                             contentDescription = null,
-                            tint = AccentCyan,
-                            modifier = Modifier.size(22.dp)
+                            tint = Color(0xFF007AFF),
+                            modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = "View Browsing History",
-                            fontSize = 15.sp,
+                            fontSize = 14.5.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary
+                            color = Color.White
                         )
                     }
                     Icon(
-                        imageVector = Icons.Default.ChevronRight,
+                        imageVector = Icons.Rounded.ChevronRight,
                         contentDescription = null,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(20.dp)
+                        tint = Color(0xFF8E8E93),
+                        modifier = Modifier.size(18.dp)
                     )
                 }
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
+                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier
                         .fillMaxWidth()
                         .clickable { showClearDialog = true }
-                        .padding(horizontal = 16.dp, vertical = 14.dp)
+                        .padding(horizontal = 16.dp, vertical = 13.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.DeleteOutline,
+                        imageVector = Icons.Rounded.DeleteOutline,
                         contentDescription = null,
                         tint = DangerRed,
-                        modifier = Modifier.size(22.dp)
+                        modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
                         text = "Clear Browsing Data...",
-                        fontSize = 15.sp,
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = DangerRed
                     )
                 }
             }
 
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(modifier = Modifier.height(18.dp))
 
             // Section 7: About
             SettingsSectionHeader(title = "ABOUT")
             SettingsCard {
-                Column(modifier = Modifier.padding(16.dp)) {
+                Column(modifier = Modifier.padding(14.dp)) {
                     Text(
-                        text = "AdFree Gecko Browser",
-                        fontSize = 15.sp,
+                        text = "Gecko AdFree Browser",
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = Color.White
                     )
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(modifier = Modifier.height(3.dp))
                     Text(
                         text = "Version 1.0.0 (Release) • arm64-v8a",
-                        fontSize = 12.sp,
-                        color = TextSecondary
+                        fontSize = 11.5.sp,
+                        color = Color(0xFF8E8E93)
                     )
                     Text(
-                        text = "Engine: Mozilla GeckoView 122 + Dark Reader + Free In-Browser VPN",
-                        fontSize = 12.sp,
-                        color = TextSecondary
+                        text = "Mozilla GeckoView 122 + Dark Reader + Free VPN",
+                        fontSize = 11.5.sp,
+                        color = Color(0xFF8E8E93)
+                    )
+                    Text(
+                        text = "GNU General Public License v3.0 (GPLv3)",
+                        fontSize = 11.5.sp,
+                        color = Color(0xFF8E8E93)
                     )
                 }
             }
@@ -559,10 +614,10 @@ fun BrowserSettingsSheet(
 fun SettingsSectionHeader(title: String) {
     Text(
         text = title,
-        fontSize = 12.sp,
+        fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
-        color = AccentCyan,
-        modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+        color = Color(0xFF007AFF),
+        modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
     )
 }
 
@@ -571,9 +626,9 @@ fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
-            .background(SurfaceElevated)
-            .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+            .clip(RoundedCornerShape(18.dp))
+            .background(Color(0xFF1C1C1E))
+            .border(1.dp, Color(0xFF2C2C2E), RoundedCornerShape(18.dp)),
         content = content
     )
 }
@@ -591,7 +646,7 @@ fun SettingsSwitchRow(
         horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .padding(horizontal = 16.dp, vertical = 11.dp)
     ) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -600,21 +655,21 @@ fun SettingsSwitchRow(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (checked) AccentCyan else TextSecondary,
-                modifier = Modifier.size(22.dp)
+                tint = if (checked) Color(0xFF007AFF) else Color(0xFF8E8E93),
+                modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.width(12.dp))
             Column {
                 Text(
                     text = title,
-                    fontSize = 15.sp,
+                    fontSize = 14.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary
+                    color = Color.White
                 )
                 Text(
                     text = subtitle,
-                    fontSize = 12.sp,
-                    color = TextSecondary
+                    fontSize = 11.5.sp,
+                    color = Color(0xFF8E8E93)
                 )
             }
         }
@@ -622,9 +677,10 @@ fun SettingsSwitchRow(
             checked = checked,
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
-                checkedThumbColor = DarkBg,
-                checkedTrackColor = AccentCyan,
-                uncheckedTrackColor = SurfaceCard
+                checkedThumbColor = Color.White,
+                checkedTrackColor = Color(0xFF007AFF),
+                uncheckedTrackColor = Color(0xFF2C2C2E),
+                uncheckedThumbColor = Color(0xFF8E8E93)
             )
         )
     }

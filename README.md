@@ -75,4 +75,4 @@ This project integrates and builds upon the following open-source projects and l
 
 This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
 
-See the [LICENSE](LICENSE) file for full details.
+See the [LICENSE](https://github.com/Bharathsencha/Gecko/blob/main/LICENSE) file for full details.

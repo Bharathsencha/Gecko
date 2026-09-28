@@ -20,11 +20,15 @@ package com.browser.adfree.vpn
 import android.content.Context
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import com.browser.adfree.model.TabModel
 import com.browser.adfree.model.VpnCountry
 import com.browser.adfree.storage.BrowserPreferencesRepository
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.mozilla.geckoview.GeckoRuntime
 
@@ -41,8 +45,32 @@ class FreeVpnManager(
     var statusText by mutableStateOf(if (preferencesRepo.vpnEnabled) "Secured & Connected" else "Disconnected")
         private set
 
-    var livePingMs by mutableIntStateOf(selectedCountry.estimatedPingMs)
-        private set
+    val livePings = mutableStateMapOf<String, Int>()
+
+    var onConfigChanged: ((enabled: Boolean, host: String, port: Int, type: String) -> Unit)? = null
+
+    private val scope = CoroutineScope(Dispatchers.Main)
+
+    init {
+        // Initialize default pings and trigger background live probe
+        VpnCountry.COUNTRIES.forEach { country ->
+            livePings[country.code] = country.estimatedPingMs
+        }
+        refreshPings()
+    }
+
+    fun refreshPings() {
+        scope.launch {
+            val results = VpnPingManager.probeAllCountries(VpnCountry.COUNTRIES)
+            results.forEach { (code, ping) ->
+                livePings[code] = ping
+            }
+        }
+    }
+
+    fun getPingForCountry(code: String): Int {
+        return livePings[code] ?: selectedCountry.estimatedPingMs
+    }
 
     fun toggleVpn(runtime: GeckoRuntime?, tabs: List<TabModel>) {
         if (isEnabled) {
@@ -55,30 +83,31 @@ class FreeVpnManager(
     fun connect(country: VpnCountry, runtime: GeckoRuntime?, tabs: List<TabModel>) {
         selectedCountry = country
         isEnabled = true
-        statusText = "Secured & Connected (${country.city})"
-        livePingMs = country.estimatedPingMs
+        statusText = "Secured (${country.city})"
         preferencesRepo.setVpnPreference(enabled = true, countryCode = country.code)
-        applyVpnToExtension(tabs, enabled = true, country = country)
+        notifyConfigChange(enabled = true, country = country, tabs = tabs)
+        refreshPings()
     }
 
     fun disconnect(runtime: GeckoRuntime?, tabs: List<TabModel>) {
         isEnabled = false
         statusText = "Disconnected"
         preferencesRepo.setVpnPreference(enabled = false, countryCode = selectedCountry.code)
-        applyVpnToExtension(tabs, enabled = false, country = selectedCountry)
+        notifyConfigChange(enabled = false, country = selectedCountry, tabs = tabs)
     }
 
     fun selectCountry(country: VpnCountry, runtime: GeckoRuntime?, tabs: List<TabModel>) {
         selectedCountry = country
-        livePingMs = country.estimatedPingMs
         preferencesRepo.setVpnPreference(enabled = isEnabled, countryCode = country.code)
         if (isEnabled) {
-            statusText = "Secured & Connected (${country.city})"
-            applyVpnToExtension(tabs, enabled = true, country = country)
+            statusText = "Secured (${country.city})"
+            notifyConfigChange(enabled = true, country = country, tabs = tabs)
         }
     }
 
-    private fun applyVpnToExtension(tabs: List<TabModel>, enabled: Boolean, country: VpnCountry) {
+    private fun notifyConfigChange(enabled: Boolean, country: VpnCountry, tabs: List<TabModel>) {
+        onConfigChanged?.invoke(enabled, if (enabled) country.host else "", if (enabled) country.port else 0, country.type)
+
         val payload = JSONObject().apply {
             put("action", "set_vpn_config")
             put("enabled", enabled)
@@ -102,6 +131,6 @@ class FreeVpnManager(
         isEnabled = false
         statusText = "Disconnected"
         preferencesRepo.setVpnPreference(enabled = false, countryCode = selectedCountry.code)
-        applyVpnToExtension(tabs, enabled = false, country = selectedCountry)
+        notifyConfigChange(enabled = false, country = selectedCountry, tabs = tabs)
     }
 }

@@ -235,6 +235,7 @@ fun BrowserMainScreen(
                     showHistoryPage = true
                 },
                 onOpenVpnSelector = {
+                    showSettingsSheet = false
                     showVpnCountrySelector = true
                 },
                 onDismissRequest = { showSettingsSheet = false }
@@ -244,11 +245,16 @@ fun BrowserMainScreen(
         // VPN Country Selector Modal Sheet
         if (showVpnCountrySelector) {
             VpnCountrySelectorSheet(
-                selectedCountry = vpnManager.selectedCountry,
+                vpnManager = vpnManager,
                 onSelectCountry = { country ->
                     vpnManager.selectCountry(country, runtime, tabManager.tabs)
+                    showVpnCountrySelector = false
+                    showSettingsSheet = true
                 },
-                onDismiss = { showVpnCountrySelector = false }
+                onDismiss = {
+                    showVpnCountrySelector = false
+                    showSettingsSheet = true
+                }
             )
         }
 

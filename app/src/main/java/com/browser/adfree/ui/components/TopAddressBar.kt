@@ -222,6 +222,8 @@ fun TopAddressBar(
             }
         }
 
+        Spacer(modifier = Modifier.width(10.dp))
+
         // Unified Action Capsule: History and Settings
         Row(
             verticalAlignment = Alignment.CenterVertically,

@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var favoritesRepo: FavoritesRepository
     private lateinit var vpnManager: FreeVpnManager
 
+    private var extensionPort: WebExtension.Port? = null
     private var pendingSaveLogin by mutableStateOf<PendingSaveLogin?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -65,6 +66,20 @@ class MainActivity : ComponentActivity() {
         tabManager = TabManager(this).apply {
             this.historyRepository = historyRepo
             this.preferencesRepository = preferencesRepo
+        }
+
+        // Wire real-time VPN config bridge to WebExtension
+        vpnManager.onConfigChanged = { enabled, host, port, type ->
+            try {
+                val payload = JSONObject().apply {
+                    put("action", "set_vpn_config")
+                    put("enabled", enabled)
+                    put("host", host)
+                    put("port", port)
+                    put("type", type)
+                }
+                extensionPort?.postMessage(payload)
+            } catch (e: Exception) {}
         }
 
         // 2. Configure GeckoRuntime with Strict Native Tracking Protection & Cookie Shield
@@ -95,8 +110,23 @@ class MainActivity : ComponentActivity() {
                 if (extension != null) {
                     Log.i("AdFreeBrowser", "Content Blocker Shield successfully registered.")
 
-                    // Set up Native Messaging Bridge for Ad Blocker Stats & Logins
+                    // Set up Two-Way Native Port Messaging Bridge
                     extension.setMessageDelegate(object : WebExtension.MessageDelegate {
+                        override fun onConnect(port: WebExtension.Port) {
+                            extensionPort = port
+                            port.setDelegate(object : WebExtension.PortDelegate {
+                                override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                                    handleExtensionMessage(message)
+                                }
+                                override fun onDisconnect(port: WebExtension.Port) {
+                                    if (extensionPort == port) {
+                                        extensionPort = null
+                                    }
+                                }
+                            })
+                            syncExtensionConfig()
+                        }
+
                         override fun onMessage(
                             nativeApp: String,
                             message: Any,
@@ -173,6 +203,31 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    private fun syncExtensionConfig() {
+        try {
+            val vpnPayload = JSONObject().apply {
+                put("action", "set_vpn_config")
+                put("enabled", vpnManager.isEnabled)
+                put("host", if (vpnManager.isEnabled) vpnManager.selectedCountry.host else "")
+                put("port", if (vpnManager.isEnabled) vpnManager.selectedCountry.port else 0)
+                put("type", vpnManager.selectedCountry.type)
+            }
+            extensionPort?.postMessage(vpnPayload)
+
+            val adPayload = JSONObject().apply {
+                put("action", "set_ad_blocking")
+                put("enabled", preferencesRepo.adBlockingEnabled)
+            }
+            extensionPort?.postMessage(adPayload)
+
+            val aiPayload = JSONObject().apply {
+                put("action", "set_block_ai_overviews")
+                put("enabled", preferencesRepo.blockAiOverviews)
+            }
+            extensionPort?.postMessage(aiPayload)
+        } catch (e: Exception) {}
     }
 
     private fun handleExtensionMessage(message: Any) {

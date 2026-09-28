@@ -20,16 +20,7 @@ package com.browser.adfree.ui.components
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -38,14 +29,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Public
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.Surface
-import androidx.compose.material3.Text
-import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,27 +41,40 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.browser.adfree.model.VpnCountry
+import com.browser.adfree.vpn.FreeVpnManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VpnCountrySelectorSheet(
-    selectedCountry: VpnCountry,
+    vpnManager: FreeVpnManager,
     onSelectCountry: (VpnCountry) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
+    LaunchedEffect(Unit) {
+        vpnManager.refreshPings()
+    }
+
     ModalBottomSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = Color(0xFF141416),
-        dragHandle = null,
-        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp)
+        dragHandle = {
+            Box(
+                modifier = Modifier
+                    .padding(top = 10.dp, bottom = 6.dp)
+                    .width(36.dp)
+                    .height(4.dp)
+                    .background(Color(0xFF3A3A3C), RoundedCornerShape(2.dp))
+            )
+        },
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 20.dp)
+                .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
             // Header Bar
             Row(
@@ -91,7 +91,7 @@ fun VpnCountrySelectorSheet(
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.Public,
-                            contentDescription = "VPN Relays",
+                            contentDescription = null,
                             tint = Color(0xFF34C759),
                             modifier = Modifier.size(20.dp)
                         )
@@ -101,49 +101,66 @@ fun VpnCountrySelectorSheet(
                         Text(
                             text = "VPN Locations",
                             color = Color.White,
-                            fontSize = 18.sp,
+                            fontSize = 17.sp,
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "100% Free Public Encrypted Relays",
+                            text = "10 Encrypted Free Relays",
                             color = Color(0xFF8E8E93),
                             fontSize = 12.sp
                         )
                     }
                 }
 
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(Color(0xFF2C2C2E), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Close,
-                        contentDescription = "Close",
-                        tint = Color(0xFF8E8E93),
-                        modifier = Modifier.size(18.dp)
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = { vpnManager.refreshPings() },
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(Color(0xFF2C2C2E), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Refresh,
+                            contentDescription = "Refresh Ping",
+                            tint = Color(0xFF8E8E93),
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    IconButton(
+                        onClick = onDismiss,
+                        modifier = Modifier
+                            .size(32.dp)
+                            .background(Color(0xFF2C2C2E), CircleShape)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Close,
+                            contentDescription = "Close",
+                            tint = Color(0xFF8E8E93),
+                            modifier = Modifier.size(17.dp)
+                        )
+                    }
                 }
             }
 
-            Spacer(modifier = Modifier.height(18.dp))
+            Spacer(modifier = Modifier.height(16.dp))
 
             // Country List
             LazyColumn(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(380.dp),
+                    .height(390.dp),
                 verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 items(VpnCountry.COUNTRIES) { country ->
-                    val isSelected = country.code == selectedCountry.code
+                    val isSelected = country.code == vpnManager.selectedCountry.code
+                    val pingMs = vpnManager.getPingForCountry(country.code)
 
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .clip(RoundedCornerShape(16.dp))
-                            .background(if (isSelected) Color(0xFF1E2E24) else Color(0xFF1C1C1E))
+                            .background(if (isSelected) Color(0xFF1C2A20) else Color(0xFF1C1C1E))
                             .border(
                                 width = 1.dp,
                                 color = if (isSelected) Color(0xFF34C759) else Color(0xFF2C2C2E),
@@ -153,15 +170,14 @@ fun VpnCountrySelectorSheet(
                                 onSelectCountry(country)
                                 onDismiss()
                             }
-                            .padding(horizontal = 16.dp, vertical = 14.dp),
+                            .padding(horizontal = 16.dp, vertical = 13.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Flag icon
                             Text(
                                 text = country.flag,
-                                fontSize = 24.sp
+                                fontSize = 22.sp
                             )
                             Spacer(modifier = Modifier.width(14.dp))
                             Column {
@@ -180,14 +196,14 @@ fun VpnCountrySelectorSheet(
                         }
 
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Ping Badge
+                            // Dynamic Ping Badge
                             Surface(
                                 shape = RoundedCornerShape(8.dp),
-                                color = if (country.estimatedPingMs < 50) Color(0xFF1A3320) else Color(0xFF332B1A)
+                                color = if (pingMs < 60) Color(0xFF1A3320) else Color(0xFF332B1A)
                             ) {
                                 Text(
-                                    text = "${country.estimatedPingMs} ms",
-                                    color = if (country.estimatedPingMs < 50) Color(0xFF34C759) else Color(0xFFFF9F0A),
+                                    text = "$pingMs ms",
+                                    color = if (pingMs < 60) Color(0xFF34C759) else Color(0xFFFF9F0A),
                                     fontSize = 11.sp,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -200,7 +216,7 @@ fun VpnCountrySelectorSheet(
                                     imageVector = Icons.Rounded.Check,
                                     contentDescription = "Selected",
                                     tint = Color(0xFF34C759),
-                                    modifier = Modifier.size(20.dp)
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
                         }
@@ -208,7 +224,7 @@ fun VpnCountrySelectorSheet(
                 }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
