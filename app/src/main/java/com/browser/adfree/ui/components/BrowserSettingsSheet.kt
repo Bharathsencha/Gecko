@@ -81,7 +81,7 @@ fun BrowserSettingsSheet(
         currentScreen = SettingsScreen.MAIN
     }
 
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
@@ -656,7 +656,7 @@ private fun MainSettingsView(
         SettingsCard {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "Gecko AdFree Browser",
+                    text = "Gecko",
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White

@@ -98,7 +98,7 @@ fun SafariHomePage(
         Spacer(modifier = Modifier.height(14.dp))
 
         Text(
-            text = "AdFree Browser",
+            text = "Gecko",
             fontSize = 24.sp,
             fontWeight = FontWeight.Bold,
             color = TextPrimary
