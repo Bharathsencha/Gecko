@@ -49,6 +49,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var historyRepo: HistoryRepository
     private lateinit var favoritesRepo: FavoritesRepository
     private lateinit var vpnManager: FreeVpnManager
+    private lateinit var shieldsRepo: com.browser.adfree.shields.ShieldsRepository
 
     private var extensionPort: WebExtension.Port? = null
     private var uBlockExtension: WebExtension? = null
@@ -109,6 +110,7 @@ class MainActivity : ComponentActivity() {
 
         // 1. Initialize Repositories & Managers
         preferencesRepo = BrowserPreferencesRepository(this)
+        shieldsRepo = com.browser.adfree.shields.ShieldsRepository(this)
         passwordRepo = SecurePasswordRepository(this)
         historyRepo = HistoryRepository(this)
         favoritesRepo = FavoritesRepository(this)
@@ -118,6 +120,8 @@ class MainActivity : ComponentActivity() {
         tabManager = TabManager(this).apply {
             this.historyRepository = historyRepo
             this.preferencesRepository = preferencesRepo
+            this.shieldsRepository = shieldsRepo
+            this.downloadManager = downloadManager
         }
 
         // Wire real-time VPN config bridge to WebExtension
@@ -299,6 +303,7 @@ class MainActivity : ComponentActivity() {
                     passwordRepo = passwordRepo,
                     historyRepo = historyRepo,
                     favoritesRepo = favoritesRepo,
+                    shieldsRepo = shieldsRepo,
                     vpnManager = vpnManager,
                     pendingSaveLogin = pendingSaveLogin,
                     onSaveLogin = {

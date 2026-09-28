@@ -23,6 +23,7 @@ import android.os.Looper
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import android.net.Uri
+import com.browser.adfree.download.BrowserDownloadManager
 import com.browser.adfree.model.SearchEngine
 import com.browser.adfree.model.StartupBehavior
 import com.browser.adfree.model.TabModel
@@ -34,6 +35,8 @@ import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
+import org.mozilla.geckoview.MediaSession
+import org.mozilla.geckoview.WebResponse
 import java.net.URLEncoder
 
 class TabManager(private val context: Context) {
@@ -47,13 +50,14 @@ class TabManager(private val context: Context) {
 
     var historyRepository: HistoryRepository? = null
     var preferencesRepository: BrowserPreferencesRepository? = null
+    var shieldsRepository: com.browser.adfree.shields.ShieldsRepository? = null
+    var downloadManager: BrowserDownloadManager? = null
     val sessionRepository = TabSessionRepository(context)
 
     var onInsecureHttpPrompt: ((url: String, onProceed: () -> Unit) -> Unit)? = null
     val allowedHttpUrls = mutableSetOf<String>()
 
     private val mainHandler = Handler(Looper.getMainLooper())
-
 
     companion object {
         const val HOME_URL = "about:home"
@@ -68,7 +72,23 @@ class TabManager(private val context: Context) {
         session.settings.userAgentOverride = if (tab.isDesktopMode) DESKTOP_UA else MODERN_MOBILE_UA
         session.settings.userAgentMode = if (tab.isDesktopMode) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
         session.settings.viewportMode = if (tab.isDesktopMode) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
-        session.settings.useTrackingProtection = true
+        
+        val siteConfig = shieldsRepository?.getConfigForUrl(tab.url)
+        val shieldsActive = siteConfig?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true)
+        val bgMedia = siteConfig?.backgroundMediaEnabled ?: true
+        
+        session.settings.useTrackingProtection = shieldsActive
+        session.settings.suspendMediaWhenInactive = !bgMedia
+
+        // Media Session Delegate for Android Foreground Service & Lockscreen playback
+        session.mediaSessionDelegate = object : MediaSession.Delegate {
+            override fun onActivated(session: GeckoSession, mediaSession: MediaSession) {
+                com.browser.adfree.media.MediaPlaybackService.start(context, tab.title, tab.url)
+            }
+            override fun onDeactivated(session: GeckoSession, mediaSession: MediaSession) {
+                com.browser.adfree.media.MediaPlaybackService.stop(context)
+            }
+        }
 
         // Content Blocking / Ad & Tracker Shield Delegate
         session.contentBlockingDelegate = object : org.mozilla.geckoview.ContentBlocking.Delegate {
@@ -94,6 +114,13 @@ class TabManager(private val context: Context) {
                     tab.adBlockCount = 0
                     tab.isReaderMode = false
                     tab.articleData = null
+
+                    // Dynamically apply per-site shield settings
+                    val currentSiteConfig = shieldsRepository?.getConfigForUrl(url)
+                    val currentShieldsActive = currentSiteConfig?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true)
+                    val currentBgMedia = currentSiteConfig?.backgroundMediaEnabled ?: true
+                    session.settings.useTrackingProtection = currentShieldsActive
+                    session.settings.suspendMediaWhenInactive = !currentBgMedia
                 }
             }
 
@@ -144,6 +171,12 @@ class TabManager(private val context: Context) {
                     }
                 }
             }
+
+            override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
+                mainHandler.post {
+                    downloadManager?.startDownload(url = response.uri)
+                }
+            }
         }
 
         session.navigationDelegate = object : GeckoSession.NavigationDelegate {
@@ -153,6 +186,15 @@ class TabManager(private val context: Context) {
             ): GeckoResult<AllowOrDeny>? {
                 val uri = request.uri
                 val httpsOnly = preferencesRepository?.httpsOnlyMode ?: true
+
+                // De-AMP Interception: Auto-bypass Google AMP wrappers to load canonical publisher page
+                val deAmped = com.browser.adfree.model.UrlSanitizer.deAmp(uri)
+                if (deAmped != uri) {
+                    mainHandler.post {
+                        session.loadUri(deAmped)
+                    }
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
 
                 if (httpsOnly && uri.startsWith("http://")) {
                     val host = try { Uri.parse(uri).host ?: "" } catch (e: Exception) { "" }
@@ -424,8 +466,11 @@ class TabManager(private val context: Context) {
         val searchEngine = preferencesRepository?.searchEngine ?: SearchEngine.GOOGLE
 
         if (trimmed.startsWith("https://", ignoreCase = true) ||
-            trimmed.startsWith("http://", ignoreCase = true) ||
-            trimmed.startsWith("about:", ignoreCase = true) ||
+            trimmed.startsWith("http://", ignoreCase = true)) {
+            return com.browser.adfree.model.UrlSanitizer.cleanUrl(trimmed)
+        }
+
+        if (trimmed.startsWith("about:", ignoreCase = true) ||
             trimmed.startsWith("javascript:", ignoreCase = true) ||
             trimmed.startsWith("file://", ignoreCase = true)) {
             return trimmed
@@ -438,7 +483,7 @@ class TabManager(private val context: Context) {
                        (trimmed.substringBefore("/").split(".").lastOrNull()?.length ?: 0) in 2..24
 
         if (isDomain) {
-            return "https://$trimmed"
+            return com.browser.adfree.model.UrlSanitizer.cleanUrl("https://$trimmed")
         }
 
         return try {

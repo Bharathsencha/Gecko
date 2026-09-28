@@ -71,6 +71,7 @@ fun TopAddressBar(
     onOpenSettings: () -> Unit,
     onOpenHistory: () -> Unit,
     onReload: () -> Unit,
+    onOpenShields: () -> Unit = {},
     isBookmarked: Boolean = false,
     onToggleBookmark: () -> Unit = {},
     historySuggestions: List<HistoryItem> = emptyList(),
@@ -104,14 +105,15 @@ fun TopAddressBar(
         }
     }
 
-    // Auto-select all on first focus tap
+    // Auto-select all on first focus gain only
+    var previousFocused by remember { mutableStateOf(false) }
     LaunchedEffect(isFocused) {
-        if (isFocused && textFieldValue.text.isNotEmpty()) {
-            kotlinx.coroutines.delay(60)
+        if (isFocused && !previousFocused && textFieldValue.text.isNotEmpty()) {
             textFieldValue = textFieldValue.copy(
                 selection = TextRange(0, textFieldValue.text.length)
             )
         }
+        previousFocused = isFocused
     }
 
     val showSuggestions = isFocused && textFieldValue.text.isNotEmpty() && historySuggestions.isNotEmpty()
@@ -175,13 +177,14 @@ fun TopAddressBar(
 
                     Spacer(modifier = Modifier.width(6.dp))
 
-                    // 2. Shield / Lock / Search icon
+                    // 2. Shield / Lock / Search icon (Clicking opens Shields Quick Sheet)
                     if (adBlockCount > 0) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
                                 .clip(RoundedCornerShape(8.dp))
                                 .background(ShieldGreen.copy(alpha = 0.15f))
+                                .clickable { onOpenShields() }
                                 .padding(horizontal = 4.dp, vertical = 2.dp)
                         ) {
                             Icon(
@@ -200,12 +203,20 @@ fun TopAddressBar(
                         }
                         Spacer(modifier = Modifier.width(6.dp))
                     } else if (!isStartPage && urlInput.startsWith("https://")) {
-                        Icon(
-                            imageVector = Icons.Default.Lock,
-                            contentDescription = "Secure",
-                            tint = AccentCyan.copy(alpha = 0.7f),
-                            modifier = Modifier.size(14.dp)
-                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onOpenShields() }
+                                .padding(2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Lock,
+                                contentDescription = "Secure",
+                                tint = AccentCyan.copy(alpha = 0.7f),
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
                         Spacer(modifier = Modifier.width(6.dp))
                     } else if (isStartPage) {
                         Icon(
@@ -374,7 +385,7 @@ fun TopAddressBar(
                     x = with(density) { 12.dp.roundToPx() },
                     y = barHeightPx  // position just below the bar
                 ),
-                properties = PopupProperties(focusable = false, dismissOnClickOutside = false)
+                properties = PopupProperties(focusable = false, dismissOnClickOutside = true)
             ) {
                 Column(
                     modifier = Modifier

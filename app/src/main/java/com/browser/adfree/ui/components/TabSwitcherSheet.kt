@@ -107,8 +107,11 @@ fun TabSwitcherSheet(
         }
     }
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
         containerColor = SurfaceDark,
         contentColor = TextPrimary,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)

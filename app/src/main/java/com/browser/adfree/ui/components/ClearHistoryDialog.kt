@@ -61,8 +61,11 @@ fun ClearBrowsingDataSheet(
     var clearCookiesChecked by remember { mutableStateOf(true) }
     var clearCacheChecked by remember { mutableStateOf(true) }
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
         containerColor = SurfaceDark,
         contentColor = TextPrimary,
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)

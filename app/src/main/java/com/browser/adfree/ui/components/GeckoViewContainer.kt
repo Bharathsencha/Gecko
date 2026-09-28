@@ -5,39 +5,64 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.browser.adfree.ui.components
 
+import android.view.ViewGroup
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoView
 
 @Composable
 fun GeckoViewContainer(
     session: GeckoSession,
+    isLoading: Boolean = false,
+    onRefresh: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     AndroidView(
         factory = { context ->
-            GeckoView(context).apply {
+            val geckoView = GeckoView(context).apply {
                 setSession(session)
             }
+
+            SwipeRefreshLayout(context).apply {
+                setColorSchemeColors(android.graphics.Color.parseColor("#00F0FF"))
+                setProgressBackgroundColorSchemeColor(android.graphics.Color.parseColor("#141416"))
+                
+                addView(
+                    geckoView,
+                    ViewGroup.LayoutParams(
+                        ViewGroup.LayoutParams.MATCH_PARENT,
+                        ViewGroup.LayoutParams.MATCH_PARENT
+                    )
+                )
+
+                setOnRefreshListener {
+                    onRefresh()
+                }
+
+                setOnChildScrollUpCallback { _, _ ->
+                    geckoView.canScrollVertically(-1)
+                }
+            }
         },
-        modifier = modifier,
-        update = { geckoView ->
-            if (geckoView.session != session) {
-                geckoView.setSession(session)
+        modifier = modifier.fillMaxSize(),
+        update = { swipeLayout ->
+            swipeLayout.isRefreshing = isLoading
+            for (i in 0 until swipeLayout.childCount) {
+                val child = swipeLayout.getChildAt(i)
+                if (child is GeckoView) {
+                    if (child.session != session) {
+                        child.setSession(session)
+                    }
+                    break
+                }
             }
         }
     )

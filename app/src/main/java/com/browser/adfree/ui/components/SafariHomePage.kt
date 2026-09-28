@@ -188,64 +188,75 @@ fun SafariHomePage(
             }
         }
 
-        // Favorites Grid
-        LazyVerticalGrid(
-            columns = GridCells.Fixed(4),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
-            contentPadding = PaddingValues(top = 10.dp, bottom = 16.dp, start = 4.dp, end = 4.dp),
-            modifier = Modifier
-                .fillMaxWidth()
-                .heightIn(max = 420.dp)
-        ) {
-            items(favorites, key = { it.id }) { fav ->
-                FavoriteCard(
-                    fav = fav,
-                    isEditMode = isEditMode,
-                    onClick = {
-                        if (!isEditMode) onNavigate(fav.url)
-                    },
-                    onLongClick = { isEditMode = true },
-                    onDelete = { onRemoveFavorite(fav) }
-                )
-            }
+        // Favorites Grid (Chunked into 4-column rows without nested lazy containers for smooth scrolling)
+        val allItems = remember(favorites.toList()) { favorites.toList() }
+        val totalCells = allItems.size + 1 // items + Add button
+        val numRows = (totalCells + 3) / 4
 
-            // "+ Add" Card
-            item {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable { showAddSheet = true }
-                        .padding(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier.padding(top = 6.dp, end = 6.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(54.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(SurfaceElevated)
-                                .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = "Add Favorite",
-                                tint = AccentCyan,
-                                modifier = Modifier.size(24.dp)
+        for (rowIndex in 0 until numRows) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                for (colIndex in 0 until 4) {
+                    val itemIndex = rowIndex * 4 + colIndex
+                    Box(modifier = Modifier.weight(1f)) {
+                        if (itemIndex < allItems.size) {
+                            val fav = allItems[itemIndex]
+                            FavoriteCard(
+                                fav = fav,
+                                isEditMode = isEditMode,
+                                onClick = {
+                                    if (!isEditMode) onNavigate(fav.url)
+                                },
+                                onLongClick = { isEditMode = true },
+                                onDelete = { onRemoveFavorite(fav) }
                             )
+                        } else if (itemIndex == allItems.size) {
+                            // "+ Add" Card
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(14.dp))
+                                    .clickable { showAddSheet = true }
+                                    .padding(4.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier.padding(top = 6.dp, end = 6.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(54.dp)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(SurfaceElevated)
+                                            .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Add,
+                                            contentDescription = "Add Favorite",
+                                            tint = AccentCyan,
+                                            modifier = Modifier.size(24.dp)
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "Add",
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = TextSecondary,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
+                        } else {
+                            // Empty placeholder spacer to keep 4-column alignment
+                            Spacer(modifier = Modifier.fillMaxWidth())
                         }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = "Add",
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextSecondary,
-                        textAlign = TextAlign.Center
-                    )
                 }
             }
         }

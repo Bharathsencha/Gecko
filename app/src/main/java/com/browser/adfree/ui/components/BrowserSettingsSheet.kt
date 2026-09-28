@@ -81,8 +81,11 @@ fun BrowserSettingsSheet(
         currentScreen = SettingsScreen.MAIN
     }
 
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
         containerColor = Color(0xFF141416),
         dragHandle = {
             Box(

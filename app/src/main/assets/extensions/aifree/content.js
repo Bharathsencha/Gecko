@@ -1,6 +1,6 @@
 /**
  * AI Free Content Script
- * Handles: Google AI Overview removal, Reader mode extraction, SPA Scroll Restoration (YouTube, etc.)
+ * Handles: Google AI Overview removal, Reader mode extraction, SPA Scroll Restoration, Background Media Playback
  * Ad blocking → real uBlock Origin
  * Dark mode → real Dark Reader
  */
@@ -97,8 +97,7 @@ function initSpaScrollRestoration() {
         saveCurrentPos();
     }, true);
 
-    // Restore on popstate (back button)
-    window.addEventListener('popstate', () => {
+    function restoreScrollForCurrentPage() {
         const targetUrl = location.href;
         let savedY = scrollMap.get(targetUrl);
         if (savedY === undefined) {
@@ -111,7 +110,7 @@ function initSpaScrollRestoration() {
         if (savedY !== undefined && savedY > 0) {
             isRestoring = true;
             let attempts = 0;
-            const maxAttempts = 30; // ~1.5 seconds
+            const maxAttempts = 25;
 
             function tryScroll() {
                 attempts++;
@@ -125,22 +124,81 @@ function initSpaScrollRestoration() {
                     if (document.documentElement) document.documentElement.scrollTop = savedY;
                     if (document.body) document.body.scrollTop = savedY;
 
-                    // Release lock after YouTube's initial animation settles
-                    setTimeout(() => { isRestoring = false; }, 300);
+                    setTimeout(() => { isRestoring = false; }, 250);
                 } else {
                     requestAnimationFrame(tryScroll);
                 }
             }
 
             requestAnimationFrame(tryScroll);
-            setTimeout(tryScroll, 100);
-            setTimeout(tryScroll, 300);
-            setTimeout(tryScroll, 600);
+            setTimeout(tryScroll, 150);
+            setTimeout(tryScroll, 400);
         }
+    }
+
+    // Restore on popstate (back button) & YouTube custom SPA navigation
+    window.addEventListener('popstate', restoreScrollForCurrentPage);
+    window.addEventListener('yt-navigate-finish', () => {
+        setTimeout(restoreScrollForCurrentPage, 100);
     });
 }
 
-// ── 3. Reader Mode Article Extraction ──────────────────────────────────────
+// ── 3. Background Audio & Video Playback Engine ─────────────────────────────
+function initBackgroundMediaPlayback() {
+    try {
+        const script = document.createElement('script');
+        script.textContent = `(function() {
+            try {
+                Object.defineProperty(document, 'hidden', {
+                    get: () => false,
+                    configurable: true
+                });
+                Object.defineProperty(document, 'visibilityState', {
+                    get: () => 'visible',
+                    configurable: true
+                });
+                Object.defineProperty(document, 'webkitVisibilityState', {
+                    get: () => 'visible',
+                    configurable: true
+                });
+            } catch(e) {}
+
+            // Suppress visibility/pagehide pause events from reaching video elements
+            const blockedEventTypes = new Set(['visibilitychange', 'webkitvisibilitychange', 'pagehide']);
+            
+            const origAddEventListener = EventTarget.prototype.addEventListener;
+            EventTarget.prototype.addEventListener = function(type, listener, options) {
+                if (blockedEventTypes.has(type)) {
+                    const wrapped = function(e) {
+                        // Do not fire pause actions when browser is backgrounded
+                        return;
+                    };
+                    return origAddEventListener.call(this, type, wrapped, options);
+                }
+                return origAddEventListener.call(this, type, listener, options);
+            };
+
+            // Intercept media pause calls triggered by backgrounding
+            const origPause = HTMLMediaElement.prototype.pause;
+            HTMLMediaElement.prototype.pause = function() {
+                const stack = new Error().stack || '';
+                if (stack.includes('visibilitychange') || 
+                    stack.includes('onVisibilityChange') || 
+                    stack.includes('pagehide') || 
+                    stack.includes('onHidden') || 
+                    stack.includes('background') ||
+                    stack.includes('onBlur')) {
+                    return;
+                }
+                return origPause.apply(this, arguments);
+            };
+        })();`;
+        (document.head || document.documentElement).appendChild(script);
+        script.remove();
+    } catch (e) {}
+}
+
+// ── 4. Reader Mode Article Extraction ──────────────────────────────────────
 function extractArticleContent(doc) {
     try {
         const documentClone = doc.cloneNode(true);
@@ -199,9 +257,10 @@ function extractArticleContent(doc) {
     }
 }
 
-// ── 4. Init ────────────────────────────────────────────────────────────────
+// ── 5. Init ────────────────────────────────────────────────────────────────
 watchForGoogleAiOverview();
 initSpaScrollRestoration();
+initBackgroundMediaPlayback();
 
 window.addEventListener("DOMContentLoaded", () => {
     removeAiNodes(document);

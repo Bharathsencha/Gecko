@@ -48,8 +48,11 @@ fun DownloadsSheet(
     onClearCompleted: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
+        sheetState = sheetState,
         containerColor = SurfaceDark,
         contentColor = TextPrimary,
         shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp)

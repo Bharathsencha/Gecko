@@ -49,6 +49,7 @@ fun BrowserMainScreen(
     passwordRepo: SecurePasswordRepository,
     historyRepo: HistoryRepository,
     favoritesRepo: FavoritesRepository,
+    shieldsRepo: com.browser.adfree.shields.ShieldsRepository,
     vpnManager: FreeVpnManager,
     pendingSaveLogin: PendingSaveLogin? = null,
     onSaveLogin: () -> Unit = {},
@@ -62,6 +63,7 @@ fun BrowserMainScreen(
     var showPasswordsSheet by remember { mutableStateOf(false) }
     var showHistoryPage by remember { mutableStateOf(false) }
     var showBookmarksPage by remember { mutableStateOf(false) }
+    var showShieldsSheet by remember { mutableStateOf(false) }
 
     var pendingInsecureHttpUrl by remember { mutableStateOf<String?>(null) }
     var pendingInsecureProceedCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -131,6 +133,7 @@ fun BrowserMainScreen(
                 onOpenPageMenu = { showPageMenu = true },
                 onOpenSettings = { showSettingsSheet = true },
                 onOpenHistory = { showHistoryPage = true },
+                onOpenShields = { showShieldsSheet = true },
                 onReload = {
                     activeTab?.session?.reload()
                 },
@@ -184,6 +187,8 @@ fun BrowserMainScreen(
                     } else if (activeTab != null) {
                         GeckoViewContainer(
                             session = activeTab.session,
+                            isLoading = activeTab.isLoading,
+                            onRefresh = { activeTab.session.reload() },
                             modifier = Modifier.fillMaxSize()
                         )
                     }
@@ -377,6 +382,34 @@ fun BrowserMainScreen(
                 onDismissRequest = { showDownloadsSheet = false }
             )
         }
+
+        // Brave-style Shields Quick Panel (linked to existing Shield badge)
+        if (showShieldsSheet && activeTab != null) {
+            ShieldsQuickSheet(
+                tab = activeTab,
+                preferencesRepo = preferencesRepo,
+                shieldsRepo = shieldsRepo,
+                onToggleShieldsForSite = { enabled ->
+                    shieldsRepo.setShieldsForUrl(activeTab.url, shieldsEnabled = enabled)
+                    activeTab.session.settings.useTrackingProtection = enabled
+                },
+                onToggleBackgroundMedia = { enabled ->
+                    shieldsRepo.setShieldsForUrl(activeTab.url, backgroundMediaEnabled = enabled)
+                    activeTab.session.settings.suspendMediaWhenInactive = !enabled
+                },
+                onToggleDarkWeb = {
+                    val newDark = !activeTab.isDarkWeb
+                    shieldsRepo.setShieldsForUrl(activeTab.url, darkWebEnabled = newDark)
+                    tabManager.toggleDarkWeb(activeTab)
+                },
+                onToggleDesktop = {
+                    val newDesktop = !activeTab.isDesktopMode
+                    shieldsRepo.setShieldsForUrl(activeTab.url, desktopModeEnabled = newDesktop)
+                    tabManager.toggleDesktopMode(activeTab)
+                },
+                onDismissRequest = { showShieldsSheet = false }
+            )
+        }
     }
 }
 
@@ -397,13 +430,14 @@ private fun triggerReaderModeExtraction(tab: com.browser.adfree.model.TabModel) 
 
 private fun shareUrl(context: Context, title: String, url: String) {
     try {
+        val clean = com.browser.adfree.model.UrlSanitizer.cleanUrl(url)
         val sendIntent = Intent().apply {
             action = Intent.ACTION_SEND
-            putExtra(Intent.EXTRA_TEXT, url)
+            putExtra(Intent.EXTRA_TEXT, clean)
             putExtra(Intent.EXTRA_TITLE, title)
             type = "text/plain"
         }
-        val shareIntent = Intent.createChooser(sendIntent, "Share Web Page")
+        val shareIntent = Intent.createChooser(sendIntent, "Share Clean Link")
         context.startActivity(shareIntent)
     } catch (e: Exception) {
         e.printStackTrace()

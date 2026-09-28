@@ -89,14 +89,15 @@ dependencies {
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material")
     implementation("androidx.compose.material:material-icons-extended")
+
+    // SwipeRefreshLayout for smooth native pull-to-refresh
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
     // Coil for Dynamic Favicons
     implementation("io.coil-kt:coil-compose:2.5.0")
 
     // Networking (OkHttp)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
-
-    // JSON Parser — already provided by Android SDK, no need to bundle
-    // implementation("org.json:json:20231013")
 }
