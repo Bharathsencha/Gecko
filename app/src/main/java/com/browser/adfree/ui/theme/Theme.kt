@@ -17,9 +17,12 @@
 
 package com.browser.adfree.ui.theme
 
+import androidx.compose.foundation.text.selection.LocalTextSelectionColors
+import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 
 private val DarkColorScheme = darkColorScheme(
     primary = AccentCyan,
@@ -32,10 +35,19 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = TextPrimary
 )
 
+private val CustomTextSelectionColors = TextSelectionColors(
+    handleColor = AccentCyan,
+    backgroundColor = AccentCyan.copy(alpha = 0.35f)
+)
+
 @Composable
 fun BrowserTheme(content: @Composable () -> Unit) {
     MaterialTheme(
-        colorScheme = DarkColorScheme,
-        content = content
-    )
+        colorScheme = DarkColorScheme
+    ) {
+        CompositionLocalProvider(
+            LocalTextSelectionColors provides CustomTextSelectionColors,
+            content = content
+        )
+    }
 }

@@ -205,6 +205,7 @@ fun HistoryPage(
                     unfocusedTextColor = TextPrimary,
                     focusedBorderColor = AccentCyan,
                     unfocusedBorderColor = BorderSubtle,
+                    cursorColor = Color.White,
                     focusedContainerColor = SurfaceElevated,
                     unfocusedContainerColor = SurfaceElevated
                 ),

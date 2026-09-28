@@ -17,6 +17,7 @@
 
 package com.browser.adfree
 
+import android.content.Intent
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
@@ -77,13 +78,27 @@ class MainActivity : ComponentActivity() {
                     put("host", host)
                     put("port", port)
                     put("type", type)
+                    put("countryCode", vpnManager.selectedCountry.code)
                 }
                 extensionPort?.postMessage(payload)
             } catch (e: Exception) {}
         }
 
         // 2. Configure GeckoRuntime with Strict Native Tracking Protection & Cookie Shield
+        // Enable Gecko's built-in fingerprinting protection (RFP engine) via about:config prefs
+        val geckoPrefs = Bundle().apply {
+            // Enable Firefox's native Fingerprinting Protection engine
+            // (same tech as Firefox's privacy.fingerprintingProtection setting)
+            putBoolean("privacy.fingerprintingProtection", true)
+            // Also enable stricter resist fingerprinting for private-browsing-style protection
+            putBoolean("privacy.resistFingerprinting.randomization.enabled", true)
+            // Disable telemetry noise
+            putBoolean("toolkit.telemetry.enabled", false)
+            putBoolean("datareporting.healthreport.uploadEnabled", false)
+        }
         val runtimeSettings = GeckoRuntimeSettings.Builder()
+            .extras(geckoPrefs)
+            .globalPrivacyControlEnabled(true)
             .contentBlocking(
                 ContentBlocking.Settings.Builder()
                     .enhancedTrackingProtectionLevel(ContentBlocking.EtpLevel.STRICT)
@@ -147,6 +162,15 @@ class MainActivity : ComponentActivity() {
 
         // 4. Restore Session / Create Initial Tab according to Startup Behavior
         tabManager.restoreSession(runtime, preferencesRepo.startupBehavior)
+        val initialUrl = intent?.dataString
+        if (!initialUrl.isNullOrBlank()) {
+            val activeTab = tabManager.activeTab
+            if (activeTab != null && activeTab.url == TabManager.HOME_URL) {
+                tabManager.loadUri(activeTab, initialUrl, runtime)
+            } else {
+                tabManager.createNewTab(runtime, initialUrl)
+            }
+        }
 
         // 5. System Back Button Dispatcher
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
@@ -163,14 +187,7 @@ class MainActivity : ComponentActivity() {
                 } else {
                     vpnManager.forceDisconnectOnExit(tabManager.tabs)
                     if (preferencesRepo.wipeOnExit) {
-                        historyRepo.clearAll()
-                        tabManager.sessionRepository.clearSession()
-                        runtime.storageController.clearData(StorageController.ClearFlags.ALL)
-                        try {
-                            cacheDir.deleteRecursively()
-                            codeCacheDir.deleteRecursively()
-                            externalCacheDir?.deleteRecursively()
-                        } catch (e: Exception) {}
+                        performWipeOnExit()
                     }
                     finish()
                 }
@@ -205,6 +222,19 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun performWipeOnExit() {
+        try {
+            historyRepo.clearAll()
+            tabManager.sessionRepository.clearSession()
+            runtime.storageController.clearData(StorageController.ClearFlags.ALL)
+            cacheDir.deleteRecursively()
+            codeCacheDir.deleteRecursively()
+            externalCacheDir?.deleteRecursively()
+        } catch (e: Exception) {
+            Log.e("AdFreeBrowser", "Error wiping data on exit", e)
+        }
+    }
+
     private fun syncExtensionConfig() {
         try {
             val vpnPayload = JSONObject().apply {
@@ -213,6 +243,7 @@ class MainActivity : ComponentActivity() {
                 put("host", if (vpnManager.isEnabled) vpnManager.selectedCountry.host else "")
                 put("port", if (vpnManager.isEnabled) vpnManager.selectedCountry.port else 0)
                 put("type", vpnManager.selectedCountry.type)
+                put("countryCode", vpnManager.selectedCountry.code)
             }
             extensionPort?.postMessage(vpnPayload)
 
@@ -265,6 +296,20 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent?) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        val url = intent?.dataString
+        if (!url.isNullOrBlank()) {
+            val activeTab = tabManager.activeTab
+            if (activeTab != null && activeTab.url == TabManager.HOME_URL) {
+                tabManager.loadUri(activeTab, url, runtime)
+            } else {
+                tabManager.createNewTab(runtime, url)
+            }
+        }
+    }
+
     override fun onPause() {
         super.onPause()
         if (preferencesRepo.wipeOnExit) {
@@ -279,14 +324,7 @@ class MainActivity : ComponentActivity() {
         super.onStop()
         vpnManager.forceDisconnectOnExit(tabManager.tabs)
         if (preferencesRepo.wipeOnExit) {
-            historyRepo.clearAll()
-            tabManager.sessionRepository.clearSession()
-            runtime.storageController.clearData(StorageController.ClearFlags.ALL)
-            try {
-                cacheDir.deleteRecursively()
-                codeCacheDir.deleteRecursively()
-                externalCacheDir?.deleteRecursively()
-            } catch (e: Exception) {}
+            performWipeOnExit()
         } else {
             tabManager.saveSession()
         }
@@ -295,14 +333,7 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         vpnManager.forceDisconnectOnExit(tabManager.tabs)
         if (preferencesRepo.wipeOnExit) {
-            historyRepo.clearAll()
-            tabManager.sessionRepository.clearSession()
-            runtime.storageController.clearData(StorageController.ClearFlags.ALL)
-            try {
-                cacheDir.deleteRecursively()
-                codeCacheDir.deleteRecursively()
-                externalCacheDir?.deleteRecursively()
-            } catch (e: Exception) {}
+            performWipeOnExit()
         }
         tabManager.destroy()
         runtime.shutdown()

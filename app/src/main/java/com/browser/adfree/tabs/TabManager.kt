@@ -57,14 +57,14 @@ class TabManager(private val context: Context) {
 
     companion object {
         const val HOME_URL = "about:home"
-        const val MODERN_MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; SM-S948B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.6261.119 Mobile Safari/537.36"
-        const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64; rv:122.0) Gecko/20100101 Firefox/122.0"
+        const val MODERN_MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; SM-S948B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.127 Mobile Safari/537.36"
+        const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
     }
 
     private fun buildSession(tab: TabModel): GeckoSession {
         val session = GeckoSession()
 
-        // Modern Mobile User Agent & Viewport
+        // Chrome-like UA for proper Google/site layout; Desktop UA for desktop mode
         session.settings.userAgentOverride = if (tab.isDesktopMode) DESKTOP_UA else MODERN_MOBILE_UA
         session.settings.userAgentMode = if (tab.isDesktopMode) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
         session.settings.viewportMode = if (tab.isDesktopMode) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
@@ -204,6 +204,14 @@ class TabManager(private val context: Context) {
     }
 
     fun restoreSession(runtime: GeckoRuntime, startupBehavior: StartupBehavior) {
+        if (preferencesRepository?.wipeOnExit == true) {
+            sessionRepository.clearSession()
+            historyRepository?.clearAll()
+            tabs.clear()
+            createNewTab(runtime, HOME_URL)
+            return
+        }
+
         val (savedTabs, savedActiveIndex) = sessionRepository.loadSession()
 
         if (savedTabs.isNotEmpty()) {
@@ -250,6 +258,10 @@ class TabManager(private val context: Context) {
     }
 
     fun saveSession() {
+        if (preferencesRepository?.wipeOnExit == true) {
+            sessionRepository.clearSession()
+            return
+        }
         if (tabs.isNotEmpty()) {
             sessionRepository.saveSession(tabs, activeTabIndex.intValue)
         }
@@ -390,14 +402,8 @@ class TabManager(private val context: Context) {
             return
         }
 
-        // If launching from about:home, reset the session so previous site history doesn't leak into new site
-        if (tab.url == HOME_URL) {
-            try {
-                tab.session.close()
-            } catch (e: Exception) {}
-            val freshSession = buildSession(tab)
-            freshSession.open(runtime)
-            tab.session = freshSession
+        if (!tab.session.isOpen) {
+            tab.session.open(runtime)
         }
 
         tab.url = resolved
@@ -406,42 +412,39 @@ class TabManager(private val context: Context) {
     }
 
     fun resolveInputUrl(input: String): String {
-        val trimmed = input.trim()
+        var trimmed = input.trim()
         if (trimmed.isEmpty() || trimmed == HOME_URL) return HOME_URL
 
+        // If markdown link format was pasted e.g. [coveryourtracks.eff.org](https://coveryourtracks.eff.org/)
+        val mdMatch = Regex("\\[.*?\\]\\((https?://.*?)\\)").find(trimmed)
+        if (mdMatch != null) {
+            trimmed = mdMatch.groupValues[1]
+        }
+
         val searchEngine = preferencesRepository?.searchEngine ?: SearchEngine.GOOGLE
-        val blockAi = preferencesRepository?.blockAiOverviews ?: true
 
-        if (trimmed.startsWith("https://") || trimmed.startsWith("about:") || trimmed.startsWith("javascript:")) {
-            if (blockAi && (trimmed.startsWith("https://www.google.com/search") || trimmed.startsWith("https://google.com/search"))) {
-                if (!trimmed.contains("udm=")) {
-                    return if (trimmed.contains("?")) "$trimmed&udm=14" else "$trimmed?udm=14"
-                }
-            }
+        if (trimmed.startsWith("https://", ignoreCase = true) ||
+            trimmed.startsWith("http://", ignoreCase = true) ||
+            trimmed.startsWith("about:", ignoreCase = true) ||
+            trimmed.startsWith("javascript:", ignoreCase = true) ||
+            trimmed.startsWith("file://", ignoreCase = true)) {
             return trimmed
         }
 
-        if (trimmed.startsWith("http://")) {
-            return trimmed
-        }
+        // Domain matching without spaces (e.g., coveryourtracks.eff.org, adblock-tester.com/test)
+        val isDomain = !trimmed.contains(" ") && trimmed.contains(".") &&
+                       !trimmed.startsWith(".") && !trimmed.endsWith(".") &&
+                       (trimmed.substringBefore("/").split(".").lastOrNull()?.all { it.isLetter() } == true) &&
+                       (trimmed.substringBefore("/").split(".").lastOrNull()?.length ?: 0) in 2..24
 
-        val domainPattern = Regex("^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}(/.*)?$")
-        if (domainPattern.matches(trimmed) && !trimmed.contains(" ")) {
+        if (isDomain) {
             return "https://$trimmed"
         }
 
         return try {
-            var url = searchEngine.searchUrl + URLEncoder.encode(trimmed, "UTF-8")
-            if (blockAi && searchEngine == SearchEngine.GOOGLE) {
-                url += "&udm=14"
-            }
-            url
+            searchEngine.searchUrl + URLEncoder.encode(trimmed, "UTF-8")
         } catch (e: Exception) {
-            var url = searchEngine.searchUrl + trimmed.replace(" ", "+")
-            if (blockAi && searchEngine == SearchEngine.GOOGLE) {
-                url += "&udm=14"
-            }
-            url
+            searchEngine.searchUrl + trimmed.replace(" ", "+")
         }
     }
 

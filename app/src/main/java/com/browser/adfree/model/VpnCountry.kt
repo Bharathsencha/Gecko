@@ -22,9 +22,9 @@ data class VpnCountry(
     val name: String,
     val flag: String,
     val city: String,
-    val host: String,
-    val port: Int,
-    val type: String = "http",
+    var host: String,
+    var port: Int,
+    var type: String = "socks",
     val estimatedPingMs: Int = 45
 ) {
     companion object {
@@ -34,9 +34,9 @@ data class VpnCountry(
                 name = "United States",
                 flag = "🇺🇸",
                 city = "New York / Ashburn",
-                host = "us.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "107.150.41.226",
+                port = 18080,
+                type = "socks",
                 estimatedPingMs = 38
             ),
             VpnCountry(
@@ -44,9 +44,9 @@ data class VpnCountry(
                 name = "Germany",
                 flag = "🇩🇪",
                 city = "Frankfurt",
-                host = "de.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "94.228.118.127",
+                port = 1414,
+                type = "socks",
                 estimatedPingMs = 42
             ),
             VpnCountry(
@@ -54,9 +54,9 @@ data class VpnCountry(
                 name = "Japan",
                 flag = "🇯🇵",
                 city = "Tokyo",
-                host = "jp.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "172.105.192.212",
+                port = 9080,
+                type = "socks",
                 estimatedPingMs = 75
             ),
             VpnCountry(
@@ -64,9 +64,9 @@ data class VpnCountry(
                 name = "United Kingdom",
                 flag = "🇬🇧",
                 city = "London",
-                host = "gb.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "144.24.111.128",
+                port = 1088,
+                type = "socks",
                 estimatedPingMs = 35
             ),
             VpnCountry(
@@ -74,9 +74,9 @@ data class VpnCountry(
                 name = "Netherlands",
                 flag = "🇳🇱",
                 city = "Amsterdam",
-                host = "nl.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "62.238.107.38",
+                port = 9050,
+                type = "socks",
                 estimatedPingMs = 40
             ),
             VpnCountry(
@@ -84,9 +84,9 @@ data class VpnCountry(
                 name = "Singapore",
                 flag = "🇸🇬",
                 city = "Singapore Central",
-                host = "sg.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "104.248.151.220",
+                port = 57554,
+                type = "socks",
                 estimatedPingMs = 68
             ),
             VpnCountry(
@@ -94,9 +94,9 @@ data class VpnCountry(
                 name = "Canada",
                 flag = "🇨🇦",
                 city = "Toronto",
-                host = "ca.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "142.54.228.193",
+                port = 4145,
+                type = "socks",
                 estimatedPingMs = 45
             ),
             VpnCountry(
@@ -104,9 +104,9 @@ data class VpnCountry(
                 name = "France",
                 flag = "🇫🇷",
                 city = "Paris",
-                host = "fr.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "51.79.11.180",
+                port = 10001,
+                type = "socks",
                 estimatedPingMs = 44
             ),
             VpnCountry(
@@ -114,9 +114,9 @@ data class VpnCountry(
                 name = "Australia",
                 flag = "🇦🇺",
                 city = "Sydney",
-                host = "au.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "67.201.33.10",
+                port = 25283,
+                type = "socks",
                 estimatedPingMs = 92
             ),
             VpnCountry(
@@ -124,9 +124,9 @@ data class VpnCountry(
                 name = "India",
                 flag = "🇮🇳",
                 city = "Mumbai / Bangalore",
-                host = "in.free-relay.adfree.internal",
-                port = 8080,
-                type = "http",
+                host = "45.74.31.41",
+                port = 4967,
+                type = "socks",
                 estimatedPingMs = 28
             )
         )

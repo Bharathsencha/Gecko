@@ -37,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import androidx.compose.ui.graphics.Color
 import com.browser.adfree.model.HistoryItem
 import com.browser.adfree.model.TimeframeWipe
 import com.browser.adfree.storage.HistoryRepository
@@ -144,7 +145,8 @@ fun HistorySheet(
                     focusedBorderColor = AccentCyan,
                     unfocusedBorderColor = BorderSubtle,
                     focusedContainerColor = SurfaceElevated,
-                    unfocusedContainerColor = SurfaceElevated
+                    unfocusedContainerColor = SurfaceElevated,
+                    cursorColor = Color.White
                 ),
                 modifier = Modifier
                     .fillMaxWidth()

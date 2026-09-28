@@ -61,7 +61,6 @@ fun BrowserMainScreen(
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showPasswordsSheet by remember { mutableStateOf(false) }
     var showHistoryPage by remember { mutableStateOf(false) }
-    var showVpnCountrySelector by remember { mutableStateOf(false) }
 
     var pendingInsecureHttpUrl by remember { mutableStateOf<String?>(null) }
     var pendingInsecureProceedCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -71,6 +70,22 @@ fun BrowserMainScreen(
 
     val activeDownloadsCount = downloadManager.downloadsList.count { it.status == DownloadStatus.DOWNLOADING }
     val isHomePage = activeTab == null || activeTab.url == "about:home"
+
+    // Debounced history filter — runs 150ms after typing stops to prevent per-keystroke lag
+    var historySuggestions by remember { mutableStateOf<List<com.browser.adfree.model.HistoryItem>>(emptyList()) }
+    LaunchedEffect(urlText) {
+        if (urlText.isBlank() || urlText == "about:home") {
+            historySuggestions = emptyList()
+        } else {
+            kotlinx.coroutines.delay(150)
+            historySuggestions = historyRepo.history
+                .filter { item ->
+                    item.url.contains(urlText, ignoreCase = true) ||
+                    item.title.contains(urlText, ignoreCase = true)
+                }
+                .take(5)
+        }
+    }
 
     // Set up insecure HTTP warning prompt listener
     LaunchedEffect(tabManager) {
@@ -109,7 +124,8 @@ fun BrowserMainScreen(
                 onOpenHistory = { showHistoryPage = true },
                 onReload = {
                     activeTab?.session?.reload()
-                }
+                },
+                historySuggestions = historySuggestions
             )
 
             // 2. Main Web View Container OR Start Page with Ultra-Smooth Transition
@@ -234,27 +250,7 @@ fun BrowserMainScreen(
                     showSettingsSheet = false
                     showHistoryPage = true
                 },
-                onOpenVpnSelector = {
-                    showSettingsSheet = false
-                    showVpnCountrySelector = true
-                },
                 onDismissRequest = { showSettingsSheet = false }
-            )
-        }
-
-        // VPN Country Selector Modal Sheet
-        if (showVpnCountrySelector) {
-            VpnCountrySelectorSheet(
-                vpnManager = vpnManager,
-                onSelectCountry = { country ->
-                    vpnManager.selectCountry(country, runtime, tabManager.tabs)
-                    showVpnCountrySelector = false
-                    showSettingsSheet = true
-                },
-                onDismiss = {
-                    showVpnCountrySelector = false
-                    showSettingsSheet = true
-                }
             )
         }
 

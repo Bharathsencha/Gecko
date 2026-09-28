@@ -33,10 +33,19 @@ let blockAiOverviewsActive = true;
 // In-Browser VPN / Secure Proxy Router
 let vpnConfig = {
     enabled: false,
-    type: "http",
+    type: "socks",
     host: "",
-    port: 0
+    port: 0,
+    countryCode: "US"
 };
+
+// High-speed pre-compiled surrogate data URIs (0ms network time, fires script.onload without network errors)
+const SURROGATE_JS_NOOP = "data:application/javascript;charset=utf-8,%2F*%20noop%20*%2F";
+const SURROGATE_ADSBYGOOGLE = "data:application/javascript;charset=utf-8,(function()%7Bwindow.adsbygoogle%3Dwindow.adsbygoogle%7C%7C%5B%5D%3Bwindow.adsbygoogle.loaded%3Dtrue%3Bwindow.adsbygoogle.push%3Dfunction(a)%7Bif(typeof%20a%3D%3D%3D'function')try%7Ba()%3B%7Dcatch(e)%7B%7D%7D%3B%7D)()%3B";
+const SURROGATE_GPT = "data:application/javascript;charset=utf-8,(function()%7Bwindow.googletag%3Dwindow.googletag%7C%7C%7Bcmd%3A%5B%5D%7D%3Bwindow.googletag.apiReady%3Dtrue%3Bwindow.googletag.pubads%3Dfunction()%7Breturn%7BaddEventListener%3Afunction()%7B%7D%2CenableSingleRequest%3Afunction()%7B%7D%2CsetTargeting%3Afunction()%7B%7D%2CcollapseEmptyDivs%3Afunction()%7B%7D%2CclearTargeting%3Afunction()%7B%7D%2Crefresh%3Afunction()%7B%7D%2CdisableInitialLoad%3Afunction()%7B%7D%2CgetSlots%3Afunction()%7Breturn%5B%5D%3B%7D%7D%3B%7D%3Bwindow.googletag.enableServices%3Dfunction()%7B%7D%3Bwindow.googletag.display%3Dfunction()%7B%7D%3Bwindow.googletag.defineSlot%3Dfunction()%7Breturn%7BaddService%3Afunction()%7Breturn%20this%3B%7D%2CsetTargeting%3Afunction()%7Breturn%20this%3B%7D%2CsetCollapseEmptyDiv%3Afunction()%7Breturn%20this%3B%7D%7D%3B%7D%3B%7D)()%3B";
+const SURROGATE_GA = "data:application/javascript;charset=utf-8,(function()%7Bwindow.ga%3Dwindow.ga%7C%7Cfunction()%7B%7D%3Bwindow.gtag%3Dwindow.gtag%7C%7Cfunction()%7B%7D%3Bwindow.dataLayer%3Dwindow.dataLayer%7C%7C%5B%5D%3B%7D)()%3B";
+const SURROGATE_FBQ = "data:application/javascript;charset=utf-8,(function()%7Bwindow.fbq%3Dwindow.fbq%7C%7Cfunction()%7B%7D%3Bwindow._fbq%3Dwindow._fbq%7C%7Cwindow.fbq%3B%7D)()%3B";
+const SURROGATE_1X1_GIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
 // Comprehensive built-in ad, tracker, popup, and telemetry domain database
 const coreBlocklist = [
@@ -60,12 +69,20 @@ const coreBlocklist = [
     "adpushup.com", "adskeeper.co.uk", "adthrive.com", "mediavine.com", "monetag.com",
     "adtrue.com", "adblade.com", "richaudience.com", "sovrn.com", "undertone.com",
     
-    // Tracking & Telemetry
+    // Tracking, Telemetry & Error Loggers
     "google-analytics.com", "analytics.google.com", "statcounter.com", "yandex.ru/metrika",
     "mc.yandex.ru", "clarity.ms", "segment.io", "mixpanel.com", "amplitude.com",
     "newrelic.com", "nr-data.net", "branch.io", "appsflyer.com", "adjust.com",
     "facebook.net/en_US/fbevents.js", "connect.facebook.net/signals", "ads-twitter.com",
     "bat.bing.com", "ads.linkedin.com", "tr.snapchat.com", "analytics.tiktok.com",
+    "sentry.io", "browser.sentry-cdn.com", "js.sentry-cdn.com", "sentry-cdn.com",
+    "bugsnag.com", "notify.bugsnag.com", "sessions.bugsnag.com", "d2wy8f7a9urs9l.cloudfront.net", "d2wy8f7a9ursnm.cloudfront.net",
+    "logrocket.io", "cdn.logrocket.io", "r.logrocket.io",
+    "raygun.io", "cdn.raygun.io", "api.raygun.io",
+    "static.hotjar.com", "script.hotjar.com", "vars.hotjar.com",
+    "js-agent.newrelic.com", "bam.nr-data.net",
+    "googletagmanager.com", "matomo.js", "piwik.js",
+    "ymatuhin.ru", "an.yandex.ru", "context.js",
     
     // Cryptomining & Malware
     "coinhive.com", "crypto-loot.com", "coin-have.com", "minr.pw", "webminepool.com",
@@ -118,7 +135,25 @@ function isBlocked(host) {
     return false;
 }
 
-// 1. Request Interception & Cancellation + Google AI Overview &udm=14 auto-redirect
+function recordBlock(details, host) {
+    blockedStats.totalBlocked++;
+    blockedStats.sessionBlocked++;
+
+    const tabId = details.tabId;
+    if (tabId !== undefined && tabId >= 0) {
+        blockedStats.tabBlocked[tabId] = (blockedStats.tabBlocked[tabId] || 0) + 1;
+    }
+
+    notifyNative({
+        action: "ad_blocked",
+        url: details.url,
+        domain: host,
+        tabBlockedCount: tabId >= 0 ? blockedStats.tabBlocked[tabId] : 1,
+        totalBlockedCount: blockedStats.totalBlocked
+    });
+}
+
+// 1. High-Efficiency Request Interception, Surrogate Redirection & Anti-Bait Engine
 browser.webRequest.onBeforeRequest.addListener(
     function(details) {
         try {
@@ -126,54 +161,73 @@ browser.webRequest.onBeforeRequest.addListener(
             const host = urlObj.hostname.toLowerCase();
             const fullUrl = details.url.toLowerCase();
 
-            // Intercept Google main searches to automatically inject &udm=14 (Web Clean Mode)
-            if (blockAiOverviewsActive && details.type === "main_frame" && host.includes("google.") && urlObj.pathname.startsWith("/search")) {
-                if (!urlObj.searchParams.has("udm") && urlObj.searchParams.has("q")) {
-                    urlObj.searchParams.set("udm", "14");
-                    return { redirectUrl: urlObj.toString() };
-                }
-            }
-
             if (!adBlockingActive) {
                 return { cancel: false };
             }
 
-            // Direct Host match check
+            // 1. Direct Host match check
             let matched = isBlocked(host);
 
-            // Pattern heuristics for inline ad scripts/pixels
-            if (!matched) {
+            // 2. Comprehensive pattern heuristics for banner ads, tracker scripts, analytics, and error catchers (subresources only)
+            if (!matched && details.type !== "main_frame") {
                 if (fullUrl.includes("/ads.js") ||
                     fullUrl.includes("/adservice.") ||
-                    fullUrl.includes("/pagead/js/") ||
-                    fullUrl.includes("/google-analytics.com/analytics.js") ||
-                    fullUrl.includes("/gtag/js?id=") ||
+                    fullUrl.includes("/pagead/") ||
+                    fullUrl.includes("adsbygoogle") ||
+                    fullUrl.includes("/gpt.js") ||
+                    fullUrl.includes("pubads_impl") ||
+                    fullUrl.includes("/google-analytics.com/") ||
+                    fullUrl.includes("/googletagmanager.com/") ||
+                    fullUrl.includes("analytics.js") ||
+                    fullUrl.includes("gtag/js") ||
+                    fullUrl.includes("/ga.js") ||
+                    fullUrl.includes("/fbevents.js") ||
+                    fullUrl.includes("/sentry.") ||
+                    fullUrl.includes("/sentry-") ||
+                    fullUrl.includes("sentry-cdn.com") ||
+                    fullUrl.includes("bundle.tracing") ||
+                    fullUrl.includes("bugsnag") ||
+                    fullUrl.includes("logrocket") ||
+                    fullUrl.includes("raygun") ||
+                    fullUrl.includes("hotjar") ||
+                    fullUrl.includes("clarity.ms") ||
+                    fullUrl.includes("matomo.js") ||
+                    fullUrl.includes("piwik.js") ||
+                    fullUrl.includes("/metrika/") ||
+                    fullUrl.includes("/mc.yandex.") ||
+                    fullUrl.includes("context.js") ||
+                    fullUrl.includes(".swf") ||
+                    fullUrl.includes("pr_advertising") ||
+                    fullUrl.includes("banner_300x250") ||
+                    fullUrl.includes("banner_728x90") ||
+                    fullUrl.includes("banner_160x600") ||
+                    fullUrl.includes("banner_468x60") ||
+                    fullUrl.includes("banner_320x50") ||
+                    fullUrl.includes("banner_300x600") ||
+                    fullUrl.includes("banner_970x250") ||
+                    fullUrl.includes("/banners/") ||
+                    fullUrl.includes("/banner_") ||
+                    fullUrl.includes("/banner-") ||
+                    fullUrl.includes("/ads/") ||
+                    fullUrl.includes("/ad_") ||
+                    fullUrl.includes("/ad-") ||
+                    fullUrl.includes("_ad_") ||
+                    fullUrl.includes("_ads_") ||
+                    fullUrl.includes("/advert") ||
+                    fullUrl.includes("/popunder") ||
+                    fullUrl.includes("/clickunder") ||
+                    fullUrl.includes("popup.js") ||
+                    fullUrl.includes("/pixel") ||
+                    fullUrl.includes("/tr?") ||
                     fullUrl.includes("ad_type=") ||
                     fullUrl.includes("/ad_status.") ||
-                    fullUrl.includes("/popunder.") ||
-                    fullUrl.includes("popup.js")) {
+                    fullUrl.includes("/showads.")) {
                     matched = true;
                 }
             }
 
             if (matched) {
-                blockedStats.totalBlocked++;
-                blockedStats.sessionBlocked++;
-
-                const tabId = details.tabId;
-                if (tabId !== undefined && tabId >= 0) {
-                    blockedStats.tabBlocked[tabId] = (blockedStats.tabBlocked[tabId] || 0) + 1;
-                }
-
-                // Notify native Kotlin app with blocked stats
-                notifyNative({
-                    action: "ad_blocked",
-                    url: details.url,
-                    domain: host,
-                    tabBlockedCount: tabId >= 0 ? blockedStats.tabBlocked[tabId] : 1,
-                    totalBlockedCount: blockedStats.totalBlocked
-                });
-
+                recordBlock(details, host);
                 return { cancel: true };
             }
         } catch (e) {}
@@ -202,7 +256,7 @@ if (browser.proxy && browser.proxy.onRequest) {
         (details) => {
             if (vpnConfig.enabled && vpnConfig.host && vpnConfig.port > 0) {
                 return {
-                    type: vpnConfig.type || "http",
+                    type: vpnConfig.type || "socks",
                     host: vpnConfig.host,
                     port: vpnConfig.port,
                     proxyDNS: true
@@ -254,7 +308,23 @@ function handleConfigUpdate(request) {
         vpnConfig.enabled = !!request.enabled;
         vpnConfig.host = request.host || "";
         vpnConfig.port = request.port || 0;
-        vpnConfig.type = request.type || "http";
+        vpnConfig.type = request.type || "socks";
+        vpnConfig.countryCode = request.countryCode || "US";
+
+        // Broadcast updated VPN country to all open tabs
+        if (browser.tabs && browser.tabs.query) {
+            browser.tabs.query({}).then((tabs) => {
+                for (const t of tabs) {
+                    if (t.id) {
+                        browser.tabs.sendMessage(t.id, {
+                            action: "update_vpn_country",
+                            countryCode: vpnConfig.countryCode,
+                            enabled: vpnConfig.enabled
+                        }).catch(() => {});
+                    }
+                }
+            }).catch(() => {});
+        }
     }
 }
 

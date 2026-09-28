@@ -151,7 +151,8 @@ fun SavedPasswordsSheet(
                     focusedBorderColor = AccentCyan,
                     unfocusedBorderColor = BorderSubtle,
                     focusedContainerColor = SurfaceElevated,
-                    unfocusedContainerColor = SurfaceElevated
+                    unfocusedContainerColor = SurfaceElevated,
+                    cursorColor = Color.White
                 ),
                 modifier = Modifier
                     .fillMaxWidth()
@@ -227,7 +228,8 @@ fun SavedPasswordsSheet(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
                             focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = BorderSubtle
+                            unfocusedBorderColor = BorderSubtle,
+                            cursorColor = Color.White
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -240,7 +242,8 @@ fun SavedPasswordsSheet(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
                             focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = BorderSubtle
+                            unfocusedBorderColor = BorderSubtle,
+                            cursorColor = Color.White
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
@@ -253,7 +256,8 @@ fun SavedPasswordsSheet(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
                             focusedBorderColor = AccentCyan,
-                            unfocusedBorderColor = BorderSubtle
+                            unfocusedBorderColor = BorderSubtle,
+                            cursorColor = Color.White
                         ),
                         modifier = Modifier.fillMaxWidth()
                     )
