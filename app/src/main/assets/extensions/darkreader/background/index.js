@@ -2768,8 +2768,8 @@
     ];
     const DEFAULT_SETTINGS = {
         schemeVersion: 0,
-        enabled: true,
-        fetchNews: true,
+        enabled: false,
+        fetchNews: false,
         theme: DEFAULT_THEME,
         presets: [],
         customThemes: filterModeSites.map((url) => {
@@ -2780,7 +2780,7 @@
                 builtIn: true
             };
         }),
-        enabledByDefault: true,
+        enabledByDefault: false,
         enabledFor: [],
         disabledFor: [],
         changeBrowserTheme: false,
@@ -7138,5 +7138,17 @@ Welcome to Dark Reader!`;
     chrome.runtime.onInstalled.addListener((details) => {
         writeInstallationVersion(chrome.storage.local, details);
         writeInstallationVersion(chrome.storage.sync, details);
+    });
+
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message && message.type === "SET_DARK_READER_ENABLED") {
+            try {
+                Extension.changeSettings({ enabled: !!message.enabled });
+                if (sendResponse) sendResponse({ success: true, enabled: !!message.enabled });
+            } catch (err) {
+                if (sendResponse) sendResponse({ success: false, error: String(err) });
+            }
+            return true;
+        }
     });
 })();

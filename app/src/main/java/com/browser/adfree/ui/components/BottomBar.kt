@@ -53,6 +53,7 @@ fun BottomBar(
     onShare: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenDownloads: () -> Unit,
+    onOpenSettings: () -> Unit,
     onOpenTabs: () -> Unit,
     onSwipeLeft: () -> Unit,
     onSwipeRight: () -> Unit,
@@ -203,7 +204,19 @@ fun BottomBar(
                 }
             }
 
-            // 5. Tabs Overview Button
+            // 6. Settings Button
+            IconButton(
+                onClick = onOpenSettings,
+                colors = IconButtonDefaults.iconButtonColors(contentColor = TextPrimary)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = "Settings",
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // 7. Tabs Overview Button
             IconButton(
                 onClick = onOpenTabs,
                 colors = IconButtonDefaults.iconButtonColors(contentColor = TextPrimary)

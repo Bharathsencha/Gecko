@@ -94,5 +94,17 @@ val AccentBlue: Color
     @ReadOnlyComposable
     get() = LocalBrowserColors.current.accent
 
+val IsDarkTheme: Boolean
+    @Composable
+    @ReadOnlyComposable
+    get() = LocalBrowserColors.current.isDark
+
+val SurfaceSelected: Color
+    @Composable
+    @ReadOnlyComposable
+    get() = if (LocalBrowserColors.current.isDark) LocalBrowserColors.current.surfaceCard else Color(0xFFE2E2E8)
+
 val DangerRed = Color(0xFFFF453A)
 val ShieldGreen = Color(0xFF30D158)
+val FlameOrange = Color(0xFFFF9500)
+

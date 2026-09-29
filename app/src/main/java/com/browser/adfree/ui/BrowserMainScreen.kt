@@ -20,26 +20,38 @@ package com.browser.adfree.ui
 import android.content.Context
 import android.content.Intent
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.*
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.runtime.*
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.material3.MaterialTheme
 import com.browser.adfree.download.BrowserDownloadManager
 import com.browser.adfree.model.ArticleData
 import com.browser.adfree.model.DownloadStatus
-import com.browser.adfree.model.SearchEngine
 import com.browser.adfree.storage.BrowserPreferencesRepository
 import com.browser.adfree.storage.FavoritesRepository
 import com.browser.adfree.storage.HistoryRepository
 import com.browser.adfree.storage.SecurePasswordRepository
 import com.browser.adfree.tabs.TabManager
 import com.browser.adfree.ui.components.*
-import com.browser.adfree.ui.theme.DarkBg
 import com.browser.adfree.vpn.FreeVpnManager
 import org.mozilla.geckoview.GeckoRuntime
+import org.mozilla.geckoview.StorageController
 
 @Composable
 fun BrowserMainScreen(
@@ -59,12 +71,14 @@ fun BrowserMainScreen(
     val context = LocalContext.current
     var showTabSwitcher by remember { mutableStateOf(false) }
     var showDownloadsSheet by remember { mutableStateOf(false) }
-    var showPageMenu by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showPasswordsSheet by remember { mutableStateOf(false) }
     var showHistoryPage by remember { mutableStateOf(false) }
     var showBookmarksPage by remember { mutableStateOf(false) }
     var showShieldsSheet by remember { mutableStateOf(false) }
+    var showFireWipeDialog by remember { mutableStateOf(false) }
+    var showFireAnimation by remember { mutableStateOf(false) }
+    var showClearDataSheet by remember { mutableStateOf(false) }
     var showDefaultPrompt by remember { mutableStateOf(!isAppDefaultBrowser(context) && !preferencesRepo.defaultBrowserPromptDismissed) }
 
     val defaultBrowserLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -138,8 +152,7 @@ fun BrowserMainScreen(
                     adBlockCount = activeTab?.adBlockCount ?: 0,
                     isReaderMode = activeTab?.isReaderMode ?: false,
                     isDarkWeb = activeTab?.isDarkWeb ?: false,
-                    onOpenPageMenu = { showPageMenu = true },
-                    onOpenSettings = { showSettingsSheet = true },
+                    onOpenFireWipe = { showFireWipeDialog = true },
                     onOpenHistory = { showHistoryPage = true },
                     onOpenShields = { showShieldsSheet = true },
                     onReload = {
@@ -215,7 +228,7 @@ fun BrowserMainScreen(
                 addressBarComposable()
             }
 
-            // 3. Bottom Bar with Page Progress & Horizontal Gestures
+            // 3. Bottom Bar with Page Progress, Quick Tools & Navigation
             BottomBar(
                 progress = activeTab?.progress ?: 0,
                 isLoading = activeTab?.isLoading ?: false,
@@ -237,6 +250,7 @@ fun BrowserMainScreen(
                 },
                 onOpenBookmarks = { showBookmarksPage = true },
                 onOpenDownloads = { showDownloadsSheet = true },
+                onOpenSettings = { showSettingsSheet = true },
                 onOpenTabs = { showTabSwitcher = true },
                 onSwipeLeft = { tabManager.nextTab() },
                 onSwipeRight = { tabManager.previousTab() }
@@ -277,28 +291,7 @@ fun BrowserMainScreen(
             )
         }
 
-        // Page Options Menu
-        if (showPageMenu && activeTab != null) {
-            SafariPageMenu(
-                tab = activeTab,
-                onZoomChange = { newZoom ->
-                    tabManager.setZoom(activeTab, newZoom)
-                },
-                onToggleReader = {
-                    showPageMenu = false
-                    triggerReaderModeExtraction(activeTab)
-                },
-                onToggleDarkWeb = {
-                    tabManager.toggleDarkWeb(activeTab)
-                },
-                onToggleDesktop = {
-                    tabManager.toggleDesktopMode(activeTab)
-                },
-                onDismissRequest = { showPageMenu = false }
-            )
-        }
-
-        // Browser Settings Sheet
+        // Browser Settings Sheet (Includes Active Web Page Tools & Fire Wipe)
         if (showSettingsSheet) {
             BrowserSettingsSheet(
                 preferencesRepo = preferencesRepo,
@@ -307,6 +300,22 @@ fun BrowserMainScreen(
                 tabManager = tabManager,
                 vpnManager = vpnManager,
                 runtime = runtime,
+                activeTab = activeTab,
+                onZoomChange = { newZoom ->
+                    activeTab?.let { tabManager.setZoom(it, newZoom) }
+                },
+                onToggleDarkWeb = {
+                    activeTab?.let { tabManager.toggleDarkWeb(it) }
+                },
+                onToggleReader = {
+                    activeTab?.let { triggerReaderModeExtraction(it) }
+                },
+                onToggleDesktop = {
+                    activeTab?.let { tabManager.toggleDesktopMode(it) }
+                },
+                onBurnAll = {
+                    showFireAnimation = true
+                },
                 onOpenPasswords = {
                     showSettingsSheet = false
                     showPasswordsSheet = true
@@ -318,6 +327,47 @@ fun BrowserMainScreen(
                 onDismissRequest = { showSettingsSheet = false }
             )
         }
+
+        // DuckDuckGo Fire Wipe Dialog Prompt
+        if (showFireWipeDialog) {
+            FireWipeDialog(
+                onBurnAll = {
+                    showFireWipeDialog = false
+                    showFireAnimation = true
+                },
+                onOpenCustomClear = {
+                    showFireWipeDialog = false
+                    showClearDataSheet = true
+                },
+                onDismissRequest = { showFireWipeDialog = false }
+            )
+        }
+
+        // Granular Clear Browsing Data Sheet
+        if (showClearDataSheet) {
+            ClearBrowsingDataSheet(
+                historyRepository = historyRepo,
+                runtime = runtime,
+                onDismissRequest = { showClearDataSheet = false }
+            )
+        }
+
+        // DuckDuckGo Full-Screen Fire Burn Animation Overlay
+        FireAnimationOverlay(
+            isPlaying = showFireAnimation,
+            onWipeTrigger = {
+                historyRepo.clearAll()
+                tabManager.sessionRepository.clearSession()
+                try {
+                    runtime.storageController.clearData(StorageController.ClearFlags.ALL)
+                } catch (e: Exception) {}
+                tabManager.closeAllTabs(runtime)
+                tabManager.createNewTab(runtime, "about:home")
+            },
+            onFinished = {
+                showFireAnimation = false
+            }
+        )
 
         // Insecure Connection Warning Dialog
         if (pendingInsecureHttpUrl != null) {

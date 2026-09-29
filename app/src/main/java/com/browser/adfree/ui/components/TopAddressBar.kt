@@ -67,8 +67,7 @@ fun TopAddressBar(
     adBlockCount: Int,
     isReaderMode: Boolean,
     isDarkWeb: Boolean,
-    onOpenPageMenu: () -> Unit,
-    onOpenSettings: () -> Unit,
+    onOpenFireWipe: () -> Unit,
     onOpenHistory: () -> Unit,
     onReload: () -> Unit,
     onOpenShields: () -> Unit = {},
@@ -158,26 +157,7 @@ fun TopAddressBar(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    // 1. Page Menu 'aA'
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(if (isReaderMode || isDarkWeb) AccentCyan.copy(alpha = 0.2f) else Color.Transparent)
-                            .clickable { onOpenPageMenu() }
-                            .padding(horizontal = 6.dp, vertical = 3.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = "aA",
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = if (isReaderMode || isDarkWeb) AccentCyan else TextPrimary
-                        )
-                    }
-
-                    Spacer(modifier = Modifier.width(6.dp))
-
-                    // 2. Shield / Lock / Search icon (Clicking opens Shields Quick Sheet)
+                    // Shield / Lock / Search icon (Clicking opens Shields Quick Sheet)
                     if (adBlockCount > 0) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -363,15 +343,15 @@ fun TopAddressBar(
                     onClick = {
                         keyboardController?.hide()
                         focusManager.clearFocus()
-                        onOpenSettings()
+                        onOpenFireWipe()
                     },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(19.dp)
+                        imageVector = Icons.Default.LocalFireDepartment,
+                        contentDescription = "Burn Data & Tabs",
+                        tint = Color(0xFFFF9500),
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }

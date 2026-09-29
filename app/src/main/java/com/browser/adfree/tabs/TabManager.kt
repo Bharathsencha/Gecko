@@ -141,12 +141,11 @@ class TabManager(private val context: Context) {
                         historyRepository?.addHistory(tab.title, tab.url)
                     }
                     if (tab.isDarkWeb) {
-                        val js = "if (typeof applyDarkWebMode === 'function') { applyDarkWebMode(true); }"
-                        session.loadUri("javascript:(function(){$js})();")
+                        injectDarkWebMode(tab, true)
                     }
                     if (tab.zoomLevel != 100) {
-                        val zoom = tab.zoomLevel
-                        val js = "if (typeof applyTextZoom === 'function') { applyTextZoom($zoom); } else { document.body.style.zoom = '${zoom / 100f}'; }"
+                        val factor = tab.zoomLevel / 100f
+                        val js = "try { document.documentElement.style.zoom = '$factor'; document.body.style.zoom = '$factor'; } catch(e) { document.body.style.transform = 'scale($factor)'; document.body.style.transformOrigin = '0 0'; }"
                         session.loadUri("javascript:(function(){$js})();")
                     }
                     saveSession()
@@ -441,23 +440,39 @@ class TabManager(private val context: Context) {
 
     fun setZoom(tab: TabModel, percent: Int) {
         tab.zoomLevel = percent
-        val js = "if (typeof applyTextZoom === 'function') { applyTextZoom($percent); } else { document.body.style.zoom = '${percent / 100f}'; }"
+        val factor = percent / 100f
+        val js = "try { document.documentElement.style.zoom = '$factor'; document.body.style.zoom = '$factor'; } catch(e) { document.body.style.transform = 'scale($factor)'; document.body.style.transformOrigin = '0 0'; }"
         tab.session.loadUri("javascript:(function(){$js})();")
         saveSession()
     }
 
-    fun toggleDarkWeb(tab: TabModel) {
-        tab.isDarkWeb = !tab.isDarkWeb
-        val enabled = tab.isDarkWeb
-        val js = "if (typeof applyDarkWebMode === 'function') { applyDarkWebMode($enabled); }"
+    fun injectDarkWebMode(tab: TabModel, enabled: Boolean) {
+        tab.isDarkWeb = enabled
+        val js = """
+            (function() {
+                var el = document.getElementById('gecko-dark-web-style');
+                if ($enabled) {
+                    if (!el) {
+                        el = document.createElement('style');
+                        el.id = 'gecko-dark-web-style';
+                        el.textContent = 'html { filter: invert(90%) hue-rotate(180deg) !important; background: #121212 !important; } img, video, canvas, svg, picture, iframe, [style*="background-image"] { filter: invert(100%) hue-rotate(180deg) !important; }';
+                        (document.head || document.documentElement).appendChild(el);
+                    }
+                } else {
+                    if (el) el.remove();
+                }
+            })();
+        """.trimIndent().replace("\n", " ")
         tab.session.loadUri("javascript:(function(){$js})();")
+    }
+
+    fun toggleDarkWeb(tab: TabModel) {
+        injectDarkWebMode(tab, !tab.isDarkWeb)
     }
 
     fun setDarkWebModeAll(enabled: Boolean) {
         for (tab in tabs) {
-            tab.isDarkWeb = enabled
-            val js = "if (typeof applyDarkWebMode === 'function') { applyDarkWebMode($enabled); }"
-            tab.session.loadUri("javascript:(function(){$js})();")
+            injectDarkWebMode(tab, enabled)
         }
     }
 

@@ -17,7 +17,17 @@
 
 package com.browser.adfree.ui.components
 
+import android.app.role.RoleManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+import android.util.Log
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -30,6 +40,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -39,26 +50,16 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import android.app.role.RoleManager
-import android.content.Context
-import android.content.Intent
-import android.content.pm.PackageManager
-import android.net.Uri
-import android.os.Build
-import android.provider.Settings
-import android.util.Log
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.browser.adfree.model.CookiePolicy
 import com.browser.adfree.model.SearchEngine
 import com.browser.adfree.model.StartupBehavior
+import com.browser.adfree.model.TabModel
 import com.browser.adfree.model.VpnCountry
 import com.browser.adfree.storage.AppAccentColor
 import com.browser.adfree.storage.AppThemeMode
@@ -77,24 +78,17 @@ enum class SettingsScreen {
 }
 
 fun isAppDefaultBrowser(context: Context): Boolean {
-    return try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = context.getSystemService(RoleManager::class.java)
-            if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER)) {
-                return roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)
-            }
-        }
-        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
-        val resolveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            context.packageManager.resolveActivity(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()))
-        } else {
-            @Suppress("DEPRECATION")
-            context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
-        }
-        resolveInfo?.activityInfo?.packageName == context.packageName
-    } catch (e: Exception) {
-        false
+    val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
+    val resolveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        context.packageManager.resolveActivity(
+            intent,
+            android.content.pm.PackageManager.ResolveInfoFlags.of(android.content.pm.PackageManager.MATCH_DEFAULT_ONLY.toLong())
+        )
+    } else {
+        @Suppress("DEPRECATION")
+        context.packageManager.resolveActivity(intent, android.content.pm.PackageManager.MATCH_DEFAULT_ONLY)
     }
+    return resolveInfo?.activityInfo?.packageName == context.packageName
 }
 
 fun requestSetDefaultBrowser(context: Context, launcher: ActivityResultLauncher<Intent>) {
@@ -132,6 +126,12 @@ fun BrowserSettingsSheet(
     tabManager: TabManager,
     vpnManager: FreeVpnManager,
     runtime: GeckoRuntime,
+    activeTab: TabModel? = null,
+    onZoomChange: (Int) -> Unit = {},
+    onToggleDarkWeb: () -> Unit = {},
+    onToggleReader: () -> Unit = {},
+    onToggleDesktop: () -> Unit = {},
+    onBurnAll: () -> Unit = {},
     onOpenPasswords: () -> Unit,
     onOpenHistory: () -> Unit,
     onDismissRequest: () -> Unit
@@ -185,6 +185,12 @@ fun BrowserSettingsSheet(
                         tabManager = tabManager,
                         vpnManager = vpnManager,
                         runtime = runtime,
+                        activeTab = activeTab,
+                        onZoomChange = onZoomChange,
+                        onToggleDarkWeb = onToggleDarkWeb,
+                        onToggleReader = onToggleReader,
+                        onToggleDesktop = onToggleDesktop,
+                        onBurnAll = onBurnAll,
                         onOpenVpnLocations = { currentScreen = SettingsScreen.VPN_LOCATIONS },
                         onOpenCustomization = { currentScreen = SettingsScreen.CUSTOMIZATION },
                         onOpenPasswords = onOpenPasswords,
@@ -230,6 +236,12 @@ private fun MainSettingsView(
     tabManager: TabManager,
     vpnManager: FreeVpnManager,
     runtime: GeckoRuntime,
+    activeTab: TabModel?,
+    onZoomChange: (Int) -> Unit,
+    onToggleDarkWeb: () -> Unit,
+    onToggleReader: () -> Unit,
+    onToggleDesktop: () -> Unit,
+    onBurnAll: () -> Unit,
     onOpenVpnLocations: () -> Unit,
     onOpenCustomization: () -> Unit,
     onOpenPasswords: () -> Unit,
@@ -264,15 +276,16 @@ private fun MainSettingsView(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .statusBarsPadding()
             .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        // Header
+        // Sticky/Safe Subview Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
+                .padding(horizontal = 4.dp, vertical = 6.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -300,6 +313,230 @@ private fun MainSettingsView(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Active Web Page Tools (when viewing an active website)
+        if (activeTab != null && activeTab.url.isNotBlank() && activeTab.url != "about:home") {
+            SettingsSectionHeader(title = "ACTIVE PAGE TOOLS")
+            SettingsCard {
+                // Zoom controls
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 11.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.ZoomIn,
+                            contentDescription = null,
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(
+                            text = "Page Zoom",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                    }
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(SurfaceCard)
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        IconButton(
+                            onClick = { if (activeTab.zoomLevel > 50) onZoomChange(activeTab.zoomLevel - 10) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Text("−", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        }
+
+                        Text(
+                            text = "${activeTab.zoomLevel}%",
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary,
+                            modifier = Modifier.padding(horizontal = 8.dp)
+                        )
+
+                        IconButton(
+                            onClick = { if (activeTab.zoomLevel < 200) onZoomChange(activeTab.zoomLevel + 10) },
+                            modifier = Modifier.size(30.dp)
+                        ) {
+                            Text("+", fontSize = 18.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+                        }
+                    }
+                }
+
+                Divider(color = BorderSubtle, thickness = 0.5.dp)
+
+                SettingsSwitchRow(
+                    title = "Force Dark Web",
+                    subtitle = "Convert bright web page to high-contrast dark theme",
+                    icon = Icons.Rounded.DarkMode,
+                    checked = activeTab.isDarkWeb,
+                    onCheckedChange = { onToggleDarkWeb() }
+                )
+
+                Divider(color = BorderSubtle, thickness = 0.5.dp)
+
+                SettingsSwitchRow(
+                    title = "Desktop Site",
+                    subtitle = "Request full desktop layout",
+                    icon = Icons.Rounded.DesktopWindows,
+                    checked = activeTab.isDesktopMode,
+                    onCheckedChange = { onToggleDesktop() }
+                )
+
+                Divider(color = BorderSubtle, thickness = 0.5.dp)
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            onClose()
+                            onToggleReader()
+                        }
+                        .padding(horizontal = 16.dp, vertical = 13.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.MenuBook,
+                            contentDescription = null,
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = if (activeTab.isReaderMode) "Exit Reader View" else "Reader View",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = TextPrimary
+                            )
+                            Text(
+                                text = "Distraction-free article reader mode",
+                                fontSize = 11.5.sp,
+                                color = TextSecondary
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.Rounded.ChevronRight,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+
+        // Prominent Fire Wipe & Quick Purge Card
+        SettingsSectionHeader(title = "FIRE WIPE & PRIVACY")
+        SettingsCard {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable {
+                        onClose()
+                        onBurnAll()
+                    }
+                    .padding(horizontal = 16.dp, vertical = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(FlameOrange.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocalFireDepartment,
+                            contentDescription = "Burn Data",
+                            tint = FlameOrange,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Burn Tabs & Clear Data",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Close all tabs & wipe history, cache and cookies",
+                            fontSize = 11.5.sp,
+                            color = TextSecondary
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = DangerRed
+                ) {
+                    Text(
+                        text = "Burn 🔥",
+                        color = Color.White,
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                    )
+                }
+            }
+
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenClearDialog() }
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Rounded.Tune,
+                        contentDescription = null,
+                        tint = TextSecondary,
+                        modifier = Modifier.size(19.dp)
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Text(
+                        text = "Customize Data to Clear...",
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = TextPrimary
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Rounded.ChevronRight,
+                    contentDescription = null,
+                    tint = TextSecondary,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+
         // Default Browser Action Card
         if (!isDefault) {
             Box(
@@ -307,7 +544,7 @@ private fun MainSettingsView(
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(18.dp))
                     .background(currentAccent.copy(alpha = 0.12f))
-                    .border(1.dp, currentAccent.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                    .border(1.dp, currentAccent.copy(alpha = 0.45f), RoundedCornerShape(18.dp))
                     .clickable { requestSetDefaultBrowser(context, defaultBrowserLauncher) }
                     .padding(14.dp)
             ) {
@@ -364,56 +601,10 @@ private fun MainSettingsView(
                     }
                 }
             }
-            Spacer(modifier = Modifier.height(14.dp))
-        } else {
-            SettingsCard {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Rounded.CheckCircle,
-                            contentDescription = null,
-                            tint = Color(0xFF34C759),
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Default Web Browser",
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = TextPrimary
-                            )
-                            Text(
-                                text = "Gecko opens external web links",
-                                fontSize = 11.5.sp,
-                                color = TextSecondary
-                            )
-                        }
-                    }
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = ShieldGreen.copy(alpha = 0.2f)
-                    ) {
-                        Text(
-                            text = "Active ✓",
-                            color = ShieldGreen,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        )
-                    }
-                }
-            }
-            Spacer(modifier = Modifier.height(14.dp))
+            Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Section: Appearance & Customization Suite
+        // Section: Appearance & Customization
         SettingsSectionHeader(title = "APPEARANCE & THEME")
         SettingsCard {
             Column(modifier = Modifier.padding(14.dp)) {
@@ -421,7 +612,7 @@ private fun MainSettingsView(
                     text = "App Theme Mode",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -431,7 +622,7 @@ private fun MainSettingsView(
                         .fillMaxWidth()
                         .height(38.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF141416))
+                        .background(SurfaceCard)
                         .padding(3.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -439,11 +630,11 @@ private fun MainSettingsView(
                     val isSystem = preferencesRepo.themeMode == AppThemeMode.SYSTEM
                     val isDark = !isLight && !isSystem
 
-                    listOf(
+                    for ((label, isSelected, targetMode) in listOf(
                         Triple("Light", isLight, AppThemeMode.LIGHT),
                         Triple("Dark", isDark, AppThemeMode.DARK_OLED),
                         Triple("System", isSystem, AppThemeMode.SYSTEM)
-                    ).forEach { (label, isSelected, targetMode) ->
+                    )) {
                         Box(
                             modifier = Modifier
                                 .weight(1f)
@@ -468,16 +659,16 @@ private fun MainSettingsView(
                                 text = label,
                                 fontSize = 12.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) (if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White) else Color(0xFF8E8E93)
+                                color = if (isSelected) (if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White) else TextSecondary
                             )
                         }
                     }
                 }
             }
 
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
 
-            // Personalization Suite Subview Link
+            // Personalization Subview Link
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -504,15 +695,15 @@ private fun MainSettingsView(
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
                         Text(
-                            text = "Personalization & Theme Suite",
+                            text = "Personalization & Theme",
                             fontSize = 14.5.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White
+                            color = TextPrimary
                         )
                         Text(
                             text = "${preferencesRepo.themeMode.displayName} • ${preferencesRepo.accentColor.displayName}",
                             fontSize = 11.5.sp,
-                            color = Color(0xFF8E8E93)
+                            color = TextSecondary
                         )
                     }
                 }
@@ -528,7 +719,7 @@ private fun MainSettingsView(
                     Icon(
                         imageVector = Icons.Rounded.ChevronRight,
                         contentDescription = null,
-                        tint = Color(0xFF8E8E93),
+                        tint = TextSecondary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -550,7 +741,7 @@ private fun MainSettingsView(
                 }
             )
 
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
 
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -571,12 +762,12 @@ private fun MainSettingsView(
                             text = vpnManager.selectedCountry.name,
                             fontSize = 14.5.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = Color.White
+                            color = TextPrimary
                         )
                         Text(
                             text = vpnManager.selectedCountry.city,
                             fontSize = 11.5.sp,
-                            color = Color(0xFF8E8E93)
+                            color = TextSecondary
                         )
                     }
                 }
@@ -585,11 +776,11 @@ private fun MainSettingsView(
                     val ping = vpnManager.getPingForCountry(vpnManager.selectedCountry.code)
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = if (vpnManager.isEnabled) Color(0xFF1A3320) else Color(0xFF2C2C2E)
+                        color = if (vpnManager.isEnabled) ShieldGreen.copy(alpha = 0.15f) else SurfaceCard
                     ) {
                         Text(
                             text = if (vpnManager.isEnabled) "$ping ms" else "10 Locations",
-                            color = if (vpnManager.isEnabled) Color(0xFF34C759) else Color(0xFF8E8E93),
+                            color = if (vpnManager.isEnabled) ShieldGreen else TextSecondary,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
@@ -599,7 +790,7 @@ private fun MainSettingsView(
                     Icon(
                         imageVector = Icons.Rounded.ChevronRight,
                         contentDescription = null,
-                        tint = Color(0xFF8E8E93),
+                        tint = TextSecondary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -616,7 +807,7 @@ private fun MainSettingsView(
                     text = "Cookie Policy",
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -626,11 +817,11 @@ private fun MainSettingsView(
                         .fillMaxWidth()
                         .height(40.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF141416))
+                        .background(SurfaceCard)
                         .padding(3.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    CookiePolicy.values().forEach { policy ->
+                    for (policy in CookiePolicy.values()) {
                         val isSelected = preferencesRepo.cookiePolicy == policy
                         val label = when (policy) {
                             CookiePolicy.ACCEPT_NON_TRACKERS -> "Non-Trackers"
@@ -643,7 +834,7 @@ private fun MainSettingsView(
                                 .weight(1f)
                                 .fillMaxHeight()
                                 .clip(RoundedCornerShape(8.dp))
-                                .background(if (isSelected) Color(0xFF007AFF) else Color.Transparent)
+                                .background(if (isSelected) currentAccent else Color.Transparent)
                                 .clickable {
                                     preferencesRepo.setCookiePolicyPreference(policy)
                                     try {
@@ -656,7 +847,7 @@ private fun MainSettingsView(
                                 text = label,
                                 fontSize = 12.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.White else Color(0xFF8E8E93)
+                                color = if (isSelected) (if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White) else TextSecondary
                             )
                         }
                     }
@@ -671,7 +862,7 @@ private fun MainSettingsView(
                         CookiePolicy.REJECT_ALL -> "Highest privacy shield. Blocks all persistent cookies."
                     },
                     fontSize = 11.5.sp,
-                    color = Color(0xFF8E8E93),
+                    color = TextSecondary,
                     lineHeight = 15.sp
                 )
             }
@@ -692,7 +883,7 @@ private fun MainSettingsView(
                     tabManager.updateAdBlocking(it)
                 }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             SettingsSwitchRow(
                 title = "Consent Banner Eradicator",
                 subtitle = "Auto-dismiss GDPR and cookie popups",
@@ -703,7 +894,7 @@ private fun MainSettingsView(
                     tabManager.updateCosmeticBlocking(it)
                 }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             SettingsSwitchRow(
                 title = "Block Google AI Overviews",
                 subtitle = "Clean search results without AI clutter",
@@ -713,7 +904,7 @@ private fun MainSettingsView(
                     preferencesRepo.setBlockAiOverviewsPreference(it)
                 }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             SettingsSwitchRow(
                 title = "HTTPS-Only Mode",
                 subtitle = "Warn on unencrypted HTTP connections",
@@ -723,7 +914,7 @@ private fun MainSettingsView(
                     preferencesRepo.setHttpsOnlyModePreference(it)
                 }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             SettingsSwitchRow(
                 title = "Dark Reader Dynamic Engine",
                 subtitle = "High-contrast OLED pitch-black theme",
@@ -748,7 +939,7 @@ private fun MainSettingsView(
                 checked = preferencesRepo.savePasswordsEnabled,
                 onCheckedChange = { preferencesRepo.setSavePasswordsPreference(it) }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             SettingsSwitchRow(
                 title = "Auto-fill Logins",
                 subtitle = "Fill saved credentials on login forms",
@@ -756,7 +947,7 @@ private fun MainSettingsView(
                 checked = preferencesRepo.autofillEnabled,
                 onCheckedChange = { preferencesRepo.setAutofillPreference(it) }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -769,7 +960,7 @@ private fun MainSettingsView(
                     Icon(
                         imageVector = Icons.Rounded.Password,
                         contentDescription = null,
-                        tint = Color(0xFF007AFF),
+                        tint = AccentCyan,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -777,20 +968,20 @@ private fun MainSettingsView(
                         text = "Manage Saved Passwords",
                         fontSize = 14.5.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White
+                        color = TextPrimary
                     )
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = "${passwordRepo.logins.size} saved",
                         fontSize = 12.sp,
-                        color = Color(0xFF8E8E93)
+                        color = TextSecondary
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Icon(
                         imageVector = Icons.Rounded.ChevronRight,
                         contentDescription = null,
-                        tint = Color(0xFF8E8E93),
+                        tint = TextSecondary,
                         modifier = Modifier.size(18.dp)
                     )
                 }
@@ -807,7 +998,7 @@ private fun MainSettingsView(
                     text = "Startup Behavior",
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -816,16 +1007,16 @@ private fun MainSettingsView(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    StartupBehavior.values().forEach { behavior ->
+                    for (behavior in StartupBehavior.values()) {
                         val isSelected = preferencesRepo.startupBehavior == behavior
                         Box(
                             modifier = Modifier
                                 .weight(1f)
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) Color(0xFF162536) else Color(0xFF141416))
+                                .background(if (isSelected) currentAccent.copy(alpha = 0.15f) else SurfaceCard)
                                 .border(
                                     width = 1.dp,
-                                    color = if (isSelected) Color(0xFF007AFF) else Color(0xFF2C2C2E),
+                                    color = if (isSelected) currentAccent else BorderSubtle,
                                     shape = RoundedCornerShape(12.dp)
                                 )
                                 .clickable { preferencesRepo.setStartupBehaviorPreference(behavior) }
@@ -841,13 +1032,13 @@ private fun MainSettingsView(
                                         text = if (behavior == StartupBehavior.NEW_TAB) "Start Page" else "Resume",
                                         fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isSelected) Color.White else Color(0xFF8E8E93)
+                                        color = if (isSelected) TextPrimary else TextSecondary
                                     )
                                     if (isSelected) {
                                         Icon(
                                             imageVector = Icons.Rounded.Check,
                                             contentDescription = null,
-                                            tint = Color(0xFF007AFF),
+                                            tint = currentAccent,
                                             modifier = Modifier.size(16.dp)
                                         )
                                     }
@@ -856,7 +1047,7 @@ private fun MainSettingsView(
                                 Text(
                                     text = if (behavior == StartupBehavior.NEW_TAB) "Fresh home page" else "Restore all tabs",
                                     fontSize = 11.sp,
-                                    color = Color(0xFF8E8E93),
+                                    color = TextSecondary,
                                     lineHeight = 14.sp
                                 )
                             }
@@ -865,28 +1056,28 @@ private fun MainSettingsView(
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
-                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+                Divider(color = BorderSubtle, thickness = 0.5.dp)
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
                     text = "Default Search Engine",
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SearchEngine.values().forEach { engine ->
+                    for (engine in SearchEngine.values()) {
                         val isSelected = preferencesRepo.searchEngine == engine
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(10.dp))
-                                .background(if (isSelected) Color(0xFF162536) else Color(0xFF141416))
+                                .background(if (isSelected) currentAccent.copy(alpha = 0.15f) else SurfaceCard)
                                 .border(
                                     width = 1.dp,
-                                    color = if (isSelected) Color(0xFF007AFF) else Color(0xFF2C2C2E),
+                                    color = if (isSelected) currentAccent else BorderSubtle,
                                     shape = RoundedCornerShape(10.dp)
                                 )
                                 .clickable { preferencesRepo.setSearchEnginePreference(engine) }
@@ -898,13 +1089,13 @@ private fun MainSettingsView(
                                 text = engine.title,
                                 fontSize = 14.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) Color.White else Color(0xFF8E8E93)
+                                color = if (isSelected) TextPrimary else TextSecondary
                             )
                             if (isSelected) {
                                 Icon(
                                     imageVector = Icons.Rounded.Check,
                                     contentDescription = "Selected",
-                                    tint = Color(0xFF007AFF),
+                                    tint = currentAccent,
                                     modifier = Modifier.size(18.dp)
                                 )
                             }
@@ -926,7 +1117,7 @@ private fun MainSettingsView(
                 checked = preferencesRepo.wipeOnExit,
                 onCheckedChange = { preferencesRepo.setWipeOnExitPreference(it) }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -939,7 +1130,7 @@ private fun MainSettingsView(
                     Icon(
                         imageVector = Icons.Rounded.History,
                         contentDescription = null,
-                        tint = Color(0xFF007AFF),
+                        tint = AccentCyan,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -947,17 +1138,17 @@ private fun MainSettingsView(
                         text = "View Browsing History",
                         fontSize = 14.5.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White
+                        color = TextPrimary
                     )
                 }
                 Icon(
                     imageVector = Icons.Rounded.ChevronRight,
                     contentDescription = null,
-                    tint = Color(0xFF8E8E93),
+                    tint = TextSecondary,
                     modifier = Modifier.size(18.dp)
                 )
             }
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier
@@ -991,23 +1182,23 @@ private fun MainSettingsView(
                     text = "Gecko",
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
                     text = "Version 1.0.0 (Release) • arm64-v8a",
                     fontSize = 11.5.sp,
-                    color = Color(0xFF8E8E93)
+                    color = TextSecondary
                 )
                 Text(
                     text = "Mozilla GeckoView 122 + Dark Reader + Free VPN",
                     fontSize = 11.5.sp,
-                    color = Color(0xFF8E8E93)
+                    color = TextSecondary
                 )
                 Text(
                     text = "GNU General Public License v3.0 (GPLv3)",
                     fontSize = 11.5.sp,
-                    color = Color(0xFF8E8E93)
+                    color = TextSecondary
                 )
             }
         }
@@ -1029,6 +1220,7 @@ private fun VpnLocationsSubView(
     Column(
         modifier = Modifier
             .fillMaxWidth()
+            .statusBarsPadding()
             .navigationBarsPadding()
             .padding(horizontal = 16.dp, vertical = 6.dp)
     ) {
@@ -1048,12 +1240,12 @@ private fun VpnLocationsSubView(
                     onClick = onBack,
                     modifier = Modifier
                         .size(32.dp)
-                        .background(Color(0xFF2C2C2E), CircleShape)
+                        .background(SurfaceElevated, CircleShape)
                 ) {
                     Icon(
                         imageVector = Icons.Rounded.ArrowBack,
                         contentDescription = "Back to Settings",
-                        tint = Color.White,
+                        tint = TextPrimary,
                         modifier = Modifier.size(17.dp)
                     )
                 }
@@ -1065,12 +1257,12 @@ private fun VpnLocationsSubView(
                         text = "VPN Locations",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = TextPrimary
                     )
                     Text(
                         text = "10 Encrypted Free Relays",
                         fontSize = 11.5.sp,
-                        color = Color(0xFF8E8E93)
+                        color = TextSecondary
                     )
                 }
             }
@@ -1079,12 +1271,12 @@ private fun VpnLocationsSubView(
                 onClick = { vpnManager.refreshPings() },
                 modifier = Modifier
                     .size(32.dp)
-                    .background(Color(0xFF2C2C2E), CircleShape)
+                    .background(SurfaceElevated, CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Refresh,
                     contentDescription = "Refresh Ping",
-                    tint = Color(0xFF8E8E93),
+                    tint = TextSecondary,
                     modifier = Modifier.size(17.dp)
                 )
             }
@@ -1107,10 +1299,10 @@ private fun VpnLocationsSubView(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(if (isSelected) Color(0xFF1C2A20) else Color(0xFF1C1C1E))
+                        .background(if (isSelected) AccentCyan.copy(alpha = 0.15f) else SurfaceElevated)
                         .border(
                             width = 1.dp,
-                            color = if (isSelected) Color(0xFF34C759) else Color(0xFF2C2C2E),
+                            color = if (isSelected) AccentCyan else BorderSubtle,
                             shape = RoundedCornerShape(16.dp)
                         )
                         .clickable { onSelectCountry(country) }
@@ -1127,13 +1319,13 @@ private fun VpnLocationsSubView(
                         Column {
                             Text(
                                 text = country.name,
-                                color = Color.White,
+                                color = TextPrimary,
                                 fontSize = 15.sp,
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
                                 text = country.city,
-                                color = Color(0xFF8E8E93),
+                                color = TextSecondary,
                                 fontSize = 12.sp
                             )
                         }
@@ -1142,11 +1334,11 @@ private fun VpnLocationsSubView(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
                             shape = RoundedCornerShape(8.dp),
-                            color = if (pingMs < 100) Color(0xFF1A3320) else Color(0xFF332B1A)
+                            color = if (pingMs < 100) ShieldGreen.copy(alpha = 0.15f) else SurfaceCard
                         ) {
                             Text(
                                 text = "$pingMs ms",
-                                color = if (pingMs < 100) Color(0xFF34C759) else Color(0xFFFF9F0A),
+                                color = if (pingMs < 100) ShieldGreen else FlameOrange,
                                 fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
@@ -1158,7 +1350,7 @@ private fun VpnLocationsSubView(
                             Icon(
                                 imageVector = Icons.Rounded.Check,
                                 contentDescription = "Selected",
-                                tint = Color(0xFF34C759),
+                                tint = AccentCyan,
                                 modifier = Modifier.size(19.dp)
                             )
                         }
@@ -1177,7 +1369,7 @@ fun SettingsSectionHeader(title: String) {
         text = title,
         fontSize = 11.sp,
         fontWeight = FontWeight.Bold,
-        color = Color(0xFF007AFF),
+        color = AccentCyan,
         modifier = Modifier.padding(start = 4.dp, bottom = 6.dp)
     )
 }
@@ -1188,8 +1380,8 @@ fun SettingsCard(content: @Composable ColumnScope.() -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
-            .background(Color(0xFF1C1C1E))
-            .border(1.dp, Color(0xFF2C2C2E), RoundedCornerShape(18.dp)),
+            .background(SurfaceElevated)
+            .border(1.dp, BorderSubtle, RoundedCornerShape(18.dp)),
         content = content
     )
 }
@@ -1216,7 +1408,7 @@ fun SettingsSwitchRow(
             Icon(
                 imageVector = icon,
                 contentDescription = null,
-                tint = if (checked) Color(0xFF007AFF) else Color(0xFF8E8E93),
+                tint = if (checked) AccentCyan else TextSecondary,
                 modifier = Modifier.size(20.dp)
             )
             Spacer(modifier = Modifier.width(12.dp))
@@ -1225,12 +1417,12 @@ fun SettingsSwitchRow(
                     text = title,
                     fontSize = 14.5.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Text(
                     text = subtitle,
                     fontSize = 11.5.sp,
-                    color = Color(0xFF8E8E93)
+                    color = TextSecondary
                 )
             }
         }
@@ -1239,9 +1431,10 @@ fun SettingsSwitchRow(
             onCheckedChange = onCheckedChange,
             colors = SwitchDefaults.colors(
                 checkedThumbColor = Color.White,
-                checkedTrackColor = Color(0xFF007AFF),
-                uncheckedTrackColor = Color(0xFF2C2C2E),
-                uncheckedThumbColor = Color(0xFF8E8E93)
+                checkedTrackColor = AccentCyan,
+                uncheckedThumbColor = Color.White,
+                uncheckedTrackColor = SurfaceCard,
+                uncheckedBorderColor = BorderSubtle
             )
         )
     }

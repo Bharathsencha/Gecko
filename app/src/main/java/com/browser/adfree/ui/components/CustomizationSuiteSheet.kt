@@ -80,6 +80,7 @@ fun CustomizationSuiteSubView(
     Column(
         modifier = modifier
             .fillMaxWidth()
+            .statusBarsPadding()
             .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 4.dp)
@@ -88,7 +89,7 @@ fun CustomizationSuiteSubView(
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(top = 2.dp, bottom = 10.dp),
+                .padding(top = 4.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             IconButton(
@@ -109,7 +110,7 @@ fun CustomizationSuiteSubView(
 
             Column {
                 Text(
-                    text = "Personalization Suite",
+                    text = "Personalization & Appearance",
                     fontSize = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = TextPrimary
@@ -630,15 +631,21 @@ fun saveCustomWallpaper(context: Context, uri: Uri): String? {
     }
 }
 
+@Composable
 private fun getWallpaperPreviewBrush(wp: HomepageWallpaper): Brush {
+    val isDark = LocalBrowserColors.current.isDark
     return when (wp) {
-        HomepageWallpaper.DEFAULT -> Brush.radialGradient(listOf(Color(0xFF1B2A4A), Color(0xFF0D1525), Color(0xFF000000)))
+        HomepageWallpaper.DEFAULT -> if (isDark) {
+            Brush.radialGradient(listOf(Color(0xFF1B2A4A), Color(0xFF0D1525), Color(0xFF000000)))
+        } else {
+            Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF2F2F7), Color(0xFFE5E5EA)))
+        }
         HomepageWallpaper.AURORA -> Brush.linearGradient(listOf(Color(0xFF031024), Color(0xFF0A2E38), Color(0xFF041E24), Color(0xFF020912)))
         HomepageWallpaper.NEBULA -> Brush.radialGradient(listOf(Color(0xFF2A0845), Color(0xFF14052B), Color(0xFF000000)))
         HomepageWallpaper.CYBER -> Brush.linearGradient(listOf(Color(0xFF0D0221), Color(0xFF0F084B), Color(0xFF26408B), Color(0xFF000000)))
         HomepageWallpaper.OLED -> Brush.linearGradient(listOf(Color(0xFF000000), Color(0xFF000000)))
         HomepageWallpaper.FOREST -> Brush.linearGradient(listOf(Color(0xFF061A14), Color(0xFF0D2818), Color(0xFF040F0A), Color(0xFF000000)))
         HomepageWallpaper.SUNSET -> Brush.linearGradient(listOf(Color(0xFF2D0B00), Color(0xFF4A1500), Color(0xFF1A0500), Color(0xFF000000)))
-        HomepageWallpaper.CUSTOM -> Brush.linearGradient(listOf(Color(0xFF2C2C2E), Color(0xFF1C1C1E)))
+        HomepageWallpaper.CUSTOM -> Brush.linearGradient(listOf(SurfaceElevated, DarkBg))
     }
 }

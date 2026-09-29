@@ -70,6 +70,15 @@ fun SafariHomePage(
     var isEditMode by remember { mutableStateOf(false) }
     var showAddSheet by remember { mutableStateOf(false) }
     val currentAccent = Color(preferencesRepo.accentColor.hex)
+    val isEffectiveDark = LocalBrowserColors.current.isDark
+
+    val isWallpaperDark = when (preferencesRepo.homepageWallpaper) {
+        HomepageWallpaper.DEFAULT -> isEffectiveDark
+        else -> true // Presets (Aurora, Nebula, Cyber, Forest, Sunset, OLED) and custom photos are dark
+    }
+
+    val homeTextColor = if (isWallpaperDark) Color.White else TextPrimary
+    val homeSecondaryTextColor = if (isWallpaperDark) Color.White.copy(alpha = 0.75f) else TextSecondary
 
     Box(modifier = modifier.fillMaxSize()) {
         // 1. Wallpaper Background Layer (Supports animated GIFs, PNG, JPG, WebP & Presets)
@@ -160,13 +169,13 @@ fun SafariHomePage(
                 text = "Gecko",
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
-                color = TextPrimary
+                color = homeTextColor
             )
 
             Text(
                 text = "Ultra-Fast • Zero Ads • Complete Privacy",
                 fontSize = 13.sp,
-                color = TextSecondary,
+                color = homeSecondaryTextColor,
                 textAlign = TextAlign.Center
             )
 
@@ -178,7 +187,7 @@ fun SafariHomePage(
                     modifier = Modifier
                         .fillMaxWidth()
                         .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceElevated.copy(alpha = 0.88f))
+                        .background(SurfaceElevated.copy(alpha = if (isWallpaperDark) 0.88f else 0.95f))
                         .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
                         .padding(16.dp)
                 ) {
@@ -231,14 +240,14 @@ fun SafariHomePage(
                         text = "Favorites",
                         fontSize = 18.sp,
                         fontWeight = FontWeight.Bold,
-                        color = TextPrimary
+                        color = homeTextColor
                     )
 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         TextButton(
                             onClick = { isEditMode = !isEditMode },
                             colors = ButtonDefaults.textButtonColors(
-                                contentColor = if (isEditMode) currentAccent else TextSecondary
+                                contentColor = if (isEditMode) currentAccent else homeSecondaryTextColor
                             )
                         ) {
                             Text(
@@ -271,6 +280,7 @@ fun SafariHomePage(
                                     FavoriteCard(
                                         fav = fav,
                                         isEditMode = isEditMode,
+                                        textColor = homeTextColor,
                                         onClick = {
                                             if (!isEditMode) onNavigate(fav.url)
                                         },
@@ -364,6 +374,7 @@ private fun getHomeWallpaperBrush(wp: HomepageWallpaper): Brush {
 fun FavoriteCard(
     fav: FavoriteItem,
     isEditMode: Boolean,
+    textColor: Color = TextPrimary,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
     onDelete: () -> Unit
@@ -449,7 +460,7 @@ fun FavoriteCard(
             text = fav.title,
             fontSize = 11.sp,
             fontWeight = FontWeight.Medium,
-            color = TextPrimary,
+            color = textColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center
