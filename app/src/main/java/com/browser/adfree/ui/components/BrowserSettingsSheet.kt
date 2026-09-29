@@ -145,13 +145,7 @@ fun BrowserSettingsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     ModalBottomSheet(
-        onDismissRequest = {
-            if (currentScreen != SettingsScreen.MAIN) {
-                currentScreen = SettingsScreen.MAIN
-            } else {
-                onDismissRequest()
-            }
-        },
+        onDismissRequest = onDismissRequest,
         sheetState = sheetState,
         containerColor = DarkBg,
         dragHandle = {
@@ -225,6 +219,7 @@ fun BrowserSettingsSheet(
     if (showClearDialog) {
         ClearBrowsingDataSheet(
             historyRepository = historyRepo,
+            tabManager = tabManager,
             runtime = runtime,
             onDismissRequest = { showClearDialog = false }
         )

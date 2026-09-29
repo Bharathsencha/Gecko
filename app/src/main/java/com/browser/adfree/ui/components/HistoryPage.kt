@@ -49,10 +49,12 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 import org.mozilla.geckoview.GeckoRuntime
+import com.browser.adfree.tabs.TabManager
 
 @Composable
 fun HistoryPage(
     historyRepository: HistoryRepository,
+    tabManager: TabManager,
     runtime: GeckoRuntime,
     onNavigate: (String) -> Unit,
     onClose: () -> Unit,
@@ -294,6 +296,7 @@ fun HistoryPage(
     if (showClearSheet) {
         ClearBrowsingDataSheet(
             historyRepository = historyRepository,
+            tabManager = tabManager,
             runtime = runtime,
             onDismissRequest = { showClearSheet = false }
         )

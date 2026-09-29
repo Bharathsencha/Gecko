@@ -132,6 +132,15 @@ fun BrowserMainScreen(
         showBookmarksPage = false
     }
 
+    val hasModalOpen = showSettingsSheet || showHistoryPage || showBookmarksPage || showTabSwitcher || showDownloadsSheet || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
+    BackHandler(enabled = !hasModalOpen && activeTab != null && (activeTab.canGoBack || activeTab.url != "about:home")) {
+        if (activeTab != null && activeTab.canGoBack) {
+            activeTab.session.goBack()
+        } else if (activeTab != null && activeTab.url != "about:home") {
+            tabManager.loadUri(activeTab, "about:home", runtime)
+        }
+    }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -261,6 +270,7 @@ fun BrowserMainScreen(
         if (showHistoryPage) {
             HistoryPage(
                 historyRepository = historyRepo,
+                tabManager = tabManager,
                 runtime = runtime,
                 onNavigate = { targetUrl ->
                     activeTab?.let { tab ->
@@ -329,8 +339,12 @@ fun BrowserMainScreen(
         if (showClearDataSheet) {
             ClearBrowsingDataSheet(
                 historyRepository = historyRepo,
+                tabManager = tabManager,
                 runtime = runtime,
-                onDismissRequest = { showClearDataSheet = false }
+                onDismissRequest = {
+                    showClearDataSheet = false
+                    urlText = tabManager.activeTab?.url ?: "about:home"
+                }
             )
         }
 

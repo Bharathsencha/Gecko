@@ -48,11 +48,13 @@ import java.text.SimpleDateFormat
 import java.util.*
 
 import org.mozilla.geckoview.GeckoRuntime
+import com.browser.adfree.tabs.TabManager
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun HistorySheet(
     historyRepository: HistoryRepository,
+    tabManager: TabManager,
     runtime: GeckoRuntime,
     onNavigate: (String) -> Unit,
     onDismissRequest: () -> Unit
@@ -205,6 +207,7 @@ fun HistorySheet(
     if (showClearDialog) {
         ClearBrowsingDataSheet(
             historyRepository = historyRepository,
+            tabManager = tabManager,
             runtime = runtime,
             onDismissRequest = { showClearDialog = false }
         )

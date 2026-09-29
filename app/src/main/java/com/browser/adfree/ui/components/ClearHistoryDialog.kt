@@ -43,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.browser.adfree.model.TimeframeWipe
 import com.browser.adfree.storage.HistoryRepository
+import com.browser.adfree.tabs.TabManager
 import com.browser.adfree.ui.theme.*
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.StorageController
@@ -51,6 +52,7 @@ import org.mozilla.geckoview.StorageController
 @Composable
 fun ClearBrowsingDataSheet(
     historyRepository: HistoryRepository,
+    tabManager: TabManager,
     runtime: GeckoRuntime,
     onDismissRequest: () -> Unit
 ) {
@@ -60,6 +62,7 @@ fun ClearBrowsingDataSheet(
     var clearHistoryChecked by remember { mutableStateOf(true) }
     var clearCookiesChecked by remember { mutableStateOf(true) }
     var clearCacheChecked by remember { mutableStateOf(true) }
+    var closeTabsChecked by remember { mutableStateOf(true) }
 
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
@@ -243,6 +246,16 @@ fun ClearBrowsingDataSheet(
                     checked = clearCacheChecked,
                     onCheckedChange = { clearCacheChecked = it }
                 )
+
+                Divider(color = BorderSubtle, thickness = 0.5.dp)
+
+                ClearDataCheckboxRow(
+                    title = "Close Open Tabs",
+                    subtitle = "${tabManager.tabs.size} open tabs will be closed",
+                    icon = Icons.Default.Tab,
+                    checked = closeTabsChecked,
+                    onCheckedChange = { closeTabsChecked = it }
+                )
             }
 
             Spacer(modifier = Modifier.height(28.dp))
@@ -253,15 +266,17 @@ fun ClearBrowsingDataSheet(
                     executeClearData(
                         context = context,
                         historyRepository = historyRepository,
+                        tabManager = tabManager,
                         runtime = runtime,
                         timeframe = selectedTimeframe,
                         clearHistory = clearHistoryChecked,
                         clearCookies = clearCookiesChecked,
-                        clearCache = clearCacheChecked
+                        clearCache = clearCacheChecked,
+                        closeTabs = closeTabsChecked
                     )
                     onDismissRequest()
                 },
-                enabled = clearHistoryChecked || clearCookiesChecked || clearCacheChecked,
+                enabled = clearHistoryChecked || clearCookiesChecked || clearCacheChecked || closeTabsChecked,
                 shape = RoundedCornerShape(14.dp),
                 colors = ButtonDefaults.buttonColors(
                     containerColor = DangerRed,
@@ -364,28 +379,38 @@ fun ClearDataCheckboxRow(
 private fun executeClearData(
     context: Context,
     historyRepository: HistoryRepository,
+    tabManager: TabManager,
     runtime: GeckoRuntime,
     timeframe: TimeframeWipe,
     clearHistory: Boolean,
     clearCookies: Boolean,
-    clearCache: Boolean
+    clearCache: Boolean,
+    closeTabs: Boolean
 ) {
     try {
         if (clearHistory) {
-            historyRepository.clearHistoryByTimeframe(timeframe)
+            if (timeframe == TimeframeWipe.ALL_TIME) {
+                historyRepository.clearAll()
+            } else {
+                historyRepository.clearHistoryByTimeframe(timeframe)
+            }
         }
 
         var flags = 0L
-        if (clearCookies) {
-            flags = flags or StorageController.ClearFlags.COOKIES or 
-                    StorageController.ClearFlags.DOM_STORAGES or 
-                    StorageController.ClearFlags.AUTH_SESSIONS or
-                    StorageController.ClearFlags.SITE_DATA
-        }
-        if (clearCache) {
-            flags = flags or StorageController.ClearFlags.NETWORK_CACHE or 
-                    StorageController.ClearFlags.IMAGE_CACHE or
-                    StorageController.ClearFlags.ALL_CACHES
+        if (timeframe == TimeframeWipe.ALL_TIME && (clearCookies || clearCache)) {
+            flags = StorageController.ClearFlags.ALL
+        } else {
+            if (clearCookies) {
+                flags = flags or StorageController.ClearFlags.COOKIES or 
+                        StorageController.ClearFlags.DOM_STORAGES or 
+                        StorageController.ClearFlags.AUTH_SESSIONS or
+                        StorageController.ClearFlags.SITE_DATA
+            }
+            if (clearCache) {
+                flags = flags or StorageController.ClearFlags.NETWORK_CACHE or 
+                        StorageController.ClearFlags.IMAGE_CACHE or
+                        StorageController.ClearFlags.ALL_CACHES
+            }
         }
 
         if (flags != 0L) {
@@ -403,13 +428,19 @@ private fun executeClearData(
             } catch (e: Exception) {}
         }
 
+        if (closeTabs) {
+            tabManager.closeAllTabs(runtime)
+            tabManager.sessionRepository.clearSession()
+        }
+
         val cleanedItems = mutableListOf<String>()
         if (clearHistory) cleanedItems.add("History")
         if (clearCookies) cleanedItems.add("Cookies")
         if (clearCache) cleanedItems.add("Cache")
+        if (closeTabs) cleanedItems.add("Tabs")
 
         val summary = if (cleanedItems.isNotEmpty()) cleanedItems.joinToString(", ") else "Data"
-        Toast.makeText(context, "Cleared $summary (${timeframe.title})", Toast.LENGTH_SHORT).show()
+        Toast.makeText(context, "Cleared $summary (${timeframe.title}) 🔥", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
         e.printStackTrace()
         Toast.makeText(context, "Data cleared successfully", Toast.LENGTH_SHORT).show()
