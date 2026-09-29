@@ -40,7 +40,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -131,7 +130,6 @@ fun BrowserSettingsSheet(
     onToggleDarkWeb: () -> Unit = {},
     onToggleReader: () -> Unit = {},
     onToggleDesktop: () -> Unit = {},
-    onBurnAll: () -> Unit = {},
     onOpenPasswords: () -> Unit,
     onOpenHistory: () -> Unit,
     onDismissRequest: () -> Unit
@@ -190,7 +188,6 @@ fun BrowserSettingsSheet(
                         onToggleDarkWeb = onToggleDarkWeb,
                         onToggleReader = onToggleReader,
                         onToggleDesktop = onToggleDesktop,
-                        onBurnAll = onBurnAll,
                         onOpenVpnLocations = { currentScreen = SettingsScreen.VPN_LOCATIONS },
                         onOpenCustomization = { currentScreen = SettingsScreen.CUSTOMIZATION },
                         onOpenPasswords = onOpenPasswords,
@@ -241,7 +238,6 @@ private fun MainSettingsView(
     onToggleDarkWeb: () -> Unit,
     onToggleReader: () -> Unit,
     onToggleDesktop: () -> Unit,
-    onBurnAll: () -> Unit,
     onOpenVpnLocations: () -> Unit,
     onOpenCustomization: () -> Unit,
     onOpenPasswords: () -> Unit,
@@ -439,92 +435,38 @@ private fun MainSettingsView(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Prominent Fire Wipe & Quick Purge Card
-        SettingsSectionHeader(title = "FIRE WIPE & PRIVACY")
+        // Browsing Data Card
+        SettingsSectionHeader(title = "BROWSING DATA")
         SettingsCard {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        onClose()
-                        onBurnAll()
-                    }
-                    .padding(horizontal = 16.dp, vertical = 13.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(FlameOrange.copy(alpha = 0.18f)),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.LocalFireDepartment,
-                            contentDescription = "Burn Data",
-                            tint = FlameOrange,
-                            modifier = Modifier.size(22.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Burn Tabs & Clear Data",
-                            fontSize = 14.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Close all tabs & wipe history, cache and cookies",
-                            fontSize = 11.5.sp,
-                            color = TextSecondary
-                        )
-                    }
-                }
-
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = DangerRed
-                ) {
-                    Text(
-                        text = "Burn 🔥",
-                        color = Color.White,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
-                    )
-                }
-            }
-
-            Divider(color = BorderSubtle, thickness = 0.5.dp)
-
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
                     .clickable { onOpenClearDialog() }
-                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Rounded.Tune,
+                        imageVector = Icons.Rounded.DeleteOutline,
                         contentDescription = null,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(19.dp)
+                        tint = DangerRed,
+                        modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "Customize Data to Clear...",
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = TextPrimary
-                    )
+                    Column {
+                        Text(
+                            text = "Clear Browsing Data",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Clear history, cookies, cache, and site data",
+                            fontSize = 11.5.sp,
+                            color = TextSecondary
+                        )
+                    }
                 }
                 Icon(
                     imageVector = Icons.Rounded.ChevronRight,
@@ -916,7 +858,7 @@ private fun MainSettingsView(
             )
             Divider(color = BorderSubtle, thickness = 0.5.dp)
             SettingsSwitchRow(
-                title = "Dark Reader Dynamic Engine",
+                title = "Night Mode for Web",
                 subtitle = "High-contrast OLED pitch-black theme",
                 icon = Icons.Rounded.DarkMode,
                 checked = preferencesRepo.darkWebDefault,
@@ -1186,17 +1128,12 @@ private fun MainSettingsView(
                 )
                 Spacer(modifier = Modifier.height(3.dp))
                 Text(
-                    text = "Version 1.0.0 (Release) • arm64-v8a",
+                    text = "Version 1.0.0 (Release)",
                     fontSize = 11.5.sp,
                     color = TextSecondary
                 )
                 Text(
-                    text = "Mozilla GeckoView 122 + Dark Reader + Free VPN",
-                    fontSize = 11.5.sp,
-                    color = TextSecondary
-                )
-                Text(
-                    text = "GNU General Public License v3.0 (GPLv3)",
+                    text = "Fast, private and customizable web browser",
                     fontSize = 11.5.sp,
                     color = TextSecondary
                 )

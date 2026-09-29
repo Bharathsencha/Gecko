@@ -67,9 +67,9 @@ fun TopAddressBar(
     adBlockCount: Int,
     isReaderMode: Boolean,
     isDarkWeb: Boolean,
-    onOpenFireWipe: () -> Unit,
-    onOpenHistory: () -> Unit,
-    onReload: () -> Unit,
+    onOpenHistory: () -> Unit = {},
+    onOpenSettings: () -> Unit = {},
+    onReload: () -> Unit = {},
     onOpenShields: () -> Unit = {},
     isBookmarked: Boolean = false,
     onToggleBookmark: () -> Unit = {},
@@ -157,6 +157,7 @@ fun TopAddressBar(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
+
                     // Shield / Lock / Search icon (Clicking opens Shields Quick Sheet)
                     if (adBlockCount > 0) {
                         Row(
@@ -343,15 +344,15 @@ fun TopAddressBar(
                     onClick = {
                         keyboardController?.hide()
                         focusManager.clearFocus()
-                        onOpenFireWipe()
+                        onOpenSettings()
                     },
                     modifier = Modifier.size(36.dp)
                 ) {
                     Icon(
-                        imageVector = Icons.Default.LocalFireDepartment,
-                        contentDescription = "Burn Data & Tabs",
-                        tint = Color(0xFFFF9500),
-                        modifier = Modifier.size(20.dp)
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        tint = TextPrimary,
+                        modifier = Modifier.size(19.dp)
                     )
                 }
             }

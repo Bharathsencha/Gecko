@@ -76,8 +76,6 @@ fun BrowserMainScreen(
     var showHistoryPage by remember { mutableStateOf(false) }
     var showBookmarksPage by remember { mutableStateOf(false) }
     var showShieldsSheet by remember { mutableStateOf(false) }
-    var showFireWipeDialog by remember { mutableStateOf(false) }
-    var showFireAnimation by remember { mutableStateOf(false) }
     var showClearDataSheet by remember { mutableStateOf(false) }
     var showDefaultPrompt by remember { mutableStateOf(!isAppDefaultBrowser(context) && !preferencesRepo.defaultBrowserPromptDismissed) }
 
@@ -152,8 +150,8 @@ fun BrowserMainScreen(
                     adBlockCount = activeTab?.adBlockCount ?: 0,
                     isReaderMode = activeTab?.isReaderMode ?: false,
                     isDarkWeb = activeTab?.isDarkWeb ?: false,
-                    onOpenFireWipe = { showFireWipeDialog = true },
                     onOpenHistory = { showHistoryPage = true },
+                    onOpenSettings = { showSettingsSheet = true },
                     onOpenShields = { showShieldsSheet = true },
                     onReload = {
                         activeTab?.session?.reload()
@@ -291,7 +289,7 @@ fun BrowserMainScreen(
             )
         }
 
-        // Browser Settings Sheet (Includes Active Web Page Tools & Fire Wipe)
+        // Browser Settings Sheet (Includes Active Web Page Tools)
         if (showSettingsSheet) {
             BrowserSettingsSheet(
                 preferencesRepo = preferencesRepo,
@@ -313,9 +311,6 @@ fun BrowserMainScreen(
                 onToggleDesktop = {
                     activeTab?.let { tabManager.toggleDesktopMode(it) }
                 },
-                onBurnAll = {
-                    showFireAnimation = true
-                },
                 onOpenPasswords = {
                     showSettingsSheet = false
                     showPasswordsSheet = true
@@ -328,21 +323,6 @@ fun BrowserMainScreen(
             )
         }
 
-        // DuckDuckGo Fire Wipe Dialog Prompt
-        if (showFireWipeDialog) {
-            FireWipeDialog(
-                onBurnAll = {
-                    showFireWipeDialog = false
-                    showFireAnimation = true
-                },
-                onOpenCustomClear = {
-                    showFireWipeDialog = false
-                    showClearDataSheet = true
-                },
-                onDismissRequest = { showFireWipeDialog = false }
-            )
-        }
-
         // Granular Clear Browsing Data Sheet
         if (showClearDataSheet) {
             ClearBrowsingDataSheet(
@@ -351,23 +331,6 @@ fun BrowserMainScreen(
                 onDismissRequest = { showClearDataSheet = false }
             )
         }
-
-        // DuckDuckGo Full-Screen Fire Burn Animation Overlay
-        FireAnimationOverlay(
-            isPlaying = showFireAnimation,
-            onWipeTrigger = {
-                historyRepo.clearAll()
-                tabManager.sessionRepository.clearSession()
-                try {
-                    runtime.storageController.clearData(StorageController.ClearFlags.ALL)
-                } catch (e: Exception) {}
-                tabManager.closeAllTabs(runtime)
-                tabManager.createNewTab(runtime, "about:home")
-            },
-            onFinished = {
-                showFireAnimation = false
-            }
-        )
 
         // Insecure Connection Warning Dialog
         if (pendingInsecureHttpUrl != null) {
