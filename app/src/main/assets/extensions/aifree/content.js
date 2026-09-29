@@ -3,7 +3,7 @@
  * Handles: Fast Cosmetic Ad-Hiding, Scriptlet Surrogates, Google AI Overview removal, Reader mode, SPA Scroll, Media
  */
 
-// ── 0. High-Speed Cosmetic Ad Hiding & Scriptlet Surrogates ─────────────────
+// Cosmetic Ad Hiding & Scriptlet Surrogates
 const COSMETIC_AD_SELECTORS = [
     ".adsbygoogle",
     "[id*='google_ads']",
@@ -104,7 +104,7 @@ function injectScriptletSurrogates() {
     } catch (e) {}
 }
 
-// ── 1. Google AI Overview Blocker ──────────────────────────────────────────
+// Google AI Overview Blocker
 const AI_OVERVIEW_SELECTORS = [
     "#Odp5De",
     "div[jsname='yDeuDf']",
@@ -172,7 +172,7 @@ function watchForGoogleAiOverview() {
     observer.observe(document.documentElement, { childList: true, subtree: true });
 }
 
-// ── 2. SPA Scroll Restoration Engine (YouTube, Twitter, Reddit, etc.) ──────
+// SPA Scroll Restoration Engine (YouTube, Twitter, Reddit, etc.)
 function initSpaScrollRestoration() {
     const scrollMap = new Map();
     let isRestoring = false;
@@ -249,7 +249,7 @@ function initSpaScrollRestoration() {
     });
 }
 
-// ── 3. Background Audio & Video Playback Engine ─────────────────────────────
+// Background Audio & Video Playback Engine
 function initBackgroundMediaPlayback() {
     try {
         const script = document.createElement('script');
@@ -265,7 +265,7 @@ function initBackgroundMediaPlayback() {
     } catch (e) {}
 }
 
-// ── 4. Reader Mode Article Extraction ──────────────────────────────────────
+// Reader Mode Article Extraction
 function extractArticleContent(doc) {
     try {
         const documentClone = doc.cloneNode(true);
@@ -324,7 +324,7 @@ function extractArticleContent(doc) {
     }
 }
 
-// ── 5. Client-Side Blob / Data URI Download Interceptor ──────────────────────
+// Client-Side Blob / Data URI Download Interceptor
 function initClientDownloadInterceptor() {
     async function handleDownloadElement(el) {
         try {
@@ -382,7 +382,7 @@ function initClientDownloadInterceptor() {
     }, true);
 }
 
-// ── 6. Web Share API Native Chooser Bridge ──────────────────────────────────
+// Web Share API Native Chooser Bridge
 function initWebShareBridge() {
     try {
         const script = document.createElement("script");
@@ -424,7 +424,7 @@ function initWebShareBridge() {
     } catch (e) {}
 }
 
-// ── 8. Universal Video & Media Sniffer Engine (Cat-Catch In-Browser Architecture) ──
+// Universal Video & Media Sniffer Engine (Cat-Catch In-Browser Architecture)
 function initUniversalMediaSniffer() {
     let lastScanTime = 0;
 
@@ -838,7 +838,7 @@ function initUniversalMediaSniffer() {
 }
 
 
-// ── 7. Init ────────────────────────────────────────────────────────────────
+// Init
 injectCosmeticAdBlockStyle();
 injectScriptletSurrogates();
 watchForGoogleAiOverview();

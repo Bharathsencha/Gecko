@@ -121,7 +121,7 @@ fun TopAddressBar(
 
     val showSuggestions = isFocused && textFieldValue.text.isNotEmpty() && historySuggestions.isNotEmpty()
 
-    // ── Main bar row (layout unchanged — no Column wrapper that would push WebView) ──
+    // Main bar row (layout unchanged — no Column wrapper that would push WebView)
     Box(modifier = modifier
         .fillMaxWidth()
         .onGloballyPositioned { coords ->
@@ -442,7 +442,7 @@ fun TopAddressBar(
             }
         }
 
-        // ── Autocomplete Popup — floats OVER the WebView, zero layout impact ──
+        // Autocomplete Popup — floats OVER the WebView, zero layout impact
         if (showSuggestions) {
             Popup(
                 alignment = Alignment.TopStart,

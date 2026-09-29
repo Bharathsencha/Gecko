@@ -594,6 +594,9 @@ class MainActivity : ComponentActivity() {
                                 )
                                 activeTab.detectedVideos.add(0, detected)
                             }
+                            if (isYouTube && (activeTab.detectedVideos.isEmpty() || activeTab.detectedVideos.firstOrNull()?.qualities?.none { it.resolution.contains("1080") || it.resolution.contains("720") } == true)) {
+                                tabManager.checkForVideos(activeTab, pageUrl)
+                            }
                             Log.i("VideoSniffer", "Updated detectedVideos on activeTab (${activeTab.detectedVideos.size} items)")
                         }
                     }
@@ -659,6 +662,9 @@ class MainActivity : ComponentActivity() {
                                     )
                                     activeTab.detectedVideos.add(0, detected)
                                     Log.i("VideoSniffer", "Created new DetectedVideo from media_detected: ${detected.title}")
+                                }
+                                if (isYouTube && activeTab.detectedVideos.firstOrNull()?.qualities?.none { it.resolution.contains("1080") || it.resolution.contains("720") } == true) {
+                                    tabManager.checkForVideos(activeTab, pageUrl)
                                 }
                             }
                         }

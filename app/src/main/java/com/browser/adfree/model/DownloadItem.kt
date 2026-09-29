@@ -25,6 +25,7 @@ import androidx.compose.runtime.setValue
 
 enum class DownloadStatus {
     DOWNLOADING,
+    PAUSED,
     COMPLETED,
     FAILED,
     CANCELLED
@@ -38,7 +39,10 @@ class DownloadItem(
     val destinationPath: String,
     initialProgress: Int = 0,
     initialStatus: DownloadStatus = DownloadStatus.DOWNLOADING,
-    val timestamp: Long = System.currentTimeMillis()
+    val timestamp: Long = System.currentTimeMillis(),
+    val audioUrl: String? = null,
+    val userAgent: String? = null,
+    val referer: String? = null
 ) {
     var progress by mutableIntStateOf(initialProgress)
     var status by mutableStateOf(initialStatus)

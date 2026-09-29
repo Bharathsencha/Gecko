@@ -914,6 +914,16 @@ private fun MainSettingsView(
                     preferencesRepo.setPreferAv1CodecPreference(it)
                 }
             )
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
+            SettingsSwitchRow(
+                title = "Show WebM Formats",
+                subtitle = "Show WebM container streams in download sheet (Disabled by default for universal MP4 compatibility)",
+                icon = Icons.Rounded.VideoLibrary,
+                checked = preferencesRepo.showWebmFormats,
+                onCheckedChange = {
+                    preferencesRepo.setShowWebmFormatsPreference(it)
+                }
+            )
         }
 
         Spacer(modifier = Modifier.height(18.dp))

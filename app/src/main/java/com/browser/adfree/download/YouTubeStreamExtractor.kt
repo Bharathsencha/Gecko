@@ -73,25 +73,30 @@ object YouTubeStreamExtractor {
     }
 
     suspend fun extractById(videoId: String, pageUrl: String): DetectedVideo? = withContext(Dispatchers.IO) {
-        // Tier 1: InnerTube ANDROID_VR (Direct Playback Stream URLs - Fastest, No Cipher)
-        var detected = fetchInnerTube(videoId, pageUrl, clientName = "ANDROID_VR", clientVersion = "1.43.32", sdkVersion = 30)
+        // Tier 1: WebPage direct extraction (bypasses bot check by using real browser player response)
+        var detected = fetchFromWebPage(videoId, pageUrl)
 
-        // Tier 2: InnerTube TVHTML5
+        // Tier 2: InnerTube ANDROID_VR (Direct Playback Stream URLs - Fast & Unciphered)
+        if (detected == null || detected.qualities.isEmpty()) {
+            detected = fetchInnerTube(videoId, pageUrl, clientName = "ANDROID_VR", clientVersion = "1.43.32", sdkVersion = 30)
+        }
+
+        // Tier 3: InnerTube TVHTML5
         if (detected == null || detected.qualities.isEmpty()) {
             detected = fetchInnerTube(videoId, pageUrl, clientName = "TVHTML5_SIMPLY_EMBEDDED_PLAYER", clientVersion = "2.0", sdkVersion = null)
         }
 
-        // Tier 3: InnerTube IOS
+        // Tier 4: InnerTube IOS
         if (detected == null || detected.qualities.isEmpty()) {
             detected = fetchInnerTube(videoId, pageUrl, clientName = "IOS", clientVersion = "19.09.3", sdkVersion = null)
         }
 
-        // Tier 4: InnerTube ANDROID
+        // Tier 5: InnerTube ANDROID
         if (detected == null || detected.qualities.isEmpty()) {
             detected = fetchInnerTube(videoId, pageUrl, clientName = "ANDROID", clientVersion = "19.09.37", sdkVersion = 30)
         }
 
-        // Tier 5: NewPipeExtractor Fallback
+        // Tier 6: NewPipeExtractor Fallback
         if (detected == null || detected.qualities.isEmpty()) {
             detected = extractViaNewPipe(videoId, pageUrl)
         }
@@ -103,6 +108,35 @@ object YouTubeStreamExtractor {
         }
 
         return@withContext detected
+    }
+
+    private fun fetchFromWebPage(videoId: String, pageUrl: String): DetectedVideo? {
+        return try {
+            val watchUrl = "https://www.youtube.com/watch?v=$videoId"
+            val request = okhttp3.Request.Builder()
+                .url(watchUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36")
+                .header("Accept-Language", "en-US,en;q=0.9")
+                .header("Cookie", "CONSENT=PENDING+999; SOCS=CAESEwgDEgk2NDkzOTc0MTEaAmVuIAEaBgiA_LyaBg; PREF=f6=40000000&hl=en")
+                .build()
+
+            val response = httpClient.newCall(request).execute()
+            if (!response.isSuccessful) return null
+            val html = response.body?.string() ?: return null
+
+            val pattern = Pattern.compile("ytInitialPlayerResponse\\s*=\\s*(\\{.+?\\});(?:var|\\s*</script>)")
+            val matcher = pattern.matcher(html)
+            if (matcher.find()) {
+                val jsonStr = matcher.group(1) ?: return null
+                val json = JSONObject(jsonStr)
+                parsePlayerResponseJson(json, videoId, pageUrl)
+            } else {
+                null
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "WebPage extraction fallback: ${e.message}")
+            null
+        }
     }
 
     private fun extractViaNewPipe(videoId: String, pageUrl: String): DetectedVideo? {
@@ -120,6 +154,12 @@ object YouTubeStreamExtractor {
 
             val qualityList = mutableListOf<VideoQualityOption>()
 
+            // Best audio stream for adaptive video muxing
+            val bestAudioStream = extractor.audioStreams?.maxByOrNull { it.averageBitrate }
+            val bestAudioUrl = bestAudioStream?.content
+            val bestAudioFormat = bestAudioStream?.format?.getName()?.uppercase() ?: "M4A"
+
+            // 1. Progressive streams (Video + Audio natively combined)
             extractor.videoStreams?.forEach { stream ->
                 val streamUrl = stream.content
                 if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http")) {
@@ -131,7 +171,7 @@ object YouTubeStreamExtractor {
 
                     qualityList.add(
                         VideoQualityOption(
-                            label = "$res ($formatName • Video + Audio)",
+                            label = "$res (${if (isWebm) "WEBM" else "MP4"} • Video + Audio)",
                             resolution = res,
                             codec = codec,
                             format = formatName,
@@ -139,12 +179,15 @@ object YouTubeStreamExtractor {
                             estimatedSizeBytes = 0L,
                             isAudioOnly = false,
                             isAv1 = isAv1,
+                            isProgressive = true,
+                            audioUrl = null,
                             mimeType = if (isWebm) "video/webm" else "video/mp4"
                         )
                     )
                 }
             }
 
+            // 2. High-res Video Only streams (paired with best audio for muxing)
             extractor.videoOnlyStreams?.forEach { stream ->
                 val streamUrl = stream.content
                 if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http")) {
@@ -156,7 +199,7 @@ object YouTubeStreamExtractor {
 
                     qualityList.add(
                         VideoQualityOption(
-                            label = "$res ($codec • High Definition)",
+                            label = "$res ($codec • With Audio)",
                             resolution = res,
                             codec = codec,
                             format = formatName,
@@ -164,12 +207,15 @@ object YouTubeStreamExtractor {
                             estimatedSizeBytes = 0L,
                             isAudioOnly = false,
                             isAv1 = isAv1,
+                            isProgressive = false,
+                            audioUrl = bestAudioUrl,
                             mimeType = if (isWebm) "video/webm" else "video/mp4"
                         )
                     )
                 }
             }
 
+            // 3. Audio streams
             extractor.audioStreams?.forEach { stream ->
                 val streamUrl = stream.content
                 if (!streamUrl.isNullOrBlank() && streamUrl.startsWith("http")) {
@@ -189,6 +235,8 @@ object YouTubeStreamExtractor {
                             estimatedSizeBytes = 0L,
                             isAudioOnly = true,
                             isAv1 = false,
+                            isProgressive = true,
+                            audioUrl = null,
                             mimeType = if (isM4a) "audio/mp4" else "audio/webm"
                         )
                     )
@@ -287,11 +335,19 @@ object YouTubeStreamExtractor {
 
             val responseText = response.body?.string() ?: return null
             val json = JSONObject(responseText)
+            return parsePlayerResponseJson(json, videoId, pageUrl)
+        } catch (e: Exception) {
+            Log.d(TAG, "InnerTube $clientName exception: ${e.message}")
+            null
+        }
+    }
 
+    private fun parsePlayerResponseJson(json: JSONObject, videoId: String, pageUrl: String): DetectedVideo? {
+        try {
             val playabilityStatus = json.optJSONObject("playabilityStatus")
             val status = playabilityStatus?.optString("status")
             if (status != null && status != "OK") {
-                Log.d(TAG, "InnerTube $clientName status: $status")
+                Log.d(TAG, "Player response status: $status")
                 return null
             }
 
@@ -311,7 +367,30 @@ object YouTubeStreamExtractor {
 
             val qualityList = mutableListOf<VideoQualityOption>()
 
-            // 1. Progressive formats (Video + Audio combined in single stream)
+            // Find best audio stream from adaptiveFormats to pair with high-res video-only streams
+            var bestAudioUrl: String? = null
+            var bestAudioBitrate = 0
+            var bestAudioLength = 0L
+
+            if (adaptiveFormats != null) {
+                for (i in 0 until adaptiveFormats.length()) {
+                    val f = adaptiveFormats.getJSONObject(i)
+                    val mimeType = f.optString("mimeType", "")
+                    if (mimeType.startsWith("audio/")) {
+                        val streamUrl = extractUrlFromFormat(f)
+                        val bitrate = f.optInt("bitrate", 0)
+                        val isM4a = mimeType.contains("mp4") || mimeType.contains("m4a")
+                        // Prefer M4A/AAC for MP4 muxing compatibility
+                        if (streamUrl.isNotBlank() && (isM4a || bestAudioUrl == null || bitrate > bestAudioBitrate)) {
+                            bestAudioUrl = streamUrl
+                            bestAudioBitrate = bitrate
+                            bestAudioLength = f.optLong("contentLength", 0L)
+                        }
+                    }
+                }
+            }
+
+            // 1. Progressive formats (Video + Audio natively combined in a single stream)
             if (formats != null) {
                 for (i in 0 until formats.length()) {
                     val f = formats.getJSONObject(i)
@@ -335,6 +414,8 @@ object YouTubeStreamExtractor {
                             estimatedSizeBytes = contentLength,
                             isAudioOnly = false,
                             isAv1 = isAv1,
+                            isProgressive = true,
+                            audioUrl = null,
                             mimeType = mimeType
                         )
                     )
@@ -369,6 +450,8 @@ object YouTubeStreamExtractor {
                                 estimatedSizeBytes = contentLength,
                                 isAudioOnly = true,
                                 isAv1 = false,
+                                isProgressive = true,
+                                audioUrl = null,
                                 mimeType = mimeType
                             )
                         )
@@ -378,16 +461,19 @@ object YouTubeStreamExtractor {
                         val codec = if (isAv1) "AV1" else if (mimeType.contains("vp9") || mimeType.contains("vp09")) "VP9" else "H.264"
                         val isWebm = mimeType.contains("webm")
 
+                        // For adaptive video streams, pair with best audio stream so it will be muxed with audio!
                         qualityList.add(
                             VideoQualityOption(
-                                label = "$qualityLabel ($codec • High Definition)",
+                                label = "$qualityLabel ($codec • With Audio)",
                                 resolution = if (f.has("width") && f.has("height")) "${f.getInt("width")}x${f.getInt("height")}" else qualityLabel,
                                 codec = codec,
                                 format = if (isWebm) "WEBM" else "MP4",
                                 url = streamUrl,
-                                estimatedSizeBytes = contentLength,
+                                estimatedSizeBytes = contentLength + bestAudioLength,
                                 isAudioOnly = false,
                                 isAv1 = isAv1,
+                                isProgressive = false,
+                                audioUrl = bestAudioUrl,
                                 mimeType = mimeType
                             )
                         )
@@ -397,13 +483,15 @@ object YouTubeStreamExtractor {
 
             if (qualityList.isEmpty()) return null
 
+            // Sort: Video progressive/high-res first, then audio tracks
             val sortedQualities = qualityList.sortedWith(
                 compareBy<VideoQualityOption> { it.isAudioOnly }
                     .thenByDescending { parseHeight(it.resolution.ifBlank { it.label }) }
+                    .thenByDescending { it.isProgressive }
                     .thenByDescending { it.estimatedSizeBytes }
             )
 
-            DetectedVideo(
+            return DetectedVideo(
                 pageUrl = pageUrl,
                 title = title,
                 thumbnail = thumbnail,
@@ -412,8 +500,8 @@ object YouTubeStreamExtractor {
                 qualities = sortedQualities
             )
         } catch (e: Exception) {
-            Log.d(TAG, "InnerTube $clientName exception: ${e.message}")
-            null
+            Log.d(TAG, "JSON parsing error: ${e.message}")
+            return null
         }
     }
 

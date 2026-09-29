@@ -351,7 +351,7 @@ if (browser.webNavigation && browser.webNavigation.onCommitted) {
     });
 }
 
-// ── Universal Network Media Sniffer (Cat-Catch Network Layer) ────────────────
+// Universal Network Media Sniffer (Cat-Catch Network Layer)
 const MEDIA_EXT_REGEX = /\.(mp4|webm|mkv|m4v|mov|m3u8|mpd|m4a|mp3|aac|opus|flv|f4v)($|\?|#)/i;
 const KNOWN_STREAM_REGEX = /googlevideo\.com\/videoplayback|v\.redd\.it\/|hotstar\.com.*\.m3u8|fbcdn\.net\/.*\.mp4|twimg\.com\/.*\.mp4|tiktokcdn\.com\/|byteoversea\.com\/|akamaihd\.net\/|cloudfront\.net\/.*(m3u8|mp4)|fastly\.net\/.*(m3u8|mp4)|vimeocdn\.com\/|dailymotion\.com\/.*\.m3u8/i;
 const detectedMediaUrls = new Set();
@@ -427,7 +427,7 @@ if (browser.webNavigation && browser.webNavigation.onCommitted) {
     });
 }
 
-// ── Native Port Bridge ──────────────────────────────────────────────────────
+// Native Port Bridge
 let isConnecting = false;
 
 function connectToNativeBridge() {
@@ -506,7 +506,7 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 connectToNativeBridge();
 
-// ── Remote Blocklist Auto-Update (24h TTL) ──────────────────────────────────
+// Remote Blocklist Auto-Update (24h TTL)
 async function fetchRemoteBlocklistUpdate() {
     const CACHE_KEY = "remote_blocklist_cache";
     const TS_KEY = "remote_blocklist_ts";

@@ -78,6 +78,7 @@ fun BrowserMainScreen(
     var showPasswordsSheet by remember { mutableStateOf(false) }
     var showHistoryPage by remember { mutableStateOf(false) }
     var showBookmarksPage by remember { mutableStateOf(false) }
+    var showDownloadsPage by remember { mutableStateOf(false) }
     var showShieldsSheet by remember { mutableStateOf(false) }
     var showClearDataSheet by remember { mutableStateOf(false) }
     var showVideoDownloadSheet by remember { mutableStateOf(false) }
@@ -129,18 +130,21 @@ fun BrowserMainScreen(
         }
     }
 
-    // Intercept back button when full-screen History or Bookmarks Page is displayed
+    // Intercept back button when full-screen History, Bookmarks, or Downloads Page is displayed
     BackHandler(enabled = showHistoryPage) {
         showHistoryPage = false
     }
     BackHandler(enabled = showBookmarksPage) {
         showBookmarksPage = false
     }
+    BackHandler(enabled = showDownloadsPage) {
+        showDownloadsPage = false
+    }
     BackHandler(enabled = showVideoDownloadSheet) {
         showVideoDownloadSheet = false
     }
 
-    val hasModalOpen = showSettingsSheet || showHistoryPage || showBookmarksPage || showTabSwitcher || showDownloadsSheet || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showVideoDownloadSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
+    val hasModalOpen = showSettingsSheet || showHistoryPage || showBookmarksPage || showDownloadsPage || showTabSwitcher || showDownloadsSheet || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showVideoDownloadSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
     BackHandler(enabled = !hasModalOpen && activeTab != null && (activeTab.canGoBack || activeTab.url != "about:home")) {
         if (activeTab != null && activeTab.canGoBack) {
             activeTab.session.goBack()
@@ -308,9 +312,7 @@ fun BrowserMainScreen(
                 onClose = { showHistoryPage = false },
                 modifier = Modifier.fillMaxSize()
             )
-        }
-
-        // Dedicated Full Screen Bookmarks Page
+        }        // Dedicated Full Screen Bookmarks Page
         if (showBookmarksPage) {
             BookmarksPage(
                 favorites = favoritesRepo.favorites,
@@ -324,6 +326,15 @@ fun BrowserMainScreen(
                     favoritesRepo.removeFavorite(favoriteItem)
                 },
                 onBack = { showBookmarksPage = false },
+                modifier = Modifier.fillMaxSize()
+            )
+        }
+
+        // Dedicated Full Screen Downloads Page
+        if (showDownloadsPage) {
+            DownloadsPage(
+                downloadManager = downloadManager,
+                onClose = { showDownloadsPage = false },
                 modifier = Modifier.fillMaxSize()
             )
         }
@@ -472,9 +483,14 @@ fun BrowserMainScreen(
             DownloadsSheet(
                 downloads = downloadManager.downloadsList,
                 onOpenFile = { item -> downloadManager.openDownloadedFile(item) },
-                onRemove = { item -> downloadManager.removeDownload(item) },
+                onRemove = { item -> downloadManager.deleteDownload(item) },
                 onClearCompleted = { downloadManager.clearCompleted() },
-                onDismissRequest = { showDownloadsSheet = false }
+                onDismissRequest = { showDownloadsSheet = false },
+                onOpenFullScreen = { showDownloadsPage = true },
+                onPause = { item -> downloadManager.pauseDownload(item.id) },
+                onResume = { item -> downloadManager.resumeDownload(item.id) },
+                onCancel = { item -> downloadManager.cancelDownload(item.id) },
+                onShare = { item -> downloadManager.shareDownload(context, item) }
             )
         }
 
@@ -484,6 +500,7 @@ fun BrowserMainScreen(
             VideoDownloadSheet(
                 video = primaryVideo,
                 preferAv1 = preferencesRepo.preferAv1Codec,
+                showWebm = preferencesRepo.showWebmFormats,
                 onDownload = { option, filename ->
                     val extraHeaders = mutableMapOf<String, String>()
                     if (activeTab.url.isNotBlank()) {
@@ -494,7 +511,8 @@ fun BrowserMainScreen(
                         customFileName = filename,
                         mimeType = option.mimeType,
                         referer = activeTab.url,
-                        extraHeaders = extraHeaders
+                        extraHeaders = extraHeaders,
+                        audioUrl = option.audioUrl
                     )
                 },
                 onDismiss = { showVideoDownloadSheet = false }

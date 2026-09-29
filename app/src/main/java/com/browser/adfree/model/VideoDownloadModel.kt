@@ -5,14 +5,6 @@
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation, either version 3 of the License, or
  * (at your option) any later version.
- *
- * This program is distributed in the hope that it will be useful,
- * but WITHOUT ANY WARRANTY; without even the implied warranty of
- * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
- * GNU General Public License for more details.
- *
- * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <https://www.gnu.org/licenses/>.
  */
 
 package com.browser.adfree.model
@@ -43,7 +35,12 @@ data class VideoQualityOption(
     val estimatedSizeBytes: Long = 0L,
     val isAudioOnly: Boolean = false,
     val isAv1: Boolean = false,
+    val isProgressive: Boolean = false, // True if single stream contains both video + audio natively
+    val audioUrl: String? = null,       // Paired high-bitrate audio stream for adaptive video muxing
     val mimeType: String? = null,
     val headers: Map<String, String> = emptyMap(),
-    val alternativeAv1Option: VideoQualityOption? = null // Linked AV1 variant for the same resolution
-)
+    val alternativeAv1Option: VideoQualityOption? = null
+) {
+    val isWebm: Boolean get() = format.equals("WEBM", ignoreCase = true) || mimeType?.contains("webm", ignoreCase = true) == true || codec?.contains("vp", ignoreCase = true) == true || codec?.contains("opus", ignoreCase = true) == true
+}
+

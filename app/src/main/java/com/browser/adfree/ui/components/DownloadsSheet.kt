@@ -46,7 +46,12 @@ fun DownloadsSheet(
     onOpenFile: (DownloadItem) -> Unit,
     onRemove: (DownloadItem) -> Unit,
     onClearCompleted: () -> Unit,
-    onDismissRequest: () -> Unit
+    onDismissRequest: () -> Unit,
+    onOpenFullScreen: () -> Unit = {},
+    onPause: (DownloadItem) -> Unit = {},
+    onResume: (DownloadItem) -> Unit = {},
+    onCancel: (DownloadItem) -> Unit = {},
+    onShare: (DownloadItem) -> Unit = {}
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
@@ -87,12 +92,29 @@ fun DownloadsSheet(
                     )
                 }
 
-                if (downloads.any { it.status == DownloadStatus.COMPLETED }) {
-                    TextButton(
-                        onClick = onClearCompleted,
-                        colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (downloads.any { it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.FAILED || it.status == DownloadStatus.CANCELLED }) {
+                        TextButton(
+                            onClick = onClearCompleted,
+                            colors = ButtonDefaults.textButtonColors(contentColor = TextSecondary)
+                        ) {
+                            Text("Clear", fontSize = 13.sp)
+                        }
+                    }
+
+                    IconButton(
+                        onClick = {
+                            onDismissRequest()
+                            onOpenFullScreen()
+                        },
+                        modifier = Modifier.size(36.dp)
                     ) {
-                        Text("Clear Completed", fontSize = 13.sp)
+                        Icon(
+                            imageVector = Icons.Default.OpenInFull,
+                            contentDescription = "Expand Fullscreen",
+                            tint = AccentCyan,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
             }
@@ -122,7 +144,11 @@ fun DownloadsSheet(
                         DownloadItemRow(
                             item = item,
                             onClick = { onOpenFile(item) },
-                            onDelete = { onRemove(item) }
+                            onDelete = { onRemove(item) },
+                            onPause = { onPause(item) },
+                            onResume = { onResume(item) },
+                            onCancel = { onCancel(item) },
+                            onShare = { onShare(item) }
                         )
                     }
                 }
@@ -135,7 +161,11 @@ fun DownloadsSheet(
 fun DownloadItemRow(
     item: DownloadItem,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onPause: () -> Unit = {},
+    onResume: () -> Unit = {},
+    onCancel: () -> Unit = {},
+    onShare: () -> Unit = {}
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -153,6 +183,7 @@ fun DownloadItemRow(
         Icon(
             imageVector = when (item.status) {
                 DownloadStatus.DOWNLOADING -> Icons.Default.Downloading
+                DownloadStatus.PAUSED -> Icons.Default.PauseCircle
                 DownloadStatus.COMPLETED -> Icons.Default.CheckCircle
                 DownloadStatus.FAILED -> Icons.Default.Error
                 DownloadStatus.CANCELLED -> Icons.Default.Cancel
@@ -160,6 +191,7 @@ fun DownloadItemRow(
             contentDescription = null,
             tint = when (item.status) {
                 DownloadStatus.DOWNLOADING -> AccentCyan
+                DownloadStatus.PAUSED -> WarningAmber
                 DownloadStatus.COMPLETED -> ShieldGreen
                 DownloadStatus.FAILED -> DangerRed
                 DownloadStatus.CANCELLED -> TextSecondary
@@ -201,6 +233,25 @@ fun DownloadItemRow(
                         )
                     }
                 }
+                DownloadStatus.PAUSED -> {
+                    Column {
+                        LinearProgressIndicator(
+                            progress = (item.progress / 100f).coerceIn(0f, 1f),
+                            color = WarningAmber,
+                            trackColor = SurfaceCard,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Paused • ${item.progress}% (${formatFileSize(item.currentBytes)})",
+                            color = WarningAmber,
+                            fontSize = 11.sp
+                        )
+                    }
+                }
                 DownloadStatus.COMPLETED -> {
                     Text(
                         text = "Completed • ${formatFileSize(item.totalBytes)}",
@@ -225,21 +276,113 @@ fun DownloadItemRow(
             }
         }
 
-        IconButton(
-            onClick = onDelete,
-            modifier = Modifier.size(28.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Close,
-                contentDescription = "Remove",
-                tint = TextSecondary,
-                modifier = Modifier.size(16.dp)
-            )
+        Spacer(modifier = Modifier.width(8.dp))
+
+        // Action Buttons Row
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            when (item.status) {
+                DownloadStatus.DOWNLOADING -> {
+                    IconButton(
+                        onClick = onPause,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Pause,
+                            contentDescription = "Pause",
+                            tint = AccentCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onCancel,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel",
+                            tint = DangerRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                DownloadStatus.PAUSED -> {
+                    IconButton(
+                        onClick = onResume,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.PlayArrow,
+                            contentDescription = "Resume",
+                            tint = AccentCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onCancel,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Close,
+                            contentDescription = "Cancel",
+                            tint = DangerRed,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                DownloadStatus.COMPLETED -> {
+                    IconButton(
+                        onClick = onShare,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Share,
+                            contentDescription = "Share",
+                            tint = AccentCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Delete",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+                DownloadStatus.FAILED, DownloadStatus.CANCELLED -> {
+                    IconButton(
+                        onClick = onResume,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Retry",
+                            tint = AccentCyan,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.size(32.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DeleteOutline,
+                            contentDescription = "Delete",
+                            tint = TextSecondary,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
-private fun formatFileSize(bytes: Long): String {
+fun formatFileSize(bytes: Long): String {
     if (bytes <= 0) return "--"
     val kb = bytes / 1024.0
     val mb = kb / 1024.0

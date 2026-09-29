@@ -63,19 +63,26 @@ fun VideoDownloadSheet(
     onDownload: (option: VideoQualityOption, filename: String) -> Unit,
     onDismiss: () -> Unit,
     preferAv1: Boolean = false,
+    showWebm: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
-    val videoQualities = remember(video) { video.videoQualities }
-    val audioQualities = remember(video) { video.audioQualities }
+    val rawVideoQualities = remember(video) { video.videoQualities }
+    val videoQualities = remember(rawVideoQualities, showWebm) {
+        if (showWebm) rawVideoQualities else rawVideoQualities.filter { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }
+    }
+    val rawAudioQualities = remember(video) { video.audioQualities }
+    val audioQualities = remember(rawAudioQualities, showWebm) {
+        if (showWebm) rawAudioQualities else rawAudioQualities.filter { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }
+    }
 
     var selectedTab by remember {
         mutableStateOf(if (videoQualities.isNotEmpty()) DownloadMediaType.VIDEO else DownloadMediaType.AUDIO)
     }
 
-    var selectedOption by remember(selectedTab, video) {
+    var selectedOption by remember(selectedTab, video, videoQualities, audioQualities, preferAv1) {
         mutableStateOf(
             if (selectedTab == DownloadMediaType.VIDEO) {
                 (if (preferAv1) videoQualities.firstOrNull { it.isAv1 } else null)
@@ -469,7 +476,7 @@ fun VideoDownloadSheet(
                         selectedOption?.let { opt ->
                             // Check if an AV1 variant exists and user hasn't chosen
                             val matchingAv1 = videoQualities.firstOrNull { it.resolution == opt.resolution && it.isAv1 && it.id != opt.id }
-                            if (matchingAv1 != null && !opt.isAv1) {
+                            if (!preferAv1 && matchingAv1 != null && !opt.isAv1) {
                                 pendingDownloadOption = opt
                                 showAv1ChoiceDialog = true
                             } else {

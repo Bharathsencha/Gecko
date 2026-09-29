@@ -21,17 +21,26 @@ import android.app.DownloadManager
 import android.content.Context
 import android.content.Intent
 import android.database.Cursor
+import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.compose.runtime.mutableStateListOf
 import androidx.core.content.FileProvider
 import com.browser.adfree.model.DownloadItem
 import com.browser.adfree.model.DownloadStatus
+import kotlinx.coroutines.*
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
 import java.io.File
+import java.io.FileOutputStream
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import kotlin.concurrent.timer
 
 class BrowserDownloadManager(private val context: Context) {
@@ -39,8 +48,18 @@ class BrowserDownloadManager(private val context: Context) {
     private val systemDownloadManager = context.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    private val downloadScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private val activeJobs = ConcurrentHashMap<Long, Job>()
+
+    private val okHttpClient = OkHttpClient.Builder()
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .connectTimeout(30, TimeUnit.SECONDS)
+        .readTimeout(60, TimeUnit.SECONDS)
+        .build()
+
     init {
-        // Start periodic status poller for active downloads
+        // Start periodic status poller for active system downloads
         timer(name = "download-poller", daemon = true, period = 1000L, initialDelay = 1000L) {
             updateDownloadProgress()
         }
@@ -53,11 +72,26 @@ class BrowserDownloadManager(private val context: Context) {
         userAgent: String? = null,
         referer: String? = null,
         customFileName: String? = null,
-        extraHeaders: Map<String, String>? = null
+        extraHeaders: Map<String, String>? = null,
+        audioUrl: String? = null
     ): Long {
         if (url.startsWith("data:")) {
             val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
             return saveBase64Download(fileName, url, mimeType)
+        }
+
+        // If audioUrl is provided, trigger the muxed stream download pipeline
+        if (!audioUrl.isNullOrBlank()) {
+            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
+            return startMuxedDownload(
+                videoUrl = url,
+                audioUrl = audioUrl,
+                fileName = fileName,
+                mimeType = mimeType ?: "video/mp4",
+                userAgent = userAgent,
+                referer = referer,
+                extraHeaders = extraHeaders
+            )
         }
 
         try {
@@ -94,7 +128,10 @@ class BrowserDownloadManager(private val context: Context) {
                 mimeType = mimeType ?: "application/octet-stream",
                 destinationPath = destinationPath,
                 initialProgress = 0,
-                initialStatus = DownloadStatus.DOWNLOADING
+                initialStatus = DownloadStatus.DOWNLOADING,
+                audioUrl = null,
+                userAgent = userAgent,
+                referer = referer
             )
 
             mainHandler.post {
@@ -109,6 +146,327 @@ class BrowserDownloadManager(private val context: Context) {
                 Toast.makeText(context, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
             }
             return -1L
+        }
+    }
+
+    /**
+     * Downloads an adaptive video stream and audio stream concurrently, then losslessly remuxes them
+     * into a single complete MP4 file with audio using VideoAudioMuxer.
+     */
+    fun startMuxedDownload(
+        videoUrl: String,
+        audioUrl: String,
+        fileName: String,
+        mimeType: String = "video/mp4",
+        userAgent: String? = null,
+        referer: String? = null,
+        extraHeaders: Map<String, String>? = null
+    ): Long {
+        val downloadId = System.currentTimeMillis()
+        val cleanName = sanitizeFileName(if (fileName.endsWith(".mp4", ignoreCase = true)) fileName else "$fileName.mp4")
+
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!downloadsDir.exists()) downloadsDir.mkdirs()
+
+        var targetFile = File(downloadsDir, cleanName)
+        val nameWithoutExt = cleanName.substringBeforeLast(".")
+        val ext = cleanName.substringAfterLast(".", "mp4")
+        var counter = 1
+        while (targetFile.exists()) {
+            targetFile = File(downloadsDir, "$nameWithoutExt ($counter).$ext")
+            counter++
+        }
+
+        val item = DownloadItem(
+            id = downloadId,
+            fileName = targetFile.name,
+            url = videoUrl,
+            mimeType = mimeType,
+            destinationPath = targetFile.absolutePath,
+            initialProgress = 0,
+            initialStatus = DownloadStatus.DOWNLOADING,
+            audioUrl = audioUrl,
+            userAgent = userAgent,
+            referer = referer
+        )
+
+        mainHandler.post {
+            downloadsList.add(0, item)
+            Toast.makeText(context, "Downloading ${targetFile.name} (with Audio)", Toast.LENGTH_SHORT).show()
+        }
+
+        launchMuxedDownloadJob(item)
+        return downloadId
+    }
+
+    private fun launchMuxedDownloadJob(item: DownloadItem) {
+        val job = downloadScope.launch {
+            try {
+                val videoTmp = File(context.cacheDir, "vid_${item.id}.tmp")
+                val audioTmp = item.audioUrl?.let { File(context.cacheDir, "aud_${item.id}.tmp") }
+
+                var videoDone = false
+                var audioDone = audioTmp == null
+
+                // 1. Download Video Stream
+                val videoOk = downloadStream(
+                    url = item.url,
+                    targetFile = videoTmp,
+                    userAgent = item.userAgent,
+                    referer = item.referer,
+                    isActive = { isActive && item.status == DownloadStatus.DOWNLOADING },
+                    onProgress = { cur, tot ->
+                        mainHandler.post {
+                            val audioLen = audioTmp?.length() ?: 0L
+                            item.currentBytes = cur + audioLen
+                            if (tot > 0) {
+                                val estimatedTotal = tot + (if (audioTmp != null) (tot * 0.15f).toLong() else 0L)
+                                item.totalBytes = estimatedTotal
+                                item.progress = ((item.currentBytes * 85) / estimatedTotal).toInt().coerceIn(0, 85)
+                            }
+                        }
+                    }
+                )
+
+                if (!isActive || item.status != DownloadStatus.DOWNLOADING || !videoOk) {
+                    return@launch
+                }
+                videoDone = true
+
+                // 2. Download Audio Stream (if separate)
+                if (audioTmp != null && !item.audioUrl.isNullOrBlank()) {
+                    val audioOk = downloadStream(
+                        url = item.audioUrl,
+                        targetFile = audioTmp,
+                        userAgent = item.userAgent,
+                        referer = item.referer,
+                        isActive = { isActive && item.status == DownloadStatus.DOWNLOADING },
+                        onProgress = { cur, tot ->
+                            mainHandler.post {
+                                item.currentBytes = videoTmp.length() + cur
+                                if (tot > 0) {
+                                    val pct = 85 + ((cur * 13) / tot).toInt()
+                                    item.progress = pct.coerceIn(85, 98)
+                                }
+                            }
+                        }
+                    )
+
+                    if (!isActive || item.status != DownloadStatus.DOWNLOADING || !audioOk) {
+                        return@launch
+                    }
+                    audioDone = true
+                }
+
+                // 3. Lossless Muxing
+                if (videoDone && audioDone) {
+                    mainHandler.post {
+                        item.progress = 99
+                    }
+
+                    val destFile = File(item.destinationPath)
+                    val muxSuccess = if (audioTmp != null && audioTmp.exists()) {
+                        VideoAudioMuxer.mux(videoTmp, audioTmp, destFile)
+                    } else {
+                        videoTmp.copyTo(destFile, overwrite = true)
+                        true
+                    }
+
+                    try { videoTmp.delete() } catch (e: Exception) {}
+                    try { audioTmp?.delete() } catch (e: Exception) {}
+
+                    if (muxSuccess && destFile.exists() && destFile.length() > 0) {
+                        mainHandler.post {
+                            item.progress = 100
+                            item.status = DownloadStatus.COMPLETED
+                            item.currentBytes = destFile.length()
+                            item.totalBytes = destFile.length()
+                            Toast.makeText(context, "Saved ${destFile.name} to Downloads", Toast.LENGTH_SHORT).show()
+                        }
+                        registerCompletedDownload(destFile, item.mimeType)
+                    } else {
+                        mainHandler.post {
+                            item.status = DownloadStatus.FAILED
+                            Toast.makeText(context, "Failed to complete ${item.fileName}", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("BrowserDownloadManager", "Muxed download error", e)
+                if (isActive && item.status == DownloadStatus.DOWNLOADING) {
+                    mainHandler.post {
+                        item.status = DownloadStatus.FAILED
+                    }
+                }
+            } finally {
+                activeJobs.remove(item.id)
+            }
+        }
+        activeJobs[item.id] = job
+    }
+
+    private fun downloadStream(
+        url: String,
+        targetFile: File,
+        userAgent: String?,
+        referer: String?,
+        isActive: () -> Boolean,
+        onProgress: (current: Long, total: Long) -> Unit
+    ): Boolean {
+        var existingBytes = if (targetFile.exists()) targetFile.length() else 0L
+        val reqBuilder = Request.Builder().url(url)
+        val ua = userAgent ?: com.browser.adfree.tabs.TabManager.MODERN_MOBILE_UA
+        reqBuilder.header("User-Agent", ua)
+        if (!referer.isNullOrBlank()) {
+            reqBuilder.header("Referer", referer)
+        }
+        if (existingBytes > 0) {
+            reqBuilder.header("Range", "bytes=$existingBytes-")
+        }
+
+        try {
+            val response = okHttpClient.newCall(reqBuilder.build()).execute()
+            if (!response.isSuccessful && response.code != 206) {
+                response.close()
+                // If 416 (Range Not Satisfiable), clear partial file and retry
+                if (response.code == 416) {
+                    targetFile.delete()
+                    existingBytes = 0L
+                    val retryResp = okHttpClient.newCall(
+                        Request.Builder().url(url).header("User-Agent", ua).apply {
+                            if (!referer.isNullOrBlank()) header("Referer", referer)
+                        }.build()
+                    ).execute()
+                    if (!retryResp.isSuccessful) {
+                        retryResp.close()
+                        return false
+                    }
+                    return writeStreamToFile(retryResp, targetFile, 0L, isActive, onProgress)
+                }
+                return false
+            }
+
+            return writeStreamToFile(response, targetFile, existingBytes, isActive, onProgress)
+        } catch (e: Exception) {
+            Log.e("BrowserDownloadManager", "Stream download exception: ${e.message}")
+            return false
+        }
+    }
+
+    private fun writeStreamToFile(
+        response: Response,
+        targetFile: File,
+        existingBytes: Long,
+        isActive: () -> Boolean,
+        onProgress: (current: Long, total: Long) -> Unit
+    ): Boolean {
+        val body = response.body ?: return false
+        val contentLength = body.contentLength()
+        val totalBytes = if (contentLength > 0) existingBytes + contentLength else -1L
+        val append = existingBytes > 0 && response.code == 206
+        val appendOffset = if (append) existingBytes else 0L
+
+        try {
+            FileOutputStream(targetFile, append).use { out ->
+                body.byteStream().use { input ->
+                    val buffer = ByteArray(64 * 1024)
+                    var bytesRead: Int
+                    var currentBytes = appendOffset
+
+                    while (input.read(buffer).also { bytesRead = it } != -1) {
+                        if (!isActive()) {
+                            return false
+                        }
+                        out.write(buffer, 0, bytesRead)
+                        currentBytes += bytesRead
+                        onProgress(currentBytes, totalBytes)
+                    }
+                    out.flush()
+                }
+            }
+            return true
+        } catch (e: Exception) {
+            return false
+        } finally {
+            response.close()
+        }
+    }
+
+    fun pauseDownload(id: Long) {
+        val item = downloadsList.firstOrNull { it.id == id } ?: return
+        activeJobs[id]?.cancel()
+        activeJobs.remove(id)
+        item.status = DownloadStatus.PAUSED
+        mainHandler.post {
+            Toast.makeText(context, "Download paused", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun resumeDownload(id: Long) {
+        val item = downloadsList.firstOrNull { it.id == id } ?: return
+        if (item.status == DownloadStatus.PAUSED || item.status == DownloadStatus.FAILED) {
+            item.status = DownloadStatus.DOWNLOADING
+            if (!item.audioUrl.isNullOrBlank() || item.url.startsWith("http")) {
+                launchMuxedDownloadJob(item)
+            }
+            mainHandler.post {
+                Toast.makeText(context, "Resuming download...", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+
+    fun cancelDownload(id: Long) {
+        val item = downloadsList.firstOrNull { it.id == id } ?: return
+        activeJobs[id]?.cancel()
+        activeJobs.remove(id)
+        try {
+            systemDownloadManager.remove(id)
+        } catch (e: Exception) {}
+        try { File(context.cacheDir, "vid_${id}.tmp").delete() } catch (e: Exception) {}
+        try { File(context.cacheDir, "aud_${id}.tmp").delete() } catch (e: Exception) {}
+        item.status = DownloadStatus.CANCELLED
+        mainHandler.post {
+            Toast.makeText(context, "Download cancelled", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun deleteDownload(item: DownloadItem) {
+        activeJobs[item.id]?.cancel()
+        activeJobs.remove(item.id)
+        try {
+            systemDownloadManager.remove(item.id)
+        } catch (e: Exception) {}
+        try { File(item.destinationPath).delete() } catch (e: Exception) {}
+        try { File(context.cacheDir, "vid_${item.id}.tmp").delete() } catch (e: Exception) {}
+        try { File(context.cacheDir, "aud_${item.id}.tmp").delete() } catch (e: Exception) {}
+        downloadsList.remove(item)
+        mainHandler.post {
+            Toast.makeText(context, "Deleted ${item.fileName}", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    fun shareDownload(context: Context, item: DownloadItem) {
+        try {
+            val file = File(item.destinationPath)
+            if (!file.exists()) {
+                Toast.makeText(context, "File does not exist on disk", Toast.LENGTH_SHORT).show()
+                return
+            }
+            val uri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.provider",
+                file
+            )
+            val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                type = item.mimeType
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            context.startActivity(Intent.createChooser(shareIntent, "Share ${item.fileName}").apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            })
+        } catch (e: Exception) {
+            Toast.makeText(context, "Failed to share: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -150,17 +508,7 @@ class BrowserDownloadManager(private val context: Context) {
             val finalMime = mimeType ?: (MimeTypeMap.getSingleton().getMimeTypeFromExtension(targetFile.extension.lowercase()) ?: "application/octet-stream")
             val id = System.currentTimeMillis()
 
-            try {
-                systemDownloadManager.addCompletedDownload(
-                    targetFile.name,
-                    "Downloaded file",
-                    true,
-                    finalMime,
-                    targetFile.absolutePath,
-                    targetFile.length(),
-                    true
-                )
-            } catch (e: Exception) {}
+            registerCompletedDownload(targetFile, finalMime)
 
             val item = DownloadItem(
                 id = id,
@@ -181,7 +529,7 @@ class BrowserDownloadManager(private val context: Context) {
             }
             return id
         } catch (e: Exception) {
-            android.util.Log.e("AdFreeBrowser", "Error saving base64 download", e)
+            Log.e("AdFreeBrowser", "Error saving base64 download", e)
             mainHandler.post {
                 Toast.makeText(context, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
             }
@@ -189,8 +537,31 @@ class BrowserDownloadManager(private val context: Context) {
         }
     }
 
+    private fun registerCompletedDownload(file: File, mimeType: String) {
+        try {
+            systemDownloadManager.addCompletedDownload(
+                file.name,
+                "Downloaded media",
+                true,
+                mimeType,
+                file.absolutePath,
+                file.length(),
+                true
+            )
+        } catch (e: Exception) {
+            try {
+                MediaScannerConnection.scanFile(
+                    context,
+                    arrayOf(file.absolutePath),
+                    arrayOf(mimeType),
+                    null
+                )
+            } catch (ex: Exception) {}
+        }
+    }
+
     private fun updateDownloadProgress() {
-        val activeItems = downloadsList.filter { it.status == DownloadStatus.DOWNLOADING }
+        val activeItems = downloadsList.filter { it.status == DownloadStatus.DOWNLOADING && it.audioUrl == null }
         if (activeItems.isEmpty()) return
 
         for (item in activeItems) {
@@ -269,11 +640,11 @@ class BrowserDownloadManager(private val context: Context) {
     }
 
     fun removeDownload(item: DownloadItem) {
-        downloadsList.remove(item)
+        deleteDownload(item)
     }
 
     fun clearCompleted() {
-        downloadsList.removeAll { it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.FAILED }
+        downloadsList.removeAll { it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.FAILED || it.status == DownloadStatus.CANCELLED }
     }
 
     private fun extractFileName(url: String, contentDisposition: String?, mimeType: String?): String {
@@ -305,3 +676,4 @@ class BrowserDownloadManager(private val context: Context) {
         return name.replace(Regex("[\\\\/:*?\"<>|]"), "_")
     }
 }
+

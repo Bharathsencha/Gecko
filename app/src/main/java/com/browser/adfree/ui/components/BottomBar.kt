@@ -174,7 +174,39 @@ fun BottomBar(
                 )
             }
 
-            // 5. Downloads Button
+            // 5. Video Downloader Button (visible when video is detected on page)
+            if (detectedVideosCount > 0) {
+                Box(contentAlignment = Alignment.TopEnd) {
+                    IconButton(
+                        onClick = onOpenVideoDownloader,
+                        colors = IconButtonDefaults.iconButtonColors(contentColor = AccentCyan)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.DownloadForOffline,
+                            contentDescription = "Download Video",
+                            tint = AccentCyan,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .offset(x = (-2).dp, y = 2.dp)
+                            .size(15.dp)
+                            .background(AccentCyan, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = detectedVideosCount.toString(),
+                            color = DarkBg,
+                            fontSize = 9.5.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                }
+            }
+
+            // 6. Downloads Button
             Box(contentAlignment = Alignment.TopEnd) {
                 IconButton(
                     onClick = onOpenDownloads,

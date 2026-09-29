@@ -94,6 +94,9 @@ class BrowserPreferencesRepository(context: Context) {
     var preferAv1Codec by mutableStateOf(prefs.getBoolean("prefer_av1_codec", false))
         private set
 
+    var showWebmFormats by mutableStateOf(prefs.getBoolean("show_webm_formats", false))
+        private set
+
     // Customization & Appearance
     var themeMode by mutableStateOf(
         try {
@@ -280,6 +283,11 @@ class BrowserPreferencesRepository(context: Context) {
     fun setPreferAv1CodecPreference(enabled: Boolean) {
         preferAv1Codec = enabled
         prefs.edit().putBoolean("prefer_av1_codec", enabled).apply()
+    }
+
+    fun setShowWebmFormatsPreference(show: Boolean) {
+        showWebmFormats = show
+        prefs.edit().putBoolean("show_webm_formats", show).apply()
     }
 }
 

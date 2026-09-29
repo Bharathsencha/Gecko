@@ -107,4 +107,5 @@ val SurfaceSelected: Color
 val DangerRed = Color(0xFFFF453A)
 val ShieldGreen = Color(0xFF30D158)
 val FlameOrange = Color(0xFFFF9500)
+val WarningAmber = Color(0xFFF59E0B)
 
