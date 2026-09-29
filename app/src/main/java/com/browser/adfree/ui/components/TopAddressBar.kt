@@ -21,6 +21,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -67,8 +68,10 @@ fun TopAddressBar(
     adBlockCount: Int,
     isReaderMode: Boolean,
     isDarkWeb: Boolean,
+    tabCount: Int = 1,
+    onOpenClearData: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
-    onOpenSettings: () -> Unit = {},
+    onOpenTabs: () -> Unit = {},
     onReload: () -> Unit = {},
     onOpenShields: () -> Unit = {},
     isBookmarked: Boolean = false,
@@ -130,8 +133,35 @@ fun TopAddressBar(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 12.dp, vertical = 6.dp)
+                .padding(horizontal = 10.dp, vertical = 6.dp)
         ) {
+            // Burn Logo Button on left side beside URL bar
+            IconButton(
+                onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    onOpenClearData()
+                },
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(CircleShape)
+                    .background(SurfaceElevated)
+                    .border(
+                        1.dp,
+                        Brush.horizontalGradient(listOf(FlameOrange.copy(alpha = 0.5f), BorderSubtle)),
+                        CircleShape
+                    )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.LocalFireDepartment,
+                    contentDescription = "Clear Data",
+                    tint = FlameOrange,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Spacer(modifier = Modifier.width(8.dp))
+
             // Main Omnibox Capsule
             Box(
                 modifier = Modifier
@@ -344,16 +374,34 @@ fun TopAddressBar(
                     onClick = {
                         keyboardController?.hide()
                         focusManager.clearFocus()
-                        onOpenSettings()
+                        onOpenTabs()
                     },
                     modifier = Modifier.size(36.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(19.dp)
-                    )
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            imageVector = Icons.Default.Layers,
+                            contentDescription = "Tabs",
+                            tint = TextPrimary,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        if (tabCount > 1) {
+                            Box(
+                                modifier = Modifier
+                                    .offset(x = 6.dp, y = (-6).dp)
+                                    .size(14.dp)
+                                    .background(AccentCyan, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = tabCount.toString(),
+                                    color = DarkBg,
+                                    fontSize = 8.5.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

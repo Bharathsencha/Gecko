@@ -215,18 +215,6 @@ fun BottomBar(
                     modifier = Modifier.size(20.dp)
                 )
             }
-
-            // 7. Tabs Overview Button
-            IconButton(
-                onClick = onOpenTabs,
-                colors = IconButtonDefaults.iconButtonColors(contentColor = TextPrimary)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Layers,
-                    contentDescription = "Tabs",
-                    modifier = Modifier.size(22.dp)
-                )
-            }
         }
     }
 }

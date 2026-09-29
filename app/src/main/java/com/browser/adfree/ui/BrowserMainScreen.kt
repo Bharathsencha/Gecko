@@ -150,8 +150,10 @@ fun BrowserMainScreen(
                     adBlockCount = activeTab?.adBlockCount ?: 0,
                     isReaderMode = activeTab?.isReaderMode ?: false,
                     isDarkWeb = activeTab?.isDarkWeb ?: false,
+                    tabCount = tabManager.tabs.size,
+                    onOpenClearData = { showClearDataSheet = true },
                     onOpenHistory = { showHistoryPage = true },
-                    onOpenSettings = { showSettingsSheet = true },
+                    onOpenTabs = { showTabSwitcher = true },
                     onOpenShields = { showShieldsSheet = true },
                     onReload = {
                         activeTab?.session?.reload()

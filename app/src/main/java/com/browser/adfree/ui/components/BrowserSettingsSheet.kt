@@ -145,7 +145,13 @@ fun BrowserSettingsSheet(
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = false)
 
     ModalBottomSheet(
-        onDismissRequest = onDismissRequest,
+        onDismissRequest = {
+            if (currentScreen != SettingsScreen.MAIN) {
+                currentScreen = SettingsScreen.MAIN
+            } else {
+                onDismissRequest()
+            }
+        },
         sheetState = sheetState,
         containerColor = DarkBg,
         dragHandle = {
@@ -435,47 +441,6 @@ private fun MainSettingsView(
             Spacer(modifier = Modifier.height(16.dp))
         }
 
-        // Browsing Data Card
-        SettingsSectionHeader(title = "BROWSING DATA")
-        SettingsCard {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenClearDialog() }
-                    .padding(horizontal = 16.dp, vertical = 14.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Rounded.DeleteOutline,
-                        contentDescription = null,
-                        tint = DangerRed,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column {
-                        Text(
-                            text = "Clear Browsing Data",
-                            fontSize = 14.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Clear history, cookies, cache, and site data",
-                            fontSize = 11.5.sp,
-                            color = TextSecondary
-                        )
-                    }
-                }
-                Icon(
-                    imageVector = Icons.Rounded.ChevronRight,
-                    contentDescription = null,
-                    tint = TextSecondary,
-                    modifier = Modifier.size(18.dp)
-                )
-            }
-        }
 
         Spacer(modifier = Modifier.height(16.dp))
 
@@ -1065,51 +1030,36 @@ private fun MainSettingsView(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clickable { onOpenHistory() }
-                    .padding(horizontal = 16.dp, vertical = 13.dp)
+                    .clickable { onOpenClearDialog() }
+                    .padding(horizontal = 16.dp, vertical = 14.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        imageVector = Icons.Rounded.History,
+                        imageVector = Icons.Rounded.DeleteOutline,
                         contentDescription = null,
-                        tint = AccentCyan,
+                        tint = DangerRed,
                         modifier = Modifier.size(20.dp)
                     )
                     Spacer(modifier = Modifier.width(12.dp))
-                    Text(
-                        text = "View Browsing History",
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = TextPrimary
-                    )
+                    Column {
+                        Text(
+                            text = "Clear Browsing Data",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Clear history, cookies, cache and open sessions",
+                            fontSize = 11.5.sp,
+                            color = TextSecondary
+                        )
+                    }
                 }
                 Icon(
                     imageVector = Icons.Rounded.ChevronRight,
                     contentDescription = null,
                     tint = TextSecondary,
                     modifier = Modifier.size(18.dp)
-                )
-            }
-            Divider(color = BorderSubtle, thickness = 0.5.dp)
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable { onOpenClearDialog() }
-                    .padding(horizontal = 16.dp, vertical = 13.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.DeleteOutline,
-                    contentDescription = null,
-                    tint = DangerRed,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    text = "Clear Browsing Data...",
-                    fontSize = 14.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = DangerRed
                 )
             }
         }

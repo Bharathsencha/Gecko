@@ -95,14 +95,14 @@ fun CustomizationSuiteSubView(
             IconButton(
                 onClick = onBack,
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(32.dp)
                     .background(SurfaceElevated, CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.ArrowBack,
                     contentDescription = "Back to Settings",
                     tint = TextPrimary,
-                    modifier = Modifier.size(15.dp)
+                    modifier = Modifier.size(17.dp)
                 )
             }
 
@@ -139,7 +139,7 @@ fun CustomizationSuiteSubView(
 
                 // Theme Mode Grid
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AppThemeMode.values().forEach { mode ->
+                    for (mode in AppThemeMode.values()) {
                         val isSelected = preferencesRepo.themeMode == mode
                         val (modeBg, modeDesc, modeIcon) = when (mode) {
                             AppThemeMode.LIGHT -> Triple(Color(0xFFF2F2F7), "Crisp daylight theme with dark text", Icons.Rounded.LightMode)
@@ -155,8 +155,12 @@ fun CustomizationSuiteSubView(
                                 .clip(RoundedCornerShape(12.dp))
                                 .background(if (isSelected) currentAccent.copy(alpha = 0.15f) else SurfaceCard)
                                 .border(
-                                    width = 1.dp,
-                                    color = if (isSelected) currentAccent else BorderSubtle,
+                                    width = if (isSelected) 1.5.dp else 1.dp,
+                                    brush = if (isSelected) {
+                                        Brush.horizontalGradient(listOf(currentAccent, currentAccent.copy(alpha = 0.5f), currentAccent))
+                                    } else {
+                                        Brush.linearGradient(listOf(BorderSubtle, BorderSubtle))
+                                    },
                                     shape = RoundedCornerShape(12.dp)
                                 )
                                 .clickable { preferencesRepo.setThemeModePreference(mode) }
@@ -252,7 +256,11 @@ fun CustomizationSuiteSubView(
                                     .background(color)
                                     .border(
                                         width = if (isSelected) 3.dp else 1.dp,
-                                        color = if (isSelected) TextPrimary else Color.Transparent,
+                                        brush = if (isSelected) {
+                                            Brush.sweepGradient(listOf(color, Color.White, color))
+                                        } else {
+                                            Brush.linearGradient(listOf(Color.Transparent, Color.Transparent))
+                                        },
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
@@ -273,7 +281,7 @@ fun CustomizationSuiteSubView(
                                 text = accent.displayName.substringBefore(" "),
                                 fontSize = 11.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) TextPrimary else TextSecondary
+                                color = if (isSelected) currentAccent else TextSecondary
                             )
                         }
                     }
@@ -322,7 +330,11 @@ fun CustomizationSuiteSubView(
                                     .background(SurfaceElevated)
                                     .border(
                                         width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) currentAccent else BorderSubtle,
+                                        brush = if (isSelected) {
+                                            Brush.horizontalGradient(listOf(currentAccent, currentAccent.copy(alpha = 0.5f), currentAccent))
+                                        } else {
+                                            Brush.linearGradient(listOf(BorderSubtle, BorderSubtle))
+                                        },
                                         shape = RoundedCornerShape(14.dp)
                                     )
                                     .clickable {
