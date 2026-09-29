@@ -54,6 +54,7 @@ fun ClearBrowsingDataSheet(
     historyRepository: HistoryRepository,
     tabManager: TabManager,
     runtime: GeckoRuntime,
+    onTriggerFireAnimation: (() -> Unit)? = null,
     onDismissRequest: () -> Unit
 ) {
     val context = LocalContext.current
@@ -275,6 +276,7 @@ fun ClearBrowsingDataSheet(
                         closeTabs = closeTabsChecked
                     )
                     onDismissRequest()
+                    onTriggerFireAnimation?.invoke()
                 },
                 enabled = clearHistoryChecked || clearCookiesChecked || clearCacheChecked || closeTabsChecked,
                 shape = RoundedCornerShape(14.dp),
@@ -376,7 +378,7 @@ fun ClearDataCheckboxRow(
     }
 }
 
-private fun executeClearData(
+fun executeClearData(
     context: Context,
     historyRepository: HistoryRepository,
     tabManager: TabManager,
@@ -432,17 +434,7 @@ private fun executeClearData(
             tabManager.closeAllTabs(runtime)
             tabManager.sessionRepository.clearSession()
         }
-
-        val cleanedItems = mutableListOf<String>()
-        if (clearHistory) cleanedItems.add("History")
-        if (clearCookies) cleanedItems.add("Cookies")
-        if (clearCache) cleanedItems.add("Cache")
-        if (closeTabs) cleanedItems.add("Tabs")
-
-        val summary = if (cleanedItems.isNotEmpty()) cleanedItems.joinToString(", ") else "Data"
-        Toast.makeText(context, "Cleared $summary (${timeframe.title}) 🔥", Toast.LENGTH_SHORT).show()
     } catch (e: Exception) {
         e.printStackTrace()
-        Toast.makeText(context, "Data cleared successfully", Toast.LENGTH_SHORT).show()
     }
 }

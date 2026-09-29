@@ -45,9 +45,6 @@ class FreeVpnManager(
     var statusText by mutableStateOf(if (preferencesRepo.vpnEnabled) "Secured & Connected" else "Disconnected")
         private set
 
-    var statusIcon by mutableStateOf(if (preferencesRepo.vpnEnabled) "🟢" else "🔴")
-        private set
-
     val livePings = mutableStateMapOf<String, Int>()
 
     var onConfigChanged: ((enabled: Boolean, host: String, port: Int, type: String) -> Unit)? = null
@@ -85,14 +82,12 @@ class FreeVpnManager(
 
     fun verifyAndConnect(country: VpnCountry, runtime: GeckoRuntime?, tabs: List<TabModel>) {
         selectedCountry = country
-        statusText = "Verifying…"
-        statusIcon = "🟡"
+        statusText = "Verifying..."
         scope.launch {
             val reachable = VpnPingManager.testConnectivity(country.host, country.port)
             if (reachable) {
                 isEnabled = true
-                statusText = "Secured (${country.city}) ✓"
-                statusIcon = "🟢"
+                statusText = "Secured (${country.city})"
                 preferencesRepo.setVpnPreference(enabled = true, countryCode = country.code)
                 notifyConfigChange(enabled = true, country = country, tabs = tabs)
                 refreshPings()
@@ -102,8 +97,7 @@ class FreeVpnManager(
                 val fallbackReachable = VpnPingManager.testConnectivity(country.host, country.port)
                 if (fallbackReachable) {
                     isEnabled = true
-                    statusText = "Secured (${country.city}) ✓"
-                    statusIcon = "🟢"
+                    statusText = "Secured (${country.city})"
                     preferencesRepo.setVpnPreference(enabled = true, countryCode = country.code)
                     notifyConfigChange(enabled = true, country = country, tabs = tabs)
                     refreshPings()
@@ -111,7 +105,6 @@ class FreeVpnManager(
                     // Server truly unreachable — do NOT change proxy state
                     isEnabled = false
                     statusText = "Server offline — try another"
-                    statusIcon = "🔴"
                 }
             }
         }
@@ -124,7 +117,6 @@ class FreeVpnManager(
     fun disconnect(runtime: GeckoRuntime?, tabs: List<TabModel>) {
         isEnabled = false
         statusText = "Disconnected"
-        statusIcon = "🔴"
         preferencesRepo.setVpnPreference(enabled = false, countryCode = selectedCountry.code)
         notifyConfigChange(enabled = false, country = selectedCountry, tabs = tabs)
     }

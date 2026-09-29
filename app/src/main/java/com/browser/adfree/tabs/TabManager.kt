@@ -402,7 +402,15 @@ class TabManager(private val context: Context) {
     fun closeTab(index: Int, runtime: GeckoRuntime) {
         if (index in tabs.indices) {
             val closingTab = tabs[index]
-            closingTab.session.close()
+            try {
+                closingTab.session.progressDelegate = null
+                closingTab.session.contentDelegate = null
+                closingTab.session.navigationDelegate = null
+                closingTab.session.promptDelegate = null
+                closingTab.session.mediaSessionDelegate = null
+                closingTab.session.contentBlockingDelegate = null
+                closingTab.session.close()
+            } catch (e: Exception) {}
             tabs.removeAt(index)
 
             if (tabs.isEmpty()) {
@@ -416,9 +424,18 @@ class TabManager(private val context: Context) {
 
     fun closeAllTabs(runtime: GeckoRuntime) {
         for (tab in tabs) {
-            tab.session.close()
+            try {
+                tab.session.progressDelegate = null
+                tab.session.contentDelegate = null
+                tab.session.navigationDelegate = null
+                tab.session.promptDelegate = null
+                tab.session.mediaSessionDelegate = null
+                tab.session.contentBlockingDelegate = null
+                tab.session.close()
+            } catch (e: Exception) {}
         }
         tabs.clear()
+        sessionRepository.clearSession()
         createNewTab(runtime, HOME_URL)
         saveSession()
     }

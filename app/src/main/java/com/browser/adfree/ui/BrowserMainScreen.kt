@@ -77,6 +77,7 @@ fun BrowserMainScreen(
     var showBookmarksPage by remember { mutableStateOf(false) }
     var showShieldsSheet by remember { mutableStateOf(false) }
     var showClearDataSheet by remember { mutableStateOf(false) }
+    var showFireAnimation by remember { mutableStateOf(false) }
     var showDefaultPrompt by remember { mutableStateOf(!isAppDefaultBrowser(context) && !preferencesRepo.defaultBrowserPromptDismissed) }
 
     val defaultBrowserLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -341,6 +342,7 @@ fun BrowserMainScreen(
                 historyRepository = historyRepo,
                 tabManager = tabManager,
                 runtime = runtime,
+                onTriggerFireAnimation = { showFireAnimation = true },
                 onDismissRequest = {
                     showClearDataSheet = false
                     urlText = tabManager.activeTab?.url ?: "about:home"
@@ -473,6 +475,16 @@ fun BrowserMainScreen(
                 onDismissRequest = { showShieldsSheet = false }
             )
         }
+
+        // Full Screen DuckDuckGo Fire Wipe Animation
+        FireWipeOverlay(
+            isPlaying = showFireAnimation,
+            onAnimationFinished = {
+                showFireAnimation = false
+                urlText = "about:home"
+                android.widget.Toast.makeText(context, "Data and tabs cleared", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        )
     }
 }
 

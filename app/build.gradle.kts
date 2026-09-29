@@ -99,6 +99,9 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("io.coil-kt:coil-gif:2.5.0")
 
+    // Lottie Compose for DuckDuckGo Fire Wipe Animation
+    implementation("com.airbnb.android:lottie-compose:6.3.0")
+
     // Networking (OkHttp)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
