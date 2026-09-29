@@ -308,7 +308,10 @@ class MainActivity : ComponentActivity() {
 
         // 6. Set Compose UI
         setContent {
-            BrowserTheme {
+            BrowserTheme(
+                themeMode = preferencesRepo.themeMode,
+                accentColor = preferencesRepo.accentColor
+            ) {
                 BrowserMainScreen(
                     runtime = runtime,
                     tabManager = tabManager,

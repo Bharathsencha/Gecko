@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.material3.MaterialTheme
 import com.browser.adfree.download.BrowserDownloadManager
 import com.browser.adfree.model.ArticleData
 import com.browser.adfree.model.DownloadStatus
@@ -115,42 +116,48 @@ fun BrowserMainScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(DarkBg)
+            .background(MaterialTheme.colorScheme.background)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // 1. Top Omnibox with History & Settings Buttons
-            TopAddressBar(
-                urlInput = urlText,
-                onUrlChange = { urlText = it },
-                onSearch = { query ->
-                    activeTab?.let { tab ->
-                        tabManager.loadUri(tab, query, runtime)
-                    }
-                },
-                adBlockCount = activeTab?.adBlockCount ?: 0,
-                isReaderMode = activeTab?.isReaderMode ?: false,
-                isDarkWeb = activeTab?.isDarkWeb ?: false,
-                onOpenPageMenu = { showPageMenu = true },
-                onOpenSettings = { showSettingsSheet = true },
-                onOpenHistory = { showHistoryPage = true },
-                onOpenShields = { showShieldsSheet = true },
-                onReload = {
-                    activeTab?.session?.reload()
-                },
-                isBookmarked = isCurrentPageBookmarked,
-                onToggleBookmark = {
-                    val curUrl = activeTab?.url ?: ""
-                    if (curUrl.isNotBlank() && curUrl != "about:home") {
-                        val existing = favoritesRepo.favorites.find { it.url == curUrl }
-                        if (existing != null) {
-                            favoritesRepo.removeFavorite(existing)
-                        } else {
-                            favoritesRepo.addFavorite(activeTab?.title ?: curUrl, curUrl)
+            val addressBarComposable = @Composable {
+                TopAddressBar(
+                    urlInput = urlText,
+                    onUrlChange = { urlText = it },
+                    onSearch = { query ->
+                        activeTab?.let { tab ->
+                            tabManager.loadUri(tab, query, runtime)
                         }
-                    }
-                },
-                historySuggestions = historySuggestions
-            )
+                    },
+                    adBlockCount = activeTab?.adBlockCount ?: 0,
+                    isReaderMode = activeTab?.isReaderMode ?: false,
+                    isDarkWeb = activeTab?.isDarkWeb ?: false,
+                    onOpenPageMenu = { showPageMenu = true },
+                    onOpenSettings = { showSettingsSheet = true },
+                    onOpenHistory = { showHistoryPage = true },
+                    onOpenShields = { showShieldsSheet = true },
+                    onReload = {
+                        activeTab?.session?.reload()
+                    },
+                    isBookmarked = isCurrentPageBookmarked,
+                    onToggleBookmark = {
+                        val curUrl = activeTab?.url ?: ""
+                        if (curUrl.isNotBlank() && curUrl != "about:home") {
+                            val existing = favoritesRepo.favorites.find { it.url == curUrl }
+                            if (existing != null) {
+                                favoritesRepo.removeFavorite(existing)
+                            } else {
+                                favoritesRepo.addFavorite(activeTab?.title ?: curUrl, curUrl)
+                            }
+                        }
+                    },
+                    historySuggestions = historySuggestions
+                )
+            }
+
+            // 1. Top Address Bar (if top mode)
+            if (!preferencesRepo.bottomAddressBar) {
+                addressBarComposable()
+            }
 
             // 2. Main Web View Container OR Start Page with Ultra-Smooth Transition
             Box(
@@ -171,6 +178,7 @@ fun BrowserMainScreen(
                     if (homeActive) {
                         SafariHomePage(
                             favorites = favoritesRepo.favorites,
+                            preferencesRepo = preferencesRepo,
                             onNavigate = { targetUrl ->
                                 activeTab?.let { tab ->
                                     tabManager.loadUri(tab, targetUrl, runtime)
@@ -193,6 +201,11 @@ fun BrowserMainScreen(
                         )
                     }
                 }
+            }
+
+            // 1b. Bottom Address Bar (if bottom mode)
+            if (preferencesRepo.bottomAddressBar) {
+                addressBarComposable()
             }
 
             // 3. Bottom Bar with Page Progress & Horizontal Gestures

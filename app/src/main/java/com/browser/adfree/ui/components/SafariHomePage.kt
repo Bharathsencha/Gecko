@@ -17,6 +17,7 @@
 
 package com.browser.adfree.ui.components
 
+import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -39,6 +40,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -50,6 +52,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.browser.adfree.model.FavoriteItem
+import com.browser.adfree.storage.BrowserPreferencesRepository
+import com.browser.adfree.storage.HomepageWallpaper
 import com.browser.adfree.ui.theme.*
 import java.net.URI
 import java.net.URLEncoder
@@ -57,6 +61,7 @@ import java.net.URLEncoder
 @Composable
 fun SafariHomePage(
     favorites: List<FavoriteItem>,
+    preferencesRepo: BrowserPreferencesRepository,
     onNavigate: (String) -> Unit,
     onAddFavorite: (title: String, url: String) -> Unit,
     onRemoveFavorite: (FavoriteItem) -> Unit,
@@ -64,204 +69,261 @@ fun SafariHomePage(
 ) {
     var isEditMode by remember { mutableStateOf(false) }
     var showAddSheet by remember { mutableStateOf(false) }
+    val currentAccent = Color(preferencesRepo.accentColor.hex)
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(DarkBg)
-            .verticalScroll(rememberScrollState())
-            .padding(horizontal = 20.dp, vertical = 16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(modifier = Modifier.height(24.dp))
-
-        // Browser Brand
-        Box(
-            modifier = Modifier
-                .size(68.dp)
-                .clip(CircleShape)
-                .background(
-                    Brush.linearGradient(
-                        listOf(Color(0xFF2997FF), Color(0xFF0051C7))
-                    )
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = Icons.Default.Explore,
-                contentDescription = "Browser",
-                tint = Color.White,
-                modifier = Modifier.size(40.dp)
+    Box(modifier = modifier.fillMaxSize()) {
+        // 1. Wallpaper Background Layer
+        if (preferencesRepo.homepageWallpaper == HomepageWallpaper.CUSTOM && preferencesRepo.customWallpaperUri.isNotBlank()) {
+            AsyncImage(
+                model = Uri.parse(preferencesRepo.customWallpaperUri),
+                contentDescription = "Custom Wallpaper",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .then(if (preferencesRepo.wallpaperBlur > 0f) Modifier.blur(preferencesRepo.wallpaperBlur.dp) else Modifier)
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(getHomeWallpaperBrush(preferencesRepo.homepageWallpaper))
+                    .then(if (preferencesRepo.wallpaperBlur > 0f) Modifier.blur(preferencesRepo.wallpaperBlur.dp) else Modifier)
             )
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
-
-        Text(
-            text = "Gecko",
-            fontSize = 24.sp,
-            fontWeight = FontWeight.Bold,
-            color = TextPrimary
-        )
-
-        Text(
-            text = "Ultra-Fast • Zero Ads • Complete Privacy",
-            fontSize = 13.sp,
-            color = TextSecondary,
-            textAlign = TextAlign.Center
-        )
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Privacy Report Card
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(SurfaceElevated)
-                .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-                .padding(16.dp)
-        ) {
+        // 2. Wallpaper Dimming Scrim Layer
+        if (preferencesRepo.wallpaperDim > 0f) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .background(SurfaceCard, CircleShape),
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = preferencesRepo.wallpaperDim))
+            )
+        }
+
+        // 3. Foreground Scrollable Content
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Optional Greeting & Clock Header
+            if (preferencesRepo.showGreetingHeader) {
+                val currentGreeting = remember {
+                    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                    when {
+                        hour in 5..11 -> "Good Morning"
+                        hour in 12..16 -> "Good Afternoon"
+                        hour in 17..21 -> "Good Evening"
+                        else -> "Good Night"
+                    }
+                }
+                Text(
+                    text = currentGreeting,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = currentAccent,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+            }
+
+            // Browser Brand
+            Box(
+                modifier = Modifier
+                    .size(68.dp)
+                    .clip(CircleShape)
+                    .background(
+                        Brush.linearGradient(
+                            listOf(currentAccent, currentAccent.copy(alpha = 0.65f))
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    imageVector = Icons.Default.Shield,
-                    contentDescription = "Privacy Shield",
-                    tint = ShieldGreen,
-                    modifier = Modifier.size(24.dp)
+                    imageVector = Icons.Default.Explore,
+                    contentDescription = "Browser",
+                    tint = Color.White,
+                    modifier = Modifier.size(40.dp)
                 )
             }
 
-            Spacer(modifier = Modifier.width(14.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Privacy Protection Active",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-                Text(
-                    text = "Advanced ad blocking & strict anti-tracking active. Zero tracking cookies permitted.",
-                    fontSize = 12.sp,
-                    color = TextSecondary,
-                    lineHeight = 16.sp
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(28.dp))
-
-        // Favorites Header with Edit/Done button
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(bottom = 14.dp)
-        ) {
             Text(
-                text = "Favorites",
-                fontSize = 18.sp,
+                text = "Gecko",
+                fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = TextPrimary
             )
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TextButton(
-                    onClick = { isEditMode = !isEditMode },
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = if (isEditMode) AccentCyan else TextSecondary
-                    )
+            Text(
+                text = "Ultra-Fast • Zero Ads • Complete Privacy",
+                fontSize = 13.sp,
+                color = TextSecondary,
+                textAlign = TextAlign.Center
+            )
+
+            // Privacy Report Card
+            if (preferencesRepo.showPrivacyStatsWidget) {
+                Spacer(modifier = Modifier.height(24.dp))
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(SurfaceElevated.copy(alpha = 0.88f))
+                        .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                        .padding(16.dp)
                 ) {
-                    Text(
-                        text = if (isEditMode) "Done" else "Edit",
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.SemiBold
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .background(SurfaceCard, CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Shield,
+                            contentDescription = "Privacy Shield",
+                            tint = ShieldGreen,
+                            modifier = Modifier.size(24.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(14.dp))
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Privacy Protection Active",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = TextPrimary
+                        )
+                        Text(
+                            text = "Advanced ad blocking & strict anti-tracking active. Zero tracking cookies permitted.",
+                            fontSize = 12.sp,
+                            color = TextSecondary,
+                            lineHeight = 16.sp
+                        )
+                    }
                 }
             }
-        }
 
-        // Favorites Grid (Chunked into 4-column rows without nested lazy containers for smooth scrolling)
-        val allItems = remember(favorites.toList()) { favorites.toList() }
-        val totalCells = allItems.size + 1 // items + Add button
-        val numRows = (totalCells + 3) / 4
+            // Favorites Grid (if enabled)
+            if (preferencesRepo.showFavoritesGrid) {
+                Spacer(modifier = Modifier.height(28.dp))
 
-        for (rowIndex in 0 until numRows) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 16.dp),
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                for (colIndex in 0 until 4) {
-                    val itemIndex = rowIndex * 4 + colIndex
-                    Box(modifier = Modifier.weight(1f)) {
-                        if (itemIndex < allItems.size) {
-                            val fav = allItems[itemIndex]
-                            FavoriteCard(
-                                fav = fav,
-                                isEditMode = isEditMode,
-                                onClick = {
-                                    if (!isEditMode) onNavigate(fav.url)
-                                },
-                                onLongClick = { isEditMode = true },
-                                onDelete = { onRemoveFavorite(fav) }
+                // Favorites Header with Edit/Done button
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(bottom = 14.dp)
+                ) {
+                    Text(
+                        text = "Favorites",
+                        fontSize = 18.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = TextPrimary
+                    )
+
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = { isEditMode = !isEditMode },
+                            colors = ButtonDefaults.textButtonColors(
+                                contentColor = if (isEditMode) currentAccent else TextSecondary
                             )
-                        } else if (itemIndex == allItems.size) {
-                            // "+ Add" Card
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .clickable { showAddSheet = true }
-                                    .padding(4.dp)
-                            ) {
-                                Box(
-                                    modifier = Modifier.padding(top = 6.dp, end = 6.dp)
-                                ) {
-                                    Box(
+                        ) {
+                            Text(
+                                text = if (isEditMode) "Done" else "Edit",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+                }
+
+                // Favorites Grid (Chunked based on user column choice 3, 4, 5)
+                val columns = preferencesRepo.favoritesGridColumns.coerceIn(3, 5)
+                val allItems = remember(favorites.toList()) { favorites.toList() }
+                val totalCells = allItems.size + 1 // items + Add button
+                val numRows = (totalCells + columns - 1) / columns
+
+                for (rowIndex in 0 until numRows) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        for (colIndex in 0 until columns) {
+                            val itemIndex = rowIndex * columns + colIndex
+                            Box(modifier = Modifier.weight(1f)) {
+                                if (itemIndex < allItems.size) {
+                                    val fav = allItems[itemIndex]
+                                    FavoriteCard(
+                                        fav = fav,
+                                        isEditMode = isEditMode,
+                                        onClick = {
+                                            if (!isEditMode) onNavigate(fav.url)
+                                        },
+                                        onLongClick = { isEditMode = true },
+                                        onDelete = { onRemoveFavorite(fav) }
+                                    )
+                                } else if (itemIndex == allItems.size) {
+                                    // "+ Add" Card
+                                    Column(
+                                        horizontalAlignment = Alignment.CenterHorizontally,
                                         modifier = Modifier
-                                            .size(54.dp)
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(SurfaceElevated)
-                                            .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                                        contentAlignment = Alignment.Center
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .clickable { showAddSheet = true }
+                                            .padding(4.dp)
                                     ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Add,
-                                            contentDescription = "Add Favorite",
-                                            tint = AccentCyan,
-                                            modifier = Modifier.size(24.dp)
+                                        Box(
+                                            modifier = Modifier.padding(top = 6.dp, end = 6.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(54.dp)
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .background(SurfaceElevated.copy(alpha = 0.88f))
+                                                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Icon(
+                                                    imageVector = Icons.Default.Add,
+                                                    contentDescription = "Add Favorite",
+                                                    tint = currentAccent,
+                                                    modifier = Modifier.size(24.dp)
+                                                )
+                                            }
+                                        }
+                                        Spacer(modifier = Modifier.height(6.dp))
+                                        Text(
+                                            text = "Add",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Medium,
+                                            color = TextSecondary,
+                                            textAlign = TextAlign.Center
                                         )
                                     }
+                                } else {
+                                    // Empty placeholder spacer to keep column alignment
+                                    Spacer(modifier = Modifier.fillMaxWidth())
                                 }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "Add",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = TextSecondary,
-                                    textAlign = TextAlign.Center
-                                )
                             }
-                        } else {
-                            // Empty placeholder spacer to keep 4-column alignment
-                            Spacer(modifier = Modifier.fillMaxWidth())
                         }
                     }
                 }
             }
-        }
 
-        Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(32.dp))
+        }
     }
 
     // Modern Safari Add Shortcut Bottom Sheet
@@ -272,6 +334,19 @@ fun SafariHomePage(
             },
             onDismissRequest = { showAddSheet = false }
         )
+    }
+}
+
+private fun getHomeWallpaperBrush(wp: HomepageWallpaper): Brush {
+    return when (wp) {
+        HomepageWallpaper.DEFAULT -> Brush.radialGradient(listOf(Color(0xFF1B2A4A), Color(0xFF0D1525), Color(0xFF000000)))
+        HomepageWallpaper.AURORA -> Brush.linearGradient(listOf(Color(0xFF031024), Color(0xFF0A2E38), Color(0xFF041E24), Color(0xFF020912)))
+        HomepageWallpaper.NEBULA -> Brush.radialGradient(listOf(Color(0xFF2A0845), Color(0xFF14052B), Color(0xFF000000)))
+        HomepageWallpaper.CYBER -> Brush.linearGradient(listOf(Color(0xFF0D0221), Color(0xFF0F084B), Color(0xFF26408B), Color(0xFF000000)))
+        HomepageWallpaper.OLED -> Brush.linearGradient(listOf(Color(0xFF000000), Color(0xFF000000)))
+        HomepageWallpaper.FOREST -> Brush.linearGradient(listOf(Color(0xFF061A14), Color(0xFF0D2818), Color(0xFF040F0A), Color(0xFF000000)))
+        HomepageWallpaper.SUNSET -> Brush.linearGradient(listOf(Color(0xFF2D0B00), Color(0xFF4A1500), Color(0xFF1A0500), Color(0xFF000000)))
+        HomepageWallpaper.CUSTOM -> Brush.linearGradient(listOf(Color(0xFF1C1C1E), Color(0xFF000000)))
     }
 }
 

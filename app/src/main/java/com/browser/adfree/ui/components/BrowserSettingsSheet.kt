@@ -42,10 +42,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.app.role.RoleManager
+import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import com.browser.adfree.model.CookiePolicy
 import com.browser.adfree.model.SearchEngine
 import com.browser.adfree.model.StartupBehavior
 import com.browser.adfree.model.VpnCountry
+import com.browser.adfree.storage.AppAccentColor
+import com.browser.adfree.storage.AppThemeMode
 import com.browser.adfree.storage.BrowserPreferencesRepository
 import com.browser.adfree.storage.HistoryRepository
 import com.browser.adfree.storage.SecurePasswordRepository
@@ -56,7 +65,53 @@ import org.mozilla.geckoview.GeckoRuntime
 
 enum class SettingsScreen {
     MAIN,
-    VPN_LOCATIONS
+    VPN_LOCATIONS,
+    CUSTOMIZATION
+}
+
+fun isAppDefaultBrowser(context: Context): Boolean {
+    return try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = context.getSystemService(RoleManager::class.java)
+            if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER)) {
+                return roleManager.isRoleHeld(RoleManager.ROLE_BROWSER)
+            }
+        }
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.google.com"))
+        val resolveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.packageManager.resolveActivity(intent, PackageManager.ResolveInfoFlags.of(PackageManager.MATCH_DEFAULT_ONLY.toLong()))
+        } else {
+            @Suppress("DEPRECATION")
+            context.packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+        }
+        resolveInfo?.activityInfo?.packageName == context.packageName
+    } catch (e: Exception) {
+        false
+    }
+}
+
+fun launchDefaultBrowserSettings(context: Context) {
+    try {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val roleManager = context.getSystemService(RoleManager::class.java)
+            if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER)) {
+                val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER)
+                context.startActivity(intent)
+                return
+            }
+        }
+        val intent = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        try {
+            val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                data = Uri.fromParts("package", context.packageName, null)
+            }
+            context.startActivity(intent)
+        } catch (e2: Exception) {
+            // Fallback
+        }
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -76,8 +131,8 @@ fun BrowserSettingsSheet(
     var currentScreen by remember { mutableStateOf(SettingsScreen.MAIN) }
     var showClearDialog by remember { mutableStateOf(false) }
 
-    // Intercept back button when in VPN Locations subview
-    BackHandler(enabled = currentScreen == SettingsScreen.VPN_LOCATIONS) {
+    // Intercept back button when in subviews
+    BackHandler(enabled = currentScreen != SettingsScreen.MAIN) {
         currentScreen = SettingsScreen.MAIN
     }
 
@@ -101,7 +156,7 @@ fun BrowserSettingsSheet(
         AnimatedContent(
             targetState = currentScreen,
             transitionSpec = {
-                if (targetState == SettingsScreen.VPN_LOCATIONS) {
+                if (targetState != SettingsScreen.MAIN) {
                     (slideInHorizontally { width -> width } + fadeIn()).togetherWith(
                         slideOutHorizontally { width -> -width } + fadeOut()
                     )
@@ -123,6 +178,7 @@ fun BrowserSettingsSheet(
                         vpnManager = vpnManager,
                         runtime = runtime,
                         onOpenVpnLocations = { currentScreen = SettingsScreen.VPN_LOCATIONS },
+                        onOpenCustomization = { currentScreen = SettingsScreen.CUSTOMIZATION },
                         onOpenPasswords = onOpenPasswords,
                         onOpenHistory = onOpenHistory,
                         onOpenClearDialog = { showClearDialog = true },
@@ -137,6 +193,12 @@ fun BrowserSettingsSheet(
                             vpnManager.selectCountry(country, runtime, tabManager.tabs)
                             currentScreen = SettingsScreen.MAIN
                         }
+                    )
+                }
+                SettingsScreen.CUSTOMIZATION -> {
+                    CustomizationSuiteSubView(
+                        preferencesRepo = preferencesRepo,
+                        onBack = { currentScreen = SettingsScreen.MAIN }
                     )
                 }
             }
@@ -161,11 +223,16 @@ private fun MainSettingsView(
     vpnManager: FreeVpnManager,
     runtime: GeckoRuntime,
     onOpenVpnLocations: () -> Unit,
+    onOpenCustomization: () -> Unit,
     onOpenPasswords: () -> Unit,
     onOpenHistory: () -> Unit,
     onOpenClearDialog: () -> Unit,
     onClose: () -> Unit
 ) {
+    val context = LocalContext.current
+    val isDefault = remember { isAppDefaultBrowser(context) }
+    val currentAccent = Color(preferencesRepo.accentColor.hex)
+
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -203,7 +270,244 @@ private fun MainSettingsView(
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Default Browser Action Card
+        if (!isDefault) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(18.dp))
+                    .background(currentAccent.copy(alpha = 0.12f))
+                    .border(1.dp, currentAccent.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
+                    .clickable { launchDefaultBrowserSettings(context) }
+                    .padding(14.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(currentAccent.copy(alpha = 0.2f)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Language,
+                                contentDescription = null,
+                                tint = currentAccent,
+                                modifier = Modifier.size(22.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Set as Default Browser",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Open all links ad-free & protected",
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF8E8E93)
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = currentAccent
+                    ) {
+                        Text(
+                            text = "Set Default",
+                            color = if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        } else {
+            SettingsCard {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Rounded.CheckCircle,
+                            contentDescription = null,
+                            tint = Color(0xFF34C759),
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Default Web Browser",
+                                fontSize = 14.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color.White
+                            )
+                            Text(
+                                text = "Gecko opens external web links",
+                                fontSize = 11.5.sp,
+                                color = Color(0xFF8E8E93)
+                            )
+                        }
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xFF1A3320)
+                    ) {
+                        Text(
+                            text = "Active ✓",
+                            color = Color(0xFF34C759),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                        )
+                    }
+                }
+            }
+            Spacer(modifier = Modifier.height(14.dp))
+        }
+
+        // Section: Appearance & Customization Suite
+        SettingsSectionHeader(title = "APPEARANCE & THEME")
+        SettingsCard {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = "App Theme Mode",
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = Color.White
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+
+                // 3-Segment Quick Mode Selector: Light | Dark | System
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(38.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(Color(0xFF141416))
+                        .padding(3.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                ) {
+                    val isLight = preferencesRepo.themeMode == AppThemeMode.LIGHT
+                    val isSystem = preferencesRepo.themeMode == AppThemeMode.SYSTEM
+                    val isDark = !isLight && !isSystem
+
+                    listOf(
+                        Triple("Light", isLight, AppThemeMode.LIGHT),
+                        Triple("Dark", isDark, AppThemeMode.DARK_OLED),
+                        Triple("System", isSystem, AppThemeMode.SYSTEM)
+                    ).forEach { (label, isSelected, targetMode) ->
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(if (isSelected) currentAccent else Color.Transparent)
+                                .clickable {
+                                    if (targetMode == AppThemeMode.DARK_OLED) {
+                                        if (preferencesRepo.themeMode != AppThemeMode.DARK_OLED &&
+                                            preferencesRepo.themeMode != AppThemeMode.DARK_MIDNIGHT &&
+                                            preferencesRepo.themeMode != AppThemeMode.DARK_CHARCOAL
+                                        ) {
+                                            preferencesRepo.setThemeModePreference(AppThemeMode.DARK_OLED)
+                                        }
+                                    } else {
+                                        preferencesRepo.setThemeModePreference(targetMode)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 12.5.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isSelected) (if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White) else Color(0xFF8E8E93)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+
+            // Personalization Suite Subview Link
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenCustomization() }
+                    .padding(horizontal = 16.dp, vertical = 13.dp)
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(32.dp)
+                            .clip(CircleShape)
+                            .background(currentAccent.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Palette,
+                            contentDescription = null,
+                            tint = currentAccent,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Personalization & Theme Suite",
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "${preferencesRepo.themeMode.displayName} • ${preferencesRepo.accentColor.displayName}",
+                            fontSize = 11.5.sp,
+                            color = Color(0xFF8E8E93)
+                        )
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(14.dp)
+                            .clip(CircleShape)
+                            .background(currentAccent)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Icon(
+                        imageVector = Icons.Rounded.ChevronRight,
+                        contentDescription = null,
+                        tint = Color(0xFF8E8E93),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
 
         // Section 1: Free In-Browser VPN
         SettingsSectionHeader(title = "ENCRYPTED VPN RELAYS")

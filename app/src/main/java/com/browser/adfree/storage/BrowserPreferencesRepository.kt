@@ -88,6 +88,112 @@ class BrowserPreferencesRepository(context: Context) {
     var vpnCountryCode by mutableStateOf(prefs.getString("vpn_country_code", "US") ?: "US")
         private set
 
+    // Customization & Appearance
+    var themeMode by mutableStateOf(
+        try {
+            AppThemeMode.valueOf(prefs.getString("theme_mode", AppThemeMode.DARK_OLED.name) ?: AppThemeMode.DARK_OLED.name)
+        } catch (e: Exception) {
+            AppThemeMode.DARK_OLED
+        }
+    )
+        private set
+
+    var accentColor by mutableStateOf(
+        try {
+            AppAccentColor.valueOf(prefs.getString("accent_color", AppAccentColor.CYAN.name) ?: AppAccentColor.CYAN.name)
+        } catch (e: Exception) {
+            AppAccentColor.CYAN
+        }
+    )
+        private set
+
+    var homepageWallpaper by mutableStateOf(
+        try {
+            HomepageWallpaper.valueOf(prefs.getString("homepage_wallpaper", HomepageWallpaper.DEFAULT.name) ?: HomepageWallpaper.DEFAULT.name)
+        } catch (e: Exception) {
+            HomepageWallpaper.DEFAULT
+        }
+    )
+        private set
+
+    var customWallpaperUri by mutableStateOf(prefs.getString("custom_wallpaper_uri", "") ?: "")
+        private set
+
+    var wallpaperBlur by mutableStateOf(prefs.getFloat("wallpaper_blur", 0f))
+        private set
+
+    var wallpaperDim by mutableStateOf(prefs.getFloat("wallpaper_dim", 0.3f))
+        private set
+
+    var showPrivacyStatsWidget by mutableStateOf(prefs.getBoolean("show_privacy_stats", true))
+        private set
+
+    var showFavoritesGrid by mutableStateOf(prefs.getBoolean("show_favorites_grid", true))
+        private set
+
+    var favoritesGridColumns by mutableStateOf(prefs.getInt("favorites_grid_columns", 4))
+        private set
+
+    var showGreetingHeader by mutableStateOf(prefs.getBoolean("show_greeting_header", true))
+        private set
+
+    var bottomAddressBar by mutableStateOf(prefs.getBoolean("bottom_address_bar", false))
+        private set
+
+    fun setThemeModePreference(mode: AppThemeMode) {
+        themeMode = mode
+        prefs.edit().putString("theme_mode", mode.name).apply()
+    }
+
+    fun setAccentColorPreference(color: AppAccentColor) {
+        accentColor = color
+        prefs.edit().putString("accent_color", color.name).apply()
+    }
+
+    fun setHomepageWallpaperPreference(wallpaper: HomepageWallpaper, customUri: String = "") {
+        homepageWallpaper = wallpaper
+        customWallpaperUri = customUri
+        prefs.edit()
+            .putString("homepage_wallpaper", wallpaper.name)
+            .putString("custom_wallpaper_uri", customUri)
+            .apply()
+    }
+
+    fun setWallpaperBlurPreference(blur: Float) {
+        wallpaperBlur = blur
+        prefs.edit().putFloat("wallpaper_blur", blur).apply()
+    }
+
+    fun setWallpaperDimPreference(dim: Float) {
+        wallpaperDim = dim
+        prefs.edit().putFloat("wallpaper_dim", dim).apply()
+    }
+
+    fun setShowPrivacyStatsPreference(show: Boolean) {
+        showPrivacyStatsWidget = show
+        prefs.edit().putBoolean("show_privacy_stats", show).apply()
+    }
+
+    fun setShowFavoritesGridPreference(show: Boolean) {
+        showFavoritesGrid = show
+        prefs.edit().putBoolean("show_favorites_grid", show).apply()
+    }
+
+    fun setFavoritesGridColumnsPreference(columns: Int) {
+        favoritesGridColumns = columns
+        prefs.edit().putInt("favorites_grid_columns", columns).apply()
+    }
+
+    fun setShowGreetingHeaderPreference(show: Boolean) {
+        showGreetingHeader = show
+        prefs.edit().putBoolean("show_greeting_header", show).apply()
+    }
+
+    fun setBottomAddressBarPreference(bottom: Boolean) {
+        bottomAddressBar = bottom
+        prefs.edit().putBoolean("bottom_address_bar", bottom).apply()
+    }
+
     fun setSearchEnginePreference(engine: SearchEngine) {
         searchEngine = engine
         prefs.edit().putString("search_engine", engine.name).apply()
@@ -151,4 +257,33 @@ class BrowserPreferencesRepository(context: Context) {
             .putString("vpn_country_code", countryCode)
             .apply()
     }
+}
+
+enum class AppThemeMode(val displayName: String) {
+    LIGHT("Light"),
+    DARK_OLED("OLED Black"),
+    DARK_MIDNIGHT("Midnight Navy"),
+    DARK_CHARCOAL("Charcoal"),
+    SYSTEM("System")
+}
+
+enum class AppAccentColor(val displayName: String, val hex: Long) {
+    CYAN("Neon Cyan", 0xFF00D8F6),
+    PURPLE("Electric Purple", 0xFFA855F7),
+    GREEN("Emerald Green", 0xFF10B981),
+    RED("Ruby Crimson", 0xFFF43F5E),
+    ORANGE("Sunset Amber", 0xFFF97316),
+    YELLOW("Cyber Gold", 0xFFFACC15),
+    MONOCHROME("Monochrome", 0xFFE2E8F0)
+}
+
+enum class HomepageWallpaper(val displayName: String) {
+    DEFAULT("Glass Dark"),
+    AURORA("Deep Aurora"),
+    NEBULA("Cosmic Nebula"),
+    CYBER("Cyber Grid"),
+    OLED("Pitch Black"),
+    FOREST("Mystic Forest"),
+    SUNSET("Warm Sunset"),
+    CUSTOM("Custom Photo")
 }
