@@ -6,23 +6,22 @@
  */
 
 // ── 1. Google AI Overview Blocker ──────────────────────────────────────────
+// ── 1. Google AI Overview Blocker ──────────────────────────────────────────
 const AI_OVERVIEW_SELECTORS = [
-    "#Odp5De", "div[jsname='yDeuDf']", ".hdzaWe",
+    "#Odp5De",
+    "div[jsname='yDeuDf']",
+    ".hdzaWe",
     "div[jscontroller*='GenerativeSearch']",
-    "div[aria-label*='AI Overview']", "div[aria-label*='AI overview']",
-    "div[data-attrid*='generative']", ".g-blk", "[data-sge-block='true']",
-    ".MjjYud:has(#Odp5De)", ".MjjYud:has(.hdzaWe)",
-    "#genai_carousel", "div[jsname='X9lQic']",
-    "div[jsname='Bz112c']", "div[jsname='oIq1Zb']", "div[jsname='wx3skf']",
-    "div[jsname='wMPnde']", "div[jsname='BiCFae']", "div[jsname='r3p0Jd']",
-    "#gds-aic", "#kp-wp-tab-overview", ".YzCOte", ".XqgnIe", ".M8OgIe",
-    "div[data-aioc]", "div[data-aipc]",
-    "div[jscontroller='MxYRTe']", "div[jscontroller='AUvrTe']",
-    "div[jscontroller='SHcN5']", ".k8XOCe", ".wDYxhc:has(.XqgnIe)",
-    "div[jscontroller*='AI']", "div[data-oshdr]", "div[jsname='FzSmSb']",
-    ".UA0FGd", ".BmP5tf", ".kkjOtf",
-    "div[class*='ai-overview']", "[id*='ai-overview']",
-    ".hJnd5c", "div[jsname='Bz112c']"
+    "div[aria-label*='AI Overview']",
+    "div[aria-label*='AI overview']",
+    "div[data-attrid*='generative']",
+    "[data-sge-block='true']",
+    "#genai_carousel",
+    "#gds-aic",
+    "div[data-aioc='true']",
+    "div[data-aipc='true']",
+    "div[class*='ai-overview']",
+    "[id*='ai-overview']"
 ].join(", ");
 
 function injectAiOverrideStyle() {
@@ -33,9 +32,18 @@ function injectAiOverrideStyle() {
     if (!style) {
         style = document.createElement("style");
         style.id = "aifree-ai-block";
-        style.textContent = AI_OVERVIEW_SELECTORS.split(", ")
-            .map(s => `${s} { display: none !important; }`)
-            .join("\n");
+        style.textContent = `
+            ${AI_OVERVIEW_SELECTORS} { 
+                display: none !important; 
+            }
+            /* Protect Google Search accordion and expandable chevron SVG icons from scaling out of bounds */
+            g-accordion-expander svg, 
+            div[jscontroller] svg:not([width]), 
+            .MjjYud svg:not([width]) {
+                max-width: 24px !important;
+                max-height: 24px !important;
+            }
+        `;
         (document.head || document.documentElement).appendChild(style);
     }
 }
