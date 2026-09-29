@@ -147,6 +147,11 @@ fun SavedPasswordsSheet(
                     }
                 },
                 singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                    autoCorrect = false
+                ),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = TextPrimary,
@@ -227,6 +232,11 @@ fun SavedPasswordsSheet(
                         onValueChange = { domainInput = it },
                         label = { Text("Website (e.g. github.com)", color = TextSecondary) },
                         singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Next,
+                            autoCorrect = false
+                        ),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
@@ -241,6 +251,11 @@ fun SavedPasswordsSheet(
                         onValueChange = { usernameInput = it },
                         label = { Text("Username / Email", color = TextSecondary) },
                         singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Next,
+                            autoCorrect = false
+                        ),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,
@@ -255,6 +270,11 @@ fun SavedPasswordsSheet(
                         onValueChange = { passwordInput = it },
                         label = { Text("Password", color = TextSecondary) },
                         singleLine = true,
+                        keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                            keyboardType = androidx.compose.ui.text.input.KeyboardType.Password,
+                            imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                            autoCorrect = false
+                        ),
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedTextColor = TextPrimary,
                             unfocusedTextColor = TextPrimary,

@@ -52,6 +52,7 @@ android {
     }
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -69,14 +70,19 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
         jniLibs {
-            useLegacyPackaging = false
+            useLegacyPackaging = true
         }
     }
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+
     // Mozilla GeckoView Engine
     implementation("org.mozilla.geckoview:geckoview-omni:122.0.20240205133611")
+
+    // NewPipeExtractor for YouTube stream extraction
+    implementation("com.github.teamnewpipe:NewPipeExtractor:v0.24.4")
 
     // AndroidX & Lifecycle
     implementation("androidx.core:core-ktx:1.12.0")

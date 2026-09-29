@@ -255,49 +255,10 @@ function initBackgroundMediaPlayback() {
         const script = document.createElement('script');
         script.textContent = `(function() {
             try {
-                Object.defineProperty(document, 'hidden', {
-                    get: () => false,
-                    configurable: true
-                });
-                Object.defineProperty(document, 'visibilityState', {
-                    get: () => 'visible',
-                    configurable: true
-                });
-                Object.defineProperty(document, 'webkitVisibilityState', {
-                    get: () => 'visible',
-                    configurable: true
-                });
+                Object.defineProperty(document, 'hidden', { get: () => false, configurable: true });
+                Object.defineProperty(document, 'visibilityState', { get: () => 'visible', configurable: true });
+                Object.defineProperty(document, 'webkitVisibilityState', { get: () => 'visible', configurable: true });
             } catch(e) {}
-
-            // Suppress visibility/pagehide pause events from reaching video elements
-            const blockedEventTypes = new Set(['visibilitychange', 'webkitvisibilitychange', 'pagehide']);
-            
-            const origAddEventListener = EventTarget.prototype.addEventListener;
-            EventTarget.prototype.addEventListener = function(type, listener, options) {
-                if (blockedEventTypes.has(type)) {
-                    const wrapped = function(e) {
-                        // Do not fire pause actions when browser is backgrounded
-                        return;
-                    };
-                    return origAddEventListener.call(this, type, wrapped, options);
-                }
-                return origAddEventListener.call(this, type, listener, options);
-            };
-
-            // Intercept media pause calls triggered by backgrounding
-            const origPause = HTMLMediaElement.prototype.pause;
-            HTMLMediaElement.prototype.pause = function() {
-                const stack = new Error().stack || '';
-                if (stack.includes('visibilitychange') || 
-                    stack.includes('onVisibilityChange') || 
-                    stack.includes('pagehide') || 
-                    stack.includes('onHidden') || 
-                    stack.includes('background') ||
-                    stack.includes('onBlur')) {
-                    return;
-                }
-                return origPause.apply(this, arguments);
-            };
         })();`;
         (document.head || document.documentElement).appendChild(script);
         script.remove();
@@ -463,6 +424,420 @@ function initWebShareBridge() {
     } catch (e) {}
 }
 
+// ── 8. Universal Video & Media Sniffer Engine (Cat-Catch In-Browser Architecture) ──
+function initUniversalMediaSniffer() {
+    let lastScanTime = 0;
+
+    function reportMedia(videoData) {
+        if (!videoData || !videoData.qualities || videoData.qualities.length === 0) return;
+        try {
+            if (browser.runtime && browser.runtime.sendMessage) {
+                browser.runtime.sendMessage({
+                    action: "video_detected",
+                    data: videoData
+                }).catch(() => {});
+            }
+        } catch (e) {}
+        try {
+            if (browser.runtime && browser.runtime.sendNativeMessage) {
+                browser.runtime.sendNativeMessage("browser_app", {
+                    action: "video_detected",
+                    data: videoData
+                }).catch(() => {});
+            }
+        } catch (e) {}
+    }
+
+    // 1. Injected Player Hook & Fetch / XHR / MediaSource Interceptor
+    try {
+        const hookScript = document.createElement("script");
+        hookScript.textContent = `(function() {
+            const MEDIA_REGEX = /\\.(m3u8|mpd|mp4|webm|m4v|mov|m4a|aac|flv)(\\?|#|$)/i;
+            const KNOWN_CDN = /(googlevideo\\.com|v\\.redd\\.it|fbcdn\\.net|twimg\\.com|tiktokcdn\\.com|vimeocdn\\.com|byteoversea\\.com|hotstar\\.com|akamaihd\\.net|cloudfront\\.net)/i;
+
+            function checkUrl(url) {
+                if (!url || typeof url !== 'string' || url.startsWith('blob:') || url.startsWith('data:')) return;
+                // Ignore chunk segments
+                if (url.includes('.ts?') || url.endsWith('.ts') || url.includes('.m4s?') || url.endsWith('.m4s')) return;
+
+                if (MEDIA_REGEX.test(url) || KNOWN_CDN.test(url)) {
+                    window.postMessage({
+                        type: "__gecko_sniffed_media__",
+                        url: url,
+                        pageTitle: document.title || "Web Video",
+                        pageUrl: window.location.href
+                    }, "*");
+                }
+            }
+
+            // Hook window.fetch
+            if (window.fetch) {
+                const origFetch = window.fetch;
+                window.fetch = function() {
+                    try {
+                        const arg = arguments[0];
+                        const url = (typeof arg === 'string') ? arg : (arg && arg.url ? arg.url : '');
+                        checkUrl(url);
+                    } catch(e) {}
+                    return origFetch.apply(this, arguments);
+                };
+            }
+
+            // Hook XMLHttpRequest
+            if (window.XMLHttpRequest) {
+                const origOpen = XMLHttpRequest.prototype.open;
+                XMLHttpRequest.prototype.open = function(method, url) {
+                    try {
+                        checkUrl(url);
+                    } catch(e) {}
+                    return origOpen.apply(this, arguments);
+                };
+            }
+
+            // Hook HTMLMediaElement src
+            try {
+                const origSrcDesc = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, 'src');
+                if (origSrcDesc && origSrcDesc.set) {
+                    Object.defineProperty(HTMLMediaElement.prototype, 'src', {
+                        set: function(val) {
+                            try { checkUrl(val); } catch(e) {}
+                            return origSrcDesc.set.call(this, val);
+                        },
+                        get: origSrcDesc.get,
+                        configurable: true
+                    });
+                }
+            } catch(e) {}
+
+            // YouTube in-page player response
+            function tryExtractPagePlayer() {
+                try {
+                    const ytResp = window.ytInitialPlayerResponse || 
+                                   (window.ytplayer && window.ytplayer.config && window.ytplayer.config.args && JSON.parse(window.ytplayer.config.args.raw_player_response || "{}"));
+                    if (ytResp && ytResp.videoDetails) {
+                        const vDetails = ytResp.videoDetails;
+                        const sData = ytResp.streamingData || {};
+                        const formats = (sData.formats || []).concat(sData.adaptiveFormats || []);
+                        const streamList = [];
+
+                        formats.forEach(f => {
+                            if (f && f.url) {
+                                const isAudio = (f.mimeType || "").startsWith("audio/");
+                                const isAv1 = (f.mimeType || "").includes("av01");
+                                const isWebm = (f.mimeType || "").includes("webm");
+                                const label = f.qualityLabel || (isAudio ? "Audio Stream (" + (f.audioQuality || "128k") + ")" : "Stream " + (f.height ? f.height + "p" : ""));
+                                streamList.push({
+                                    label: label,
+                                    resolution: (f.width && f.height) ? (f.width + "x" + f.height) : (f.height ? f.height + "p" : ""),
+                                    codec: isAv1 ? "AV1" : (isWebm ? "VP9" : (isAudio ? "AAC" : "H.264")),
+                                    format: isWebm ? "WEBM" : (isAudio ? "M4A" : "MP4"),
+                                    url: f.url,
+                                    estimatedSizeBytes: parseInt(f.contentLength || "0", 10),
+                                    isAudioOnly: isAudio,
+                                    isAv1: isAv1,
+                                    mimeType: f.mimeType
+                                });
+                            }
+                        });
+
+                        const thumb = (vDetails.thumbnail && vDetails.thumbnail.thumbnails && vDetails.thumbnail.thumbnails.slice(-1)[0]?.url) || null;
+
+                        window.postMessage({
+                            type: "__gecko_inpage_media__",
+                            media: {
+                                pageUrl: window.location.href,
+                                title: vDetails.title || document.title,
+                                thumbnail: thumb,
+                                durationSeconds: parseInt(vDetails.lengthSeconds || "0", 10),
+                                sourceDomain: "youtube.com",
+                                qualities: streamList
+                            }
+                        }, "*");
+                    }
+                } catch(e) {}
+            }
+
+            tryExtractPagePlayer();
+            window.addEventListener("yt-navigate-finish", () => setTimeout(tryExtractPagePlayer, 600));
+            window.addEventListener("load", () => setTimeout(tryExtractPagePlayer, 1000));
+        })();`;
+        (document.head || document.documentElement).appendChild(hookScript);
+        hookScript.remove();
+
+        window.addEventListener("message", (event) => {
+            if (event.data) {
+                if (event.data.type === "__gecko_inpage_media__" && event.data.media) {
+                    const media = event.data.media;
+                    if (media.qualities && media.qualities.length > 0) {
+                        reportMedia(media);
+                    }
+                } else if (event.data.type === "__gecko_sniffed_media__" && event.data.url) {
+                    const mediaUrl = event.data.url;
+                    if (!mediaUrl.startsWith("blob:") && !mediaUrl.startsWith("data:") && (mediaUrl.startsWith("http://") || mediaUrl.startsWith("https://"))) {
+                        const isM3u8 = mediaUrl.includes(".m3u8");
+                        const isMpd = mediaUrl.includes(".mpd");
+                        const isWebm = mediaUrl.includes(".webm");
+                        const format = isM3u8 ? "M3U8" : (isMpd ? "DASH" : (isWebm ? "WEBM" : "MP4"));
+                        
+                        reportMedia({
+                            pageUrl: window.location.href,
+                            title: event.data.pageTitle || document.title || "Web Video",
+                            thumbnail: document.querySelector("meta[property='og:image']")?.content || null,
+                            durationSeconds: 0,
+                            sourceDomain: window.location.hostname,
+                            qualities: [
+                                {
+                                    label: isM3u8 ? "HLS Master Stream" : (isMpd ? "DASH Stream" : ("Direct " + format + " Stream")),
+                                    resolution: "Auto",
+                                    codec: (format === "WEBM") ? "VP9" : "H.264",
+                                    format: format,
+                                    url: mediaUrl,
+                                    isAudioOnly: false,
+                                    isAv1: false
+                                }
+                            ]
+                        });
+                    }
+                }
+            }
+        });
+    } catch(e) {}
+
+    // 2. YouTube DOM detector fallback (only for direct non-blob URLs)
+    function checkYouTube() {
+        const host = window.location.hostname.toLowerCase();
+        if (!host.includes("youtube.com") && !host.includes("youtu.be")) return false;
+
+        const video = document.querySelector("video");
+        if (!video) return false;
+
+        const src = video.currentSrc || video.src || "";
+        if (src && (src.startsWith("http://") || src.startsWith("https://")) && !src.startsWith("blob:") && !src.startsWith("data:")) {
+            const urlParams = new URLSearchParams(window.location.search);
+            const videoId = urlParams.get("v") || (window.location.pathname.split("/watch/")[1]) || (window.location.pathname.split("/shorts/")[1]) || "";
+            let title = document.title ? document.title.replace(" - YouTube", "").trim() : "YouTube Video";
+            const duration = Math.round(video.duration || 0);
+            const thumbnail = videoId ? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg` : null;
+
+            reportMedia({
+                pageUrl: window.location.href,
+                title: title,
+                thumbnail: thumbnail,
+                durationSeconds: duration,
+                sourceDomain: "youtube.com",
+                qualities: [
+                    {
+                        label: "Direct Stream",
+                        resolution: (video.videoWidth && video.videoHeight) ? `${video.videoWidth}x${video.videoHeight}` : "720p",
+                        codec: "H.264",
+                        format: "MP4",
+                        url: src,
+                        isAudioOnly: false,
+                        isAv1: false
+                    }
+                ]
+            });
+            return true;
+        }
+        return false;
+    }
+
+    // 3. Reddit specialized extractor
+    function checkReddit() {
+        const host = window.location.hostname.toLowerCase();
+        if (!host.includes("reddit.com")) return false;
+
+        const videoElem = document.querySelector("video[src*='v.redd.it'], shreddit-player, [data-mp4-url], video");
+        if (videoElem) {
+            let src = videoElem.src || videoElem.getAttribute("src") || videoElem.getAttribute("data-mp4-url") || "";
+            if (!src && videoElem.querySelector("source")) {
+                src = videoElem.querySelector("source").src;
+            }
+            const title = document.title.replace(" : r/", " - r/").replace(" - Reddit", "") || "Reddit Video";
+            const poster = videoElem.getAttribute("poster") || videoElem.getAttribute("preview") || null;
+
+            if (src && src.includes("v.redd.it")) {
+                const baseUrl = src.substring(0, src.lastIndexOf("/") + 1);
+                const qualities = [
+                    { label: "1080p Full HD", resolution: "1920x1080", codec: "H.264", format: "MP4", url: baseUrl + "DASH_1080.mp4", isAudioOnly: false, isAv1: false },
+                    { label: "720p HD", resolution: "1280x720", codec: "H.264", format: "MP4", url: baseUrl + "DASH_720.mp4", isAudioOnly: false, isAv1: false },
+                    { label: "480p SD", resolution: "854x480", codec: "H.264", format: "MP4", url: baseUrl + "DASH_480.mp4", isAudioOnly: false, isAv1: false },
+                    { label: "HLS Master Stream", resolution: "Auto", codec: "H.264", format: "M3U8", url: baseUrl + "HLSPlaylist.m3u8", isAudioOnly: false, isAv1: false },
+                    { label: "Audio Only", resolution: "", codec: "AAC", format: "M4A", url: baseUrl + "DASH_audio.mp4", isAudioOnly: true, isAv1: false }
+                ];
+
+                reportMedia({
+                    pageUrl: window.location.href,
+                    title: title,
+                    thumbnail: poster,
+                    durationSeconds: Math.round(videoElem.duration || 0),
+                    sourceDomain: "reddit.com",
+                    qualities: qualities
+                });
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // 4. Universal HTML5, OpenGraph & JSON-LD Video Scanner
+    function scanHtml5Media() {
+        // 4a. Check OpenGraph / Twitter video meta tags
+        const metaVideo = document.querySelector("meta[property='og:video'], meta[property='og:video:url'], meta[property='og:video:secure_url'], meta[name='twitter:player:stream']")?.content;
+        if (metaVideo && (metaVideo.startsWith("http://") || metaVideo.startsWith("https://")) && !metaVideo.includes("youtube.com/embed")) {
+            const isM3u8 = metaVideo.includes(".m3u8");
+            const isMp4 = metaVideo.includes(".mp4");
+            if (isM3u8 || isMp4 || metaVideo.includes(".webm")) {
+                let title = document.title ? document.title.trim() : "Web Video";
+                const thumbnail = document.querySelector("meta[property='og:image']")?.content || null;
+                reportMedia({
+                    pageUrl: window.location.href,
+                    title: title,
+                    thumbnail: thumbnail,
+                    durationSeconds: 0,
+                    sourceDomain: window.location.hostname,
+                    qualities: [
+                        {
+                            label: isM3u8 ? "HLS Master Stream" : "High Quality MP4",
+                            resolution: "Auto",
+                            codec: "H.264",
+                            format: isM3u8 ? "M3U8" : "MP4",
+                            url: metaVideo,
+                            isAudioOnly: false,
+                            isAv1: false
+                        }
+                    ]
+                });
+            }
+        }
+
+        // 4b. Check JSON-LD schema.org/VideoObject
+        try {
+            document.querySelectorAll("script[type='application/ld+json']").forEach(script => {
+                try {
+                    const data = JSON.parse(script.textContent || "{}");
+                    const items = Array.isArray(data) ? data : (data["@graph"] || [data]);
+                    for (const item of items) {
+                        if (item && (item["@type"] === "VideoObject" || item.type === "VideoObject")) {
+                            const contentUrl = item.contentUrl || item.embedUrl;
+                            if (contentUrl && typeof contentUrl === "string" && (contentUrl.startsWith("http://") || contentUrl.startsWith("https://"))) {
+                                const isM3u8 = contentUrl.includes(".m3u8");
+                                reportMedia({
+                                    pageUrl: window.location.href,
+                                    title: item.name || document.title || "Web Video",
+                                    thumbnail: (typeof item.thumbnailUrl === "string" ? item.thumbnailUrl : (item.thumbnailUrl && item.thumbnailUrl[0])) || null,
+                                    durationSeconds: 0,
+                                    sourceDomain: window.location.hostname,
+                                    qualities: [
+                                        {
+                                            label: isM3u8 ? "HLS Master Stream" : "Direct Stream",
+                                            resolution: "Auto",
+                                            codec: "H.264",
+                                            format: isM3u8 ? "M3U8" : "MP4",
+                                            url: contentUrl,
+                                            isAudioOnly: false,
+                                            isAv1: false
+                                        }
+                                    ]
+                                });
+                            }
+                        }
+                    }
+                } catch(e) {}
+            });
+        } catch(e) {}
+
+        // 4c. Check HTML5 <video> elements
+        const videos = document.querySelectorAll("video");
+        if (videos.length === 0) return;
+
+        videos.forEach(v => {
+            let src = v.currentSrc || v.src || "";
+            if (!src) {
+                const source = v.querySelector("source");
+                if (source) src = source.src;
+            }
+
+            // Only report if there is a direct downloadable HTTP/HTTPS video URL
+            if (!src || src.startsWith("blob:") || src.startsWith("data:") || (!src.startsWith("http://") && !src.startsWith("https://"))) {
+                return;
+            }
+
+            let title = document.title ? document.title.trim() : "";
+            if (!title || title === "Start Page" || title === "Video") {
+                title = document.querySelector("meta[property='og:title']")?.content ||
+                        document.querySelector("meta[name='twitter:title']")?.content ||
+                        document.querySelector("h1")?.textContent?.trim() || "Web Video";
+            }
+            const thumbnail = v.poster ||
+                              document.querySelector("meta[property='og:image']")?.content ||
+                              document.querySelector("meta[name='twitter:image']")?.content || null;
+            const duration = Math.round(v.duration || 0);
+            const width = v.videoWidth || 0;
+            const height = v.videoHeight || 0;
+            const resolution = (width && height) ? `${width}x${height}` : (height ? `${height}p` : "");
+
+            const qualityLabel = height >= 1080 ? "1080p Full HD" : (height >= 720 ? "720p HD" : (height >= 480 ? "480p SD" : (height >= 360 ? "360p" : (resolution || "Web Video"))));
+            const isM3u8 = src.includes(".m3u8");
+            const format = isM3u8 ? "M3U8" : (src.includes(".webm") ? "WEBM" : "MP4");
+
+            reportMedia({
+                pageUrl: window.location.href,
+                title: title,
+                thumbnail: thumbnail,
+                durationSeconds: duration,
+                sourceDomain: window.location.hostname,
+                qualities: [
+                    {
+                        label: qualityLabel,
+                        resolution: resolution,
+                        codec: format === "WEBM" ? "VP9" : "H.264",
+                        format: format,
+                        url: src,
+                        isAudioOnly: false,
+                        isAv1: false
+                    }
+                ]
+            });
+        });
+    }
+
+    function safeScan() {
+        const now = Date.now();
+        if (now - lastScanTime < 800) return; // Responsive throttle
+        lastScanTime = now;
+
+        const host = window.location.hostname.toLowerCase();
+        if (host.includes("youtube.com") || host.includes("youtu.be")) {
+            checkYouTube();
+        } else if (host.includes("reddit.com")) {
+            if (!checkReddit()) scanHtml5Media();
+        } else {
+            scanHtml5Media();
+        }
+    }
+
+    // Attach listeners on media & document events (no timeupdate to avoid CPU lag)
+    ["play", "playing", "loadedmetadata", "loadeddata", "canplay"].forEach(evt => {
+        document.addEventListener(evt, (e) => {
+            if (e.target && (e.target.tagName === "VIDEO" || e.target.tagName === "AUDIO")) {
+                safeScan();
+            }
+        }, true);
+    });
+
+    // YouTube SPA navigation hook
+    window.addEventListener("yt-navigate-finish", () => {
+        setTimeout(safeScan, 500);
+        setTimeout(safeScan, 1500);
+    });
+
+    // Initial check after page is settled
+    setTimeout(safeScan, 1000);
+    setTimeout(safeScan, 2500);
+}
+
+
 // ── 7. Init ────────────────────────────────────────────────────────────────
 injectCosmeticAdBlockStyle();
 injectScriptletSurrogates();
@@ -471,6 +846,7 @@ initSpaScrollRestoration();
 initBackgroundMediaPlayback();
 initClientDownloadInterceptor();
 initWebShareBridge();
+initUniversalMediaSniffer();
 
 window.addEventListener("DOMContentLoaded", () => {
     injectCosmeticAdBlockStyle();
@@ -484,5 +860,6 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     return true;
 });
+
 
 

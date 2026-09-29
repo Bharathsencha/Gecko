@@ -28,11 +28,13 @@ class TabModel(
     val id: String = UUID.randomUUID().toString(),
     initialTitle: String = "Start Page",
     initialUrl: String = "about:home",
-    initialSession: GeckoSession
+    initialSession: GeckoSession,
+    initialIsPrivate: Boolean = false
 ) {
     var session by mutableStateOf(initialSession)
     var title by mutableStateOf(initialTitle)
     var url by mutableStateOf(initialUrl)
+    var isPrivate by mutableStateOf(initialIsPrivate)
     var progress by mutableIntStateOf(0)
     var isLoading by mutableStateOf(false)
     var canGoBack by mutableStateOf(false)
@@ -45,4 +47,8 @@ class TabModel(
     var isDarkWeb by mutableStateOf(false)
     var isReaderMode by mutableStateOf(false)
     var articleData by mutableStateOf<ArticleData?>(null)
+
+    // Media & Video Downloader detection
+    val detectedVideos = androidx.compose.runtime.mutableStateListOf<DetectedVideo>()
+    val hasDetectedVideos: Boolean get() = detectedVideos.isNotEmpty()
 }

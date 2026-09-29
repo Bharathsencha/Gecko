@@ -19,6 +19,8 @@ package com.browser.adfree.ui.components
 
 import android.net.Uri
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -47,6 +49,11 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,6 +65,7 @@ import com.browser.adfree.ui.theme.*
 import java.net.URI
 import java.net.URLEncoder
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SafariHomePage(
     favorites: List<FavoriteItem>,
@@ -65,24 +73,44 @@ fun SafariHomePage(
     onNavigate: (String) -> Unit,
     onAddFavorite: (title: String, url: String) -> Unit,
     onRemoveFavorite: (FavoriteItem) -> Unit,
+    isPrivate: Boolean = false,
+    onSwitchToPrivate: () -> Unit = {},
+    onSwitchToNormal: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isEditMode by remember { mutableStateOf(false) }
     var showAddSheet by remember { mutableStateOf(false) }
-    val currentAccent = Color(preferencesRepo.accentColor.hex)
+    var showMythsSheet by remember { mutableStateOf(false) }
+
+    val currentAccent = if (isPrivate) Color(0xFFA855F7) else Color(preferencesRepo.accentColor.hex)
     val isEffectiveDark = LocalBrowserColors.current.isDark
 
-    val isWallpaperDark = when (preferencesRepo.homepageWallpaper) {
+    val isWallpaperDark = if (isPrivate) true else when (preferencesRepo.homepageWallpaper) {
         HomepageWallpaper.DEFAULT -> isEffectiveDark
         else -> true // Presets (Aurora, Nebula, Cyber, Forest, Sunset, OLED) and custom photos are dark
     }
 
-    val homeTextColor = if (isWallpaperDark) Color.White else TextPrimary
-    val homeSecondaryTextColor = if (isWallpaperDark) Color.White.copy(alpha = 0.75f) else TextSecondary
+    val homeTextColor = if (isPrivate || isWallpaperDark) Color.White else TextPrimary
+    val homeSecondaryTextColor = if (isPrivate || isWallpaperDark) Color.White.copy(alpha = 0.75f) else TextSecondary
 
     Box(modifier = modifier.fillMaxSize()) {
-        // 1. Wallpaper Background Layer (Supports animated GIFs, PNG, JPG, WebP & Presets)
-        if (preferencesRepo.homepageWallpaper == HomepageWallpaper.CUSTOM && preferencesRepo.customWallpaperUri.isNotBlank()) {
+        // 1. Background Layer (Supports animated GIFs, PNG, JPG, WebP, Presets & Private Violet Gradient)
+        if (isPrivate) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(
+                                Color(0xFF3B1E6D),
+                                Color(0xFF2C1654),
+                                Color(0xFF1E0E3B),
+                                Color(0xFF130826)
+                            )
+                        )
+                    )
+            )
+        } else if (preferencesRepo.homepageWallpaper == HomepageWallpaper.CUSTOM && preferencesRepo.customWallpaperUri.isNotBlank()) {
             val customFile = java.io.File(preferencesRepo.customWallpaperUri)
             val imageModel = if (customFile.exists()) customFile else Uri.parse(preferencesRepo.customWallpaperUri)
             AsyncImage(
@@ -104,7 +132,7 @@ fun SafariHomePage(
         }
 
         // 2. Wallpaper Dimming Scrim Layer
-        if (preferencesRepo.wallpaperDim > 0f) {
+        if (!isPrivate && preferencesRepo.wallpaperDim > 0f) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -112,230 +140,333 @@ fun SafariHomePage(
             )
         }
 
-        // 3. Foreground Scrollable Content
+        // 3. Main Content with Locked Stationary Top Header
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 20.dp, vertical = 14.dp),
+            horizontalAlignment = Alignment.Start
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Optional Greeting & Clock Header
-            if (preferencesRepo.showGreetingHeader) {
-                val currentGreeting = remember {
-                    val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
-                    when {
-                        hour in 5..11 -> "Good Morning"
-                        hour in 12..16 -> "Good Afternoon"
-                        hour in 17..21 -> "Good Evening"
-                        else -> "Good Night"
-                    }
-                }
-                Text(
-                    text = currentGreeting,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = currentAccent,
-                    textAlign = TextAlign.Center
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-            }
-
-            // Browser Brand
-            Box(
+            // FIXED STATIONARY TOP HEADER ROW — ZERO VERTICAL SHIFT BETWEEN MODES
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
-                    .size(68.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(currentAccent, currentAccent.copy(alpha = 0.65f))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .padding(top = 4.dp, bottom = 22.dp)
             ) {
-                Icon(
-                    imageVector = Icons.Default.Explore,
-                    contentDescription = "Browser",
-                    tint = Color.White,
-                    modifier = Modifier.size(40.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            Text(
-                text = "Gecko",
-                fontSize = 24.sp,
-                fontWeight = FontWeight.Bold,
-                color = homeTextColor
-            )
-
-            Text(
-                text = "Ultra-Fast • Zero Ads • Complete Privacy",
-                fontSize = 13.sp,
-                color = homeSecondaryTextColor,
-                textAlign = TextAlign.Center
-            )
-
-            // Privacy Report Card
-            if (preferencesRepo.showPrivacyStatsWidget) {
-                Spacer(modifier = Modifier.height(24.dp))
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(SurfaceElevated.copy(alpha = if (isWallpaperDark) 0.88f else 0.95f))
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-                        .padding(16.dp)
-                ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Box(
                         modifier = Modifier
-                            .size(44.dp)
-                            .background(SurfaceCard, CircleShape),
+                            .size(38.dp)
+                            .clip(CircleShape)
+                            .background(
+                                Brush.linearGradient(
+                                    if (isPrivate) {
+                                        listOf(Color(0xFFA855F7), Color(0xFF7C3AED))
+                                    } else {
+                                        listOf(currentAccent, currentAccent.copy(alpha = 0.65f))
+                                    }
+                                )
+                            ),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            imageVector = Icons.Default.Shield,
-                            contentDescription = "Privacy Shield",
-                            tint = ShieldGreen,
+                            imageVector = Icons.Default.Explore,
+                            contentDescription = "Gecko",
+                            tint = Color.White,
                             modifier = Modifier.size(24.dp)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(14.dp))
+                    Spacer(modifier = Modifier.width(12.dp))
 
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Privacy Protection Active",
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Text(
-                            text = "Advanced ad blocking & strict anti-tracking active. Zero tracking cookies permitted.",
-                            fontSize = 12.sp,
-                            color = TextSecondary,
-                            lineHeight = 16.sp
-                        )
-                    }
-                }
-            }
-
-            // Favorites Grid (if enabled)
-            if (preferencesRepo.showFavoritesGrid) {
-                Spacer(modifier = Modifier.height(28.dp))
-
-                // Favorites Header with Edit/Done button
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 14.dp)
-                ) {
                     Text(
-                        text = "Favorites",
-                        fontSize = 18.sp,
+                        text = "Gecko Browser",
+                        fontSize = 20.sp,
                         fontWeight = FontWeight.Bold,
                         color = homeTextColor
                     )
-
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(
-                            onClick = { isEditMode = !isEditMode },
-                            colors = ButtonDefaults.textButtonColors(
-                                contentColor = if (isEditMode) currentAccent else homeSecondaryTextColor
-                            )
-                        ) {
-                            Text(
-                                text = if (isEditMode) "Done" else "Edit",
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
                 }
 
-                // Favorites Grid (Chunked based on user column choice 3, 4, 5)
-                val columns = preferencesRepo.favoritesGridColumns.coerceIn(3, 5)
-                val allItems = remember(favorites.toList()) { favorites.toList() }
-                val totalCells = allItems.size + 1 // items + Add button
-                val numRows = (totalCells + columns - 1) / columns
-
-                for (rowIndex in 0 until numRows) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 16.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
-                    ) {
-                        for (colIndex in 0 until columns) {
-                            val itemIndex = rowIndex * columns + colIndex
-                            Box(modifier = Modifier.weight(1f)) {
-                                if (itemIndex < allItems.size) {
-                                    val fav = allItems[itemIndex]
-                                    FavoriteCard(
-                                        fav = fav,
-                                        isEditMode = isEditMode,
-                                        textColor = homeTextColor,
-                                        onClick = {
-                                            if (!isEditMode) onNavigate(fav.url)
-                                        },
-                                        onLongClick = { isEditMode = true },
-                                        onDelete = { onRemoveFavorite(fav) }
-                                    )
-                                } else if (itemIndex == allItems.size) {
-                                    // "+ Add" Card
-                                    Column(
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .clickable { showAddSheet = true }
-                                            .padding(4.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier.padding(top = 6.dp, end = 6.dp)
-                                        ) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .size(54.dp)
-                                                    .clip(RoundedCornerShape(16.dp))
-                                                    .background(SurfaceElevated.copy(alpha = 0.88f))
-                                                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
-                                                contentAlignment = Alignment.Center
-                                            ) {
-                                                Icon(
-                                                    imageVector = Icons.Default.Add,
-                                                    contentDescription = "Add Favorite",
-                                                    tint = currentAccent,
-                                                    modifier = Modifier.size(24.dp)
-                                                )
-                                            }
-                                        }
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = "Add",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = TextSecondary,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                } else {
-                                    // Empty placeholder spacer to keep column alignment
-                                    Spacer(modifier = Modifier.fillMaxWidth())
-                                }
-                            }
-                        }
-                    }
+                // Mask toggle on top right: outline button in normal mode, solid white badge in private mode
+                Box(
+                    modifier = Modifier
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isPrivate) Color.White else SurfaceElevated.copy(alpha = 0.85f)
+                        )
+                        .border(
+                            1.dp,
+                            if (isPrivate) Color.Transparent else BorderSubtle,
+                            CircleShape
+                        )
+                        .clickable {
+                            if (isPrivate) onSwitchToNormal() else onSwitchToPrivate()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    FirefoxMaskIcon(
+                        tint = if (isPrivate) Color(0xFF261245) else homeTextColor,
+                        modifier = Modifier.size(23.dp)
+                    )
                 }
             }
 
-            Spacer(modifier = Modifier.height(32.dp))
+            // CONTENT SECTION: Crossfade between Private & Normal views
+            Crossfade(
+                targetState = isPrivate,
+                animationSpec = tween(durationMillis = 200),
+                label = "homeContentCrossfade"
+            ) { privateMode ->
+                if (privateMode) {
+                    // PRIVATE MODE (Matches Firefox Android layout)
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        Text(
+                            text = "Gecko clears your search and browsing history from private tabs when you close them or quit the app. While this doesn't make you anonymous to websites or your internet service provider, it makes it easier to keep what you do online private from anyone else who uses this device.",
+                            fontSize = 15.sp,
+                            color = Color.White.copy(alpha = 0.9f),
+                            lineHeight = 22.sp
+                        )
+
+                        Spacer(modifier = Modifier.height(20.dp))
+
+                        Text(
+                            text = "Common myths about private browsing",
+                            fontSize = 15.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFD8B4FE),
+                            textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+                            modifier = Modifier.clickable { showMythsSheet = true }
+                        )
+
+                        Spacer(modifier = Modifier.height(36.dp))
+                    }
+                } else {
+                    // NORMAL MODE
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.Start
+                    ) {
+                        // Privacy Report Card
+                        if (preferencesRepo.showPrivacyStatsWidget) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(SurfaceElevated.copy(alpha = if (isWallpaperDark) 0.88f else 0.95f))
+                                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
+                                    .padding(16.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(44.dp)
+                                        .background(SurfaceCard, CircleShape),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Shield,
+                                        contentDescription = "Privacy Shield",
+                                        tint = ShieldGreen,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Privacy Protection Active",
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = TextPrimary
+                                    )
+                                    Text(
+                                        text = "Advanced ad blocking & strict anti-tracking active. Zero tracking cookies permitted.",
+                                        fontSize = 12.sp,
+                                        color = TextSecondary,
+                                        lineHeight = 16.sp
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.height(24.dp))
+                        }
+
+                        // Favorites Grid (if enabled)
+                        if (preferencesRepo.showFavoritesGrid) {
+                            // Favorites Header with Edit/Done button
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(bottom = 14.dp)
+                            ) {
+                                Text(
+                                    text = "Favorites",
+                                    fontSize = 18.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = homeTextColor
+                                )
+
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    TextButton(
+                                        onClick = { isEditMode = !isEditMode },
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = if (isEditMode) currentAccent else homeSecondaryTextColor
+                                        )
+                                    ) {
+                                        Text(
+                                            text = if (isEditMode) "Done" else "Edit",
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+
+                            // Favorites Grid (Chunked based on user column choice 3, 4, 5)
+                            val columns = preferencesRepo.favoritesGridColumns.coerceIn(3, 5)
+                            val allItems = remember(favorites.toList()) { favorites.toList() }
+                            val totalCells = allItems.size + 1 // items + Add button
+                            val numRows = (totalCells + columns - 1) / columns
+
+                            for (rowIndex in 0 until numRows) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(bottom = 16.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    for (colIndex in 0 until columns) {
+                                        val itemIndex = rowIndex * columns + colIndex
+                                        Box(modifier = Modifier.weight(1f)) {
+                                            if (itemIndex < allItems.size) {
+                                                val fav = allItems[itemIndex]
+                                                FavoriteCard(
+                                                    fav = fav,
+                                                    isEditMode = isEditMode,
+                                                    textColor = homeTextColor,
+                                                    onClick = {
+                                                        if (!isEditMode) onNavigate(fav.url)
+                                                    },
+                                                    onLongClick = { isEditMode = true },
+                                                    onDelete = { onRemoveFavorite(fav) }
+                                                )
+                                            } else if (itemIndex == allItems.size) {
+                                                // "+ Add" Card
+                                                Column(
+                                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .clip(RoundedCornerShape(14.dp))
+                                                        .clickable { showAddSheet = true }
+                                                        .padding(4.dp)
+                                                ) {
+                                                    Box(
+                                                        modifier = Modifier.padding(top = 6.dp, end = 6.dp)
+                                                    ) {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .size(54.dp)
+                                                                .clip(RoundedCornerShape(16.dp))
+                                                                .background(SurfaceElevated.copy(alpha = 0.88f))
+                                                                .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
+                                                            contentAlignment = Alignment.Center
+                                                        ) {
+                                                            Icon(
+                                                                imageVector = Icons.Default.Add,
+                                                                contentDescription = "Add Favorite",
+                                                                tint = currentAccent,
+                                                                modifier = Modifier.size(24.dp)
+                                                            )
+                                                        }
+                                                    }
+                                                    Spacer(modifier = Modifier.height(6.dp))
+                                                    Text(
+                                                        text = "Add",
+                                                        fontSize = 11.sp,
+                                                        fontWeight = FontWeight.Medium,
+                                                        color = TextSecondary,
+                                                        textAlign = TextAlign.Center
+                                                    )
+                                                }
+                                            } else {
+                                                // Empty placeholder spacer to keep column alignment
+                                                Spacer(modifier = Modifier.fillMaxWidth())
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(32.dp))
+                    }
+                }
+            }
+        }
+    }
+
+    // Common Myths Bottom Sheet
+    if (showMythsSheet) {
+        ModalBottomSheet(
+            onDismissRequest = { showMythsSheet = false },
+            containerColor = SurfaceDark,
+            contentColor = TextPrimary,
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 24.dp, vertical = 16.dp)
+                    .navigationBarsPadding()
+            ) {
+                Text(
+                    text = "Common Myths About Private Browsing",
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                MythItem(
+                    myth = "Myth: Private browsing makes me invisible to websites and ISPs.",
+                    truth = "Fact: Private browsing hides your history and cookies from anyone using this device. Websites, ISPs, and employer networks can still detect your traffic."
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                MythItem(
+                    myth = "Myth: Private browsing hides my IP address.",
+                    truth = "Fact: Your IP address remains visible. Use Gecko's built-in VPN to mask your location and IP address."
+                )
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                MythItem(
+                    myth = "Myth: Downloaded files and bookmarks disappear after private browsing.",
+                    truth = "Fact: Any files you download or bookmarks you save in private mode stay on your device."
+                )
+
+                Spacer(modifier = Modifier.height(24.dp))
+
+                Button(
+                    onClick = { showMythsSheet = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFA855F7)),
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Got it", color = Color.White, fontWeight = FontWeight.Bold)
+                }
+            }
         }
     }
 
@@ -489,3 +620,56 @@ private fun getFavoriteBgColor(fav: FavoriteItem, defaultBg: Color): Color {
         else -> defaultBg
     }
 }
+
+@Composable
+fun FirefoxMaskIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    androidx.compose.foundation.Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+
+        val path = androidx.compose.ui.graphics.Path().apply {
+            moveTo(w * 0.06f, h * 0.50f)
+            cubicTo(w * 0.12f, h * 0.20f, w * 0.40f, h * 0.24f, w * 0.50f, h * 0.38f)
+            cubicTo(w * 0.60f, h * 0.24f, w * 0.88f, h * 0.20f, w * 0.94f, h * 0.50f)
+            cubicTo(w * 0.88f, h * 0.80f, w * 0.60f, h * 0.76f, w * 0.50f, h * 0.62f)
+            cubicTo(w * 0.40f, h * 0.76f, w * 0.12f, h * 0.80f, w * 0.06f, h * 0.50f)
+            close()
+        }
+        drawPath(path = path, color = tint)
+
+        val eyeColor = if (tint == Color.White) Color(0xFF261245) else Color.White
+        drawOval(
+            color = eyeColor,
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.20f, h * 0.40f),
+            size = androidx.compose.ui.geometry.Size(w * 0.19f, h * 0.18f)
+        )
+        drawOval(
+            color = eyeColor,
+            topLeft = androidx.compose.ui.geometry.Offset(w * 0.61f, h * 0.40f),
+            size = androidx.compose.ui.geometry.Size(w * 0.19f, h * 0.18f)
+        )
+    }
+}
+
+@Composable
+private fun MythItem(myth: String, truth: String) {
+    Column {
+        Text(
+            text = myth,
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Bold,
+            color = DangerRed
+        )
+        Spacer(modifier = Modifier.height(3.dp))
+        Text(
+            text = truth,
+            fontSize = 13.sp,
+            color = TextSecondary,
+            lineHeight = 18.sp
+        )
+    }
+}
+

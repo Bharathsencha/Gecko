@@ -64,7 +64,7 @@ const coreBlocklist = [
     "an.yandex.ru", "yandex.ru/metrika",
     "live.chartboost.com", "init.supersonicads.com", "api.fyber.com", "inmobi.com", "config.inmobi.com",
     "ironsource.mobi", "outcome-ssp.supersonicads.com", "chartboost.com", "ironsrc.com", "supersonicads.com", "fyber.com",
-    "s.youtube.com", "redirector.googlevideo.com", "ads.youtube.com",
+    "ads.youtube.com",
     "adsrvr.org", "insights.adsrvr.org", "match.adsrvr.org", "smartyads.com", "ad.gt", "contextweb.com",
     "sharethrough.com", "stackadapt.com", "stickyadstv.com", "ads.stickyadstv.com", "eb2.3lift.com",
     "tlx.3lift.com", "apex.go.sonobi.com", "c.gumgum.com", "a.teads.tv", "cdn.teads.tv", "cdn.kargo.com",
@@ -237,6 +237,11 @@ function shouldBlockOrRedirectUrl(urlStr, type) {
     const host = url.hostname.toLowerCase();
     const pathname = url.pathname.toLowerCase();
 
+    // Never block video playback streams
+    if (host.includes("googlevideo.com") || (host.includes("youtube.com") && (pathname.includes("/videoplayback") || pathname.includes("/watch") || pathname.includes("/s/")))) {
+        return null;
+    }
+
     // 1. Scriptlet & Path Defusers (0ms surrogate responses to avoid broken page scripts)
     if (pathname.endsWith("/ads.js") || 
         pathname.endsWith("/pagead.js") || 
@@ -346,20 +351,105 @@ if (browser.webNavigation && browser.webNavigation.onCommitted) {
     });
 }
 
+// ── Universal Network Media Sniffer (Cat-Catch Network Layer) ────────────────
+const MEDIA_EXT_REGEX = /\.(mp4|webm|mkv|m4v|mov|m3u8|mpd|m4a|mp3|aac|opus|flv|f4v)($|\?|#)/i;
+const KNOWN_STREAM_REGEX = /googlevideo\.com\/videoplayback|v\.redd\.it\/|hotstar\.com.*\.m3u8|fbcdn\.net\/.*\.mp4|twimg\.com\/.*\.mp4|tiktokcdn\.com\/|byteoversea\.com\/|akamaihd\.net\/|cloudfront\.net\/.*(m3u8|mp4)|fastly\.net\/.*(m3u8|mp4)|vimeocdn\.com\/|dailymotion\.com\/.*\.m3u8/i;
+const detectedMediaUrls = new Set();
+
+if (browser.webRequest && browser.webRequest.onHeadersReceived) {
+    browser.webRequest.onHeadersReceived.addListener(
+        (details) => {
+            try {
+                if (!details || details.tabId < 0) return;
+                const url = details.url;
+                if (!url || url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:") || detectedMediaUrls.has(url)) return;
+
+                // Ignore chunk segments (.ts, .m4s) to avoid spamming tiny fragments
+                if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) {
+                    return;
+                }
+
+                const isMediaExt = MEDIA_EXT_REGEX.test(url);
+                const isKnownStream = KNOWN_STREAM_REGEX.test(url);
+
+                let contentType = "";
+                let contentLength = 0;
+
+                // Inspect responseHeaders if available
+                if (details.responseHeaders) {
+                    for (const header of details.responseHeaders) {
+                        const name = (header.name || "").toLowerCase();
+                        if (name === "content-type") {
+                            contentType = (header.value || "").toLowerCase();
+                        } else if (name === "content-length") {
+                            contentLength = parseInt(header.value, 10) || 0;
+                        }
+                    }
+                }
+
+                const isVideoMime = contentType.startsWith("video/") ||
+                                    contentType.includes("application/x-mpegurl") ||
+                                    contentType.includes("vnd.apple.mpegurl") ||
+                                    contentType.includes("application/dash+xml") ||
+                                    contentType.includes("video/mp4") ||
+                                    contentType.includes("video/webm");
+                const isAudioMime = contentType.startsWith("audio/") || contentType.includes("audio/x-m4a");
+
+                if (isVideoMime || isAudioMime || isMediaExt || isKnownStream || details.type === "media") {
+                    if (contentLength > 0 && contentLength < 50000 && !url.includes(".m3u8") && !url.includes(".mpd") && !isKnownStream) {
+                        return;
+                    }
+
+                    detectedMediaUrls.add(url);
+                    notifyNative({
+                        action: "media_detected",
+                        tabId: details.tabId,
+                        url: url,
+                        mimeType: contentType || (isMediaExt ? "video/mp4" : "application/x-mpegURL"),
+                        contentLength: contentLength,
+                        isAudio: isAudioMime && !isVideoMime,
+                        type: details.type || "media"
+                    });
+                }
+            } catch (e) {}
+            return {};
+        },
+        { urls: ["<all_urls>"] },
+        ["responseHeaders", "blocking"]
+    );
+}
+
+if (browser.webNavigation && browser.webNavigation.onCommitted) {
+    browser.webNavigation.onCommitted.addListener((details) => {
+        if (details.frameId === 0) {
+            detectedMediaUrls.clear();
+        }
+    });
+}
+
 // ── Native Port Bridge ──────────────────────────────────────────────────────
+let isConnecting = false;
+
 function connectToNativeBridge() {
+    if (isConnecting) return;
+    isConnecting = true;
     try {
         if (browser.runtime && browser.runtime.connectNative) {
-            nativePort = browser.runtime.connectNative("browser-app");
+            nativePort = browser.runtime.connectNative("browser_app");
             nativePort.onMessage.addListener((msg) => {
                 handleConfigUpdate(msg);
             });
             nativePort.onDisconnect.addListener(() => {
                 nativePort = null;
-                setTimeout(connectToNativeBridge, 3000);
+                isConnecting = false;
+                setTimeout(connectToNativeBridge, 2000);
             });
+            isConnecting = false;
         }
-    } catch (e) {}
+    } catch (e) {
+        nativePort = null;
+        isConnecting = false;
+    }
 }
 
 function notifyNative(msg) {
@@ -367,9 +457,16 @@ function notifyNative(msg) {
         if (nativePort) {
             nativePort.postMessage(msg);
         } else if (browser.runtime && browser.runtime.sendNativeMessage) {
-            browser.runtime.sendNativeMessage("browser-app", msg).catch(() => {});
+            browser.runtime.sendNativeMessage("browser_app", msg).catch(() => {});
+            connectToNativeBridge();
+        } else {
+            connectToNativeBridge();
         }
-    } catch (e) {}
+    } catch (e) {
+        if (browser.runtime && browser.runtime.sendNativeMessage) {
+            browser.runtime.sendNativeMessage("browser_app", msg).catch(() => {});
+        }
+    }
 }
 
 function handleConfigUpdate(msg) {
@@ -396,9 +493,12 @@ function handleConfigUpdate(msg) {
     }
 }
 
-// Listen for messages from content scripts (download_blob, share_payload, etc.) and forward to native app
+// Listen for messages from content scripts (download_blob, share_payload, video_detected, etc.) and forward to native app
 browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg) {
+        if (sender && sender.tab && sender.tab.id >= 0 && !msg.tabId) {
+            msg.tabId = sender.tab.id;
+        }
         notifyNative(msg);
     }
     return true;

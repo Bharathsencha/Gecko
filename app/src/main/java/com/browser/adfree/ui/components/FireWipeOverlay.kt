@@ -37,8 +37,8 @@ fun FireWipeOverlay(
         val composition by rememberLottieComposition(LottieCompositionSpec.RawRes(R.raw.inferno))
         val animatable = rememberLottieAnimatable()
 
-        LaunchedEffect(isPlaying) {
-            if (isPlaying) {
+        LaunchedEffect(isPlaying, composition) {
+            if (isPlaying && composition != null) {
                 animatable.snapTo(composition, 0f)
                 animatable.animate(
                     composition = composition,

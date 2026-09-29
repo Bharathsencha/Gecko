@@ -69,6 +69,7 @@ fun TopAddressBar(
     isReaderMode: Boolean,
     isDarkWeb: Boolean,
     tabCount: Int = 1,
+    isPrivate: Boolean = false,
     onOpenClearData: () -> Unit = {},
     onOpenHistory: () -> Unit = {},
     onOpenTabs: () -> Unit = {},
@@ -171,13 +172,23 @@ fun TopAddressBar(
                     .background(SurfaceElevated)
                     .border(
                         1.dp,
-                        Brush.horizontalGradient(
-                            colors = listOf(
-                                if (isReaderMode) AccentCyan else BorderSubtle,
-                                AccentCyan.copy(alpha = 0.35f),
-                                BorderSubtle
+                        if (isPrivate) {
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    Color(0xFFA855F7),
+                                    Color(0xFF7C3AED).copy(alpha = 0.5f),
+                                    Color(0xFFA855F7).copy(alpha = 0.3f)
+                                )
                             )
-                        ),
+                        } else {
+                            Brush.horizontalGradient(
+                                colors = listOf(
+                                    if (isReaderMode) AccentCyan else BorderSubtle,
+                                    AccentCyan.copy(alpha = 0.35f),
+                                    BorderSubtle
+                                )
+                            )
+                        },
                         RoundedCornerShape(22.dp)
                     )
                     .padding(horizontal = 10.dp),
@@ -188,8 +199,31 @@ fun TopAddressBar(
                     modifier = Modifier.fillMaxWidth()
                 ) {
 
-                    // Shield / Lock / Search icon (Clicking opens Shields Quick Sheet)
-                    if (adBlockCount > 0) {
+                    // Private Badge or Shield / Lock / Search icon
+                    if (isPrivate) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(Color(0xFFA855F7).copy(alpha = 0.2f))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.VisibilityOff,
+                                contentDescription = "Private Mode",
+                                tint = Color(0xFFA855F7),
+                                modifier = Modifier.size(13.dp)
+                            )
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(
+                                text = "Private",
+                                color = Color(0xFFA855F7),
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(6.dp))
+                    } else if (adBlockCount > 0) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
@@ -275,11 +309,13 @@ fun TopAddressBar(
                             .weight(1f)
                             .onFocusChanged { isFocused = it.isFocused },
                         decorationBox = { innerTextField ->
-                            if (textFieldValue.text.isEmpty() || urlInput == "about:home") {
+                            if (textFieldValue.text.isEmpty()) {
                                 Text(
-                                    text = "Search or type URL",
-                                    color = TextSecondary.copy(alpha = 0.7f),
-                                    fontSize = 14.sp
+                                    text = if (isPrivate) "Search privately or type URL" else "Search or type URL",
+                                    color = if (isPrivate) Color(0xFFA855F7).copy(alpha = 0.7f) else TextSecondary.copy(alpha = 0.7f),
+                                    fontSize = 13.sp,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
                             innerTextField()

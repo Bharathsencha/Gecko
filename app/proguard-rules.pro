@@ -1,6 +1,6 @@
 # ProGuard rules for GeckoView, Compose, and Kotlin
 
-# ── GeckoView ──────────────────────────────────────────────────────────────
+# ── GeckoView (JNI and Reflection) ─────────────────────────────────────────
 -keep class org.mozilla.geckoview.** { *; }
 -keep class org.mozilla.gecko.** { *; }
 -keepclassmembers class org.mozilla.geckoview.** { *; }
@@ -11,32 +11,11 @@
 -dontwarn sun.misc.**
 -dontwarn org.yaml.snakeyaml.**
 
-# ── Kotlin ─────────────────────────────────────────────────────────────────
--keep class kotlin.** { *; }
--keep class kotlin.Metadata { *; }
--dontwarn kotlin.**
--keepclassmembers class **$WhenMappings { <fields>; }
--keepclassmembers class kotlin.Lazy { *; }
-
-# ── Jetpack Compose ────────────────────────────────────────────────────────
--keep class androidx.compose.** { *; }
--keepclassmembers class androidx.compose.** { *; }
--dontwarn androidx.compose.**
-
-# ── Coil (image loading) ───────────────────────────────────────────────────
--keep class coil.** { *; }
--dontwarn coil.**
-
-# ── OkHttp ────────────────────────────────────────────────────────────────
--dontwarn okhttp3.**
--dontwarn okio.**
--keep class okhttp3.** { *; }
-
-# ── App model classes (serialized to/from JSON) ────────────────────────────
+# ── App model & storage classes (JSON serialization / reflection) ───────────
 -keep class com.browser.adfree.model.** { *; }
 -keep class com.browser.adfree.storage.** { *; }
 
-# ── Annotations ───────────────────────────────────────────────────────────
+# ── Annotations & Signature Attributes ─────────────────────────────────────
 -keepattributes *Annotation*
 -keepattributes Signature
 -keepattributes Exceptions
@@ -48,7 +27,13 @@
     @android.webkit.JavascriptInterface <methods>;
 }
 
-# ── Remove debug logging in release ──────────────────────────────────────
+# ── NewPipeExtractor & Rhino JavaScript Engine ─────────────────────────────
+-keep class org.mozilla.javascript.** { *; }
+-keep class org.mozilla.classfile.ClassFileWriter { *; }
+-dontwarn org.mozilla.javascript.tools.**
+-keep class org.schabi.newpipe.extractor.** { *; }
+
+# ── Remove debug logging in release ────────────────────────────────────────
 -assumenosideeffects class android.util.Log {
     public static int v(...);
     public static int d(...);

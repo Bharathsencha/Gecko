@@ -88,6 +88,12 @@ class BrowserPreferencesRepository(context: Context) {
     var vpnCountryCode by mutableStateOf(prefs.getString("vpn_country_code", "US") ?: "US")
         private set
 
+    var videoDownloaderEnabled by mutableStateOf(prefs.getBoolean("video_downloader_enabled", true))
+        private set
+
+    var preferAv1Codec by mutableStateOf(prefs.getBoolean("prefer_av1_codec", false))
+        private set
+
     // Customization & Appearance
     var themeMode by mutableStateOf(
         try {
@@ -264,6 +270,16 @@ class BrowserPreferencesRepository(context: Context) {
             .putBoolean("vpn_enabled", enabled)
             .putString("vpn_country_code", countryCode)
             .apply()
+    }
+
+    fun setVideoDownloaderEnabledPreference(enabled: Boolean) {
+        videoDownloaderEnabled = enabled
+        prefs.edit().putBoolean("video_downloader_enabled", enabled).apply()
+    }
+
+    fun setPreferAv1CodecPreference(enabled: Boolean) {
+        preferAv1Codec = enabled
+        prefs.edit().putBoolean("prefer_av1_codec", enabled).apply()
     }
 }
 

@@ -143,6 +143,11 @@ fun HistorySheet(
                     }
                 },
                 singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                    autoCorrect = false
+                ),
                 shape = RoundedCornerShape(12.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = TextPrimary,

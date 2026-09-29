@@ -36,6 +36,8 @@ import com.browser.adfree.ui.BrowserMainScreen
 import com.browser.adfree.ui.components.PendingSaveLogin
 import com.browser.adfree.ui.theme.BrowserTheme
 import com.browser.adfree.vpn.FreeVpnManager
+import android.os.Build
+import androidx.activity.result.contract.ActivityResultContracts
 import org.json.JSONObject
 import org.mozilla.geckoview.*
 
@@ -55,6 +57,18 @@ class MainActivity : ComponentActivity() {
     private var uBlockExtension: WebExtension? = null
     private var darkReaderExtension: WebExtension? = null
     private var pendingSaveLogin by mutableStateOf<PendingSaveLogin?>(null)
+
+    private val notificationPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { _ -> }
+
+    private fun checkAndRequestNotificationPermission() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                notificationPermissionLauncher.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+            }
+        }
+    }
 
     /** Enable or disable uBlock Origin blocking globally */
     fun setUBlockEnabled(enabled: Boolean) {
@@ -120,6 +134,9 @@ class MainActivity : ComponentActivity() {
             .build()
         coil.Coil.setImageLoader(imageLoader)
 
+        // Request notification permission on Android 13+ for background download progress & alerts
+        checkAndRequestNotificationPermission()
+
         // 1. Initialize Repositories & Managers
         preferencesRepo = BrowserPreferencesRepository(this)
         shieldsRepo = com.browser.adfree.shields.ShieldsRepository(this)
@@ -154,12 +171,32 @@ class MainActivity : ComponentActivity() {
         // 2. Configure GeckoRuntime with Strict Native Tracking Protection & Cookie Shield
         // Enable Gecko's built-in fingerprinting protection (RFP engine) via about:config prefs
         val geckoPrefs = Bundle().apply {
-            // Enable Firefox's native Fingerprinting Protection engine
-            // (same tech as Firefox's privacy.fingerprintingProtection setting)
-            putBoolean("privacy.fingerprintingProtection", true)
-            // Also enable stricter resist fingerprinting for private-browsing-style protection
-            putBoolean("privacy.resistFingerprinting.randomization.enabled", true)
-            // Disable telemetry noise
+            // Hardware Video Decoding & GPU WebRender Acceleration on Android
+            putBoolean("media.hardware-video-decoding.enabled", true)
+            putBoolean("media.hardware-video-decoding.failed", false)
+            putBoolean("media.android-media-codec.enabled", true)
+            putBoolean("media.android-media-codec.preferred", true)
+            putBoolean("media.webm.enabled", true)
+            putBoolean("media.mp4.enabled", true)
+            putBoolean("media.mediasource.enabled", true)
+            putBoolean("media.mediasource.mp4.enabled", true)
+            putBoolean("media.mediasource.webm.enabled", true)
+            putBoolean("media.mediasource.vp9.enabled", true)
+            putInt("media.benchmark.vp9.fps", 120)
+            putInt("media.benchmark.frames", 1000)
+            putInt("media.cache_size", 65536)
+            putInt("media.memory_cache_max_size", 65536)
+            putInt("media.autoplay.default", 0)
+            putInt("media.autoplay.blocking_policy", 0)
+            putInt("layout.frame_rate", 0)
+            putBoolean("gfx.webrender.all", true)
+            putBoolean("layers.acceleration.force-enabled", true)
+            putBoolean("layers.offmainthreadcomposition.enabled", true)
+            putBoolean("layers.offmainthreadcomposition.async-animations", true)
+
+            // Tracking Protection (Standard without timer throttling)
+            putBoolean("privacy.trackingprotection.fingerprinting.enabled", true)
+            putBoolean("privacy.trackingprotection.enabled", true)
             putBoolean("toolkit.telemetry.enabled", false)
             putBoolean("datareporting.healthreport.uploadEnabled", false)
         }
@@ -274,10 +311,12 @@ class MainActivity : ComponentActivity() {
                             message: Any,
                             sender: WebExtension.MessageSender
                         ): GeckoResult<Any>? {
-                            if (nativeApp == "browser-app") handleExtensionMessage(message)
-                            return null
+                            if (nativeApp == "browser_app") {
+                                handleExtensionMessage(message)
+                            }
+                            return GeckoResult.fromValue(JSONObject())
                         }
-                    }, "browser-app")
+                    }, "browser_app")
                 }
             },
             { error -> Log.e("AdFreeBrowser", "AI blocker failed to load", error) }
@@ -389,9 +428,58 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {}
     }
 
+    private fun parseToJsonObject(message: Any?): JSONObject {
+        if (message == null) return JSONObject()
+        return when (message) {
+            is JSONObject -> message
+            is Map<*, *> -> {
+                val json = JSONObject()
+                for ((k, v) in message) {
+                    if (k != null) {
+                        json.put(k.toString(), wrapJsonValue(v))
+                    }
+                }
+                json
+            }
+            is String -> {
+                val trimmed = message.trim()
+                if (trimmed.startsWith("{")) {
+                    try { JSONObject(trimmed) } catch (e: Exception) { JSONObject() }
+                } else JSONObject()
+            }
+            else -> {
+                try {
+                    JSONObject(message.toString())
+                } catch (e: Exception) {
+                    JSONObject()
+                }
+            }
+        }
+    }
+
+    private fun wrapJsonValue(value: Any?): Any? {
+        return when (value) {
+            null -> JSONObject.NULL
+            is Map<*, *> -> parseToJsonObject(value)
+            is List<*> -> {
+                val arr = org.json.JSONArray()
+                value.forEach { arr.put(wrapJsonValue(it)) }
+                arr
+            }
+            is Array<*> -> {
+                val arr = org.json.JSONArray()
+                value.forEach { arr.put(wrapJsonValue(it)) }
+                arr
+            }
+            is Number, is Boolean, is String -> value
+            is JSONObject, is org.json.JSONArray -> value
+            else -> value.toString()
+        }
+    }
+
     private fun handleExtensionMessage(message: Any) {
         try {
-            val json = JSONObject(message.toString())
+            val json = parseToJsonObject(message)
             val action = json.optString("action")
 
             if (action == "ad_blocked" || action == "blocked_count") {
@@ -434,13 +522,146 @@ class MainActivity : ComponentActivity() {
                 val domain = json.optString("domain")
                 val username = json.optString("username")
                 val password = json.optString("password")
-                if (preferencesRepo.savePasswordsEnabled && domain.isNotBlank() && password.isNotBlank()) {
+                val isPrivate = tabManager.activeTab?.isPrivate ?: false
+                if (!isPrivate && preferencesRepo.savePasswordsEnabled && domain.isNotBlank() && password.isNotBlank()) {
                     runOnUiThread {
                         pendingSaveLogin = com.browser.adfree.ui.components.PendingSaveLogin(
                             domain = domain,
                             username = username,
                             password = password
                         )
+                    }
+                }
+            } else if (action == "video_detected") {
+                val dataObj = json.optJSONObject("data")
+                Log.d("VideoSniffer", "video_detected action received, data null? ${dataObj == null}")
+                if (dataObj != null && preferencesRepo.videoDownloaderEnabled) {
+                    val pageUrl = dataObj.optString("pageUrl")
+                    val title = dataObj.optString("title", "Video")
+                    val thumbnail = dataObj.optString("thumbnail").ifBlank { null }
+                    val duration = dataObj.optLong("durationSeconds", 0L)
+                    val sourceDomain = dataObj.optString("sourceDomain", "")
+                    val qualitiesArr = dataObj.optJSONArray("qualities")
+
+                    val qualityList = mutableListOf<com.browser.adfree.model.VideoQualityOption>()
+                    if (qualitiesArr != null) {
+                        for (i in 0 until qualitiesArr.length()) {
+                            val q = qualitiesArr.getJSONObject(i)
+                            val qUrl = q.optString("url")
+                            // Strictly filter out page URLs, blob URLs, data URLs
+                            if (qUrl.isNotBlank() && qUrl.startsWith("http") && qUrl != pageUrl && !qUrl.contains("youtube.com/watch") && !qUrl.startsWith("blob:") && !qUrl.startsWith("data:")) {
+                                qualityList.add(
+                                    com.browser.adfree.model.VideoQualityOption(
+                                        label = q.optString("label"),
+                                        resolution = q.optString("resolution"),
+                                        codec = q.optString("codec").ifBlank { null },
+                                        format = q.optString("format", "MP4"),
+                                        url = qUrl,
+                                        estimatedSizeBytes = q.optLong("estimatedSizeBytes", 0L),
+                                        isAudioOnly = q.optBoolean("isAudioOnly", false),
+                                        isAv1 = q.optBoolean("isAv1", false),
+                                        mimeType = q.optString("mimeType").ifBlank { null }
+                                    )
+                                )
+                            }
+                        }
+                    }
+
+                    runOnUiThread {
+                        tabManager.activeTab?.let { activeTab ->
+                            val isYouTube = pageUrl.contains("youtube.com") || pageUrl.contains("youtu.be")
+                            val existingIndex = activeTab.detectedVideos.indexOfFirst {
+                                it.pageUrl == pageUrl || (isYouTube && it.sourceDomain == "youtube.com")
+                            }
+
+                            if (existingIndex >= 0) {
+                                val existing = activeTab.detectedVideos[existingIndex]
+                                val mergedQualities = (existing.qualities + qualityList).distinctBy { it.url }
+                                activeTab.detectedVideos[existingIndex] = existing.copy(
+                                    title = if (existing.title == "Web Video" && title.isNotBlank() && title != "Video") title else existing.title,
+                                    thumbnail = thumbnail ?: existing.thumbnail,
+                                    durationSeconds = if (duration > 0) duration else existing.durationSeconds,
+                                    qualities = if (mergedQualities.isNotEmpty()) mergedQualities else existing.qualities
+                                )
+                            } else if (qualityList.isNotEmpty() || (thumbnail != null && title.isNotBlank() && title != "Start Page")) {
+                                val detected = com.browser.adfree.model.DetectedVideo(
+                                    pageUrl = pageUrl,
+                                    title = title,
+                                    thumbnail = thumbnail,
+                                    durationSeconds = duration,
+                                    sourceDomain = if (isYouTube) "youtube.com" else sourceDomain,
+                                    qualities = qualityList
+                                )
+                                activeTab.detectedVideos.add(0, detected)
+                            }
+                            Log.i("VideoSniffer", "Updated detectedVideos on activeTab (${activeTab.detectedVideos.size} items)")
+                        }
+                    }
+                }
+            } else if (action == "media_detected") {
+                if (preferencesRepo.videoDownloaderEnabled) {
+                    val mediaUrl = json.optString("url")
+                    val mimeType = json.optString("mimeType")
+                    val contentLength = json.optLong("contentLength", 0L)
+                    val isAudio = json.optBoolean("isAudio", false)
+                    Log.d("VideoSniffer", "media_detected received: $mediaUrl [$mimeType]")
+
+                    if (mediaUrl.isNotBlank() && !mediaUrl.startsWith("data:") && !mediaUrl.startsWith("blob:") && !mediaUrl.startsWith("about:")) {
+                        runOnUiThread {
+                            tabManager.activeTab?.let { activeTab ->
+                                val pageUrl = activeTab.url
+                                val isYouTube = mediaUrl.contains("googlevideo.com/videoplayback") || pageUrl.contains("youtube.com") || pageUrl.contains("youtu.be")
+                                val title = if (activeTab.title.isNotBlank() && activeTab.title != "Start Page") activeTab.title else "Web Video"
+
+                                val parsedOption = if (isYouTube && mediaUrl.contains("googlevideo.com/videoplayback")) {
+                                    com.browser.adfree.download.VideoQualityParser.parseYouTubeItag(mediaUrl)
+                                } else null
+
+                                val isM3u8 = mediaUrl.contains(".m3u8") || mimeType.contains("mpegurl")
+                                val isAv1 = mimeType.contains("av01")
+                                val isWebm = mediaUrl.contains(".webm") || mimeType.contains("webm")
+                                val format = if (isM3u8) "M3U8" else if (isWebm) "WEBM" else if (isAudio) "M4A" else "MP4"
+                                val label = if (isAudio) "Audio Track (Direct Stream)" else if (isM3u8) "HLS Master Stream" else "Direct Video ($format)"
+
+                                val newOption = parsedOption ?: com.browser.adfree.model.VideoQualityOption(
+                                    label = label,
+                                    format = format,
+                                    codec = if (isAv1) "AV1" else if (format == "WEBM") "VP9" else if (isAudio) "AAC" else "H.264",
+                                    url = mediaUrl,
+                                    estimatedSizeBytes = contentLength,
+                                    isAudioOnly = isAudio,
+                                    isAv1 = isAv1,
+                                    mimeType = mimeType.ifBlank { if (isM3u8) "application/x-mpegURL" else "video/mp4" }
+                                )
+
+                                val existingIndex = activeTab.detectedVideos.indexOfFirst {
+                                    it.pageUrl == pageUrl || (isYouTube && it.sourceDomain == "youtube.com")
+                                }
+
+                                if (existingIndex >= 0) {
+                                    val existing = activeTab.detectedVideos[existingIndex]
+                                    val cleanQualities = existing.qualities.filter { it.url.startsWith("http") && it.url != pageUrl && !it.url.contains("youtube.com/watch") }
+                                    if (cleanQualities.none { it.url == newOption.url || (it.label == newOption.label && it.format == newOption.format) }) {
+                                        val updated = existing.copy(qualities = cleanQualities + newOption)
+                                        activeTab.detectedVideos[existingIndex] = updated
+                                        Log.i("VideoSniffer", "Added stream to existing DetectedVideo on tab: ${newOption.label}")
+                                    }
+                                } else {
+                                    val host = try { java.net.URI(pageUrl).host ?: "" } catch (e: Exception) { "" }
+                                    val videoId = if (isYouTube) com.browser.adfree.download.YouTubeStreamExtractor.extractVideoId(pageUrl) else null
+                                    val thumbnail = if (videoId != null) "https://i.ytimg.com/vi/$videoId/hqdefault.jpg" else null
+                                    val detected = com.browser.adfree.model.DetectedVideo(
+                                        pageUrl = pageUrl,
+                                        title = title,
+                                        thumbnail = thumbnail,
+                                        sourceDomain = if (isYouTube) "youtube.com" else host,
+                                        qualities = listOf(newOption)
+                                    )
+                                    activeTab.detectedVideos.add(0, detected)
+                                    Log.i("VideoSniffer", "Created new DetectedVideo from media_detected: ${detected.title}")
+                                }
+                            }
+                        }
                     }
                 }
             }

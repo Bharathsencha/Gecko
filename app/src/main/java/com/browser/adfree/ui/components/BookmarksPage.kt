@@ -149,6 +149,11 @@ fun BookmarksPage(
                     }
                 },
                 singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
+                    autoCorrect = false
+                ),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = TextPrimary,

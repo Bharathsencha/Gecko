@@ -51,23 +51,33 @@ class BrowserDownloadManager(private val context: Context) {
         contentDisposition: String? = null,
         mimeType: String? = null,
         userAgent: String? = null,
-        referer: String? = null
+        referer: String? = null,
+        customFileName: String? = null,
+        extraHeaders: Map<String, String>? = null
     ): Long {
         if (url.startsWith("data:")) {
-            val fileName = extractFileName(url, contentDisposition, mimeType)
+            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
             return saveBase64Download(fileName, url, mimeType)
         }
 
         try {
-            val fileName = extractFileName(url, contentDisposition, mimeType)
+            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
             val uri = Uri.parse(url)
             val request = DownloadManager.Request(uri).apply {
                 setTitle(fileName)
-                setDescription("Downloading file...")
+                setDescription("Downloading media file...")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
-                userAgent?.let { addRequestHeader("User-Agent", it) }
-                referer?.let { addRequestHeader("Referer", it) }
+                val effectiveUa = userAgent ?: com.browser.adfree.tabs.TabManager.MODERN_MOBILE_UA
+                addRequestHeader("User-Agent", effectiveUa)
+                if (!referer.isNullOrBlank()) {
+                    addRequestHeader("Referer", referer)
+                }
+                extraHeaders?.forEach { (k, v) ->
+                    if (k != "User-Agent" && k != "Referer" && v.isNotBlank()) {
+                        addRequestHeader(k, v)
+                    }
+                }
                 mimeType?.let { setMimeType(it) }
             }
 

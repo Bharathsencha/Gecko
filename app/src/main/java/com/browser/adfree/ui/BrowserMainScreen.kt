@@ -38,8 +38,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.layout.padding
+import androidx.compose.ui.unit.dp
 import com.browser.adfree.download.BrowserDownloadManager
 import com.browser.adfree.model.ArticleData
 import com.browser.adfree.model.DownloadStatus
@@ -77,6 +80,7 @@ fun BrowserMainScreen(
     var showBookmarksPage by remember { mutableStateOf(false) }
     var showShieldsSheet by remember { mutableStateOf(false) }
     var showClearDataSheet by remember { mutableStateOf(false) }
+    var showVideoDownloadSheet by remember { mutableStateOf(false) }
     var showFireAnimation by remember { mutableStateOf(false) }
     var showDefaultPrompt by remember { mutableStateOf(!isAppDefaultBrowser(context) && !preferencesRepo.defaultBrowserPromptDismissed) }
 
@@ -132,8 +136,11 @@ fun BrowserMainScreen(
     BackHandler(enabled = showBookmarksPage) {
         showBookmarksPage = false
     }
+    BackHandler(enabled = showVideoDownloadSheet) {
+        showVideoDownloadSheet = false
+    }
 
-    val hasModalOpen = showSettingsSheet || showHistoryPage || showBookmarksPage || showTabSwitcher || showDownloadsSheet || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
+    val hasModalOpen = showSettingsSheet || showHistoryPage || showBookmarksPage || showTabSwitcher || showDownloadsSheet || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showVideoDownloadSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
     BackHandler(enabled = !hasModalOpen && activeTab != null && (activeTab.canGoBack || activeTab.url != "about:home")) {
         if (activeTab != null && activeTab.canGoBack) {
             activeTab.session.goBack()
@@ -161,6 +168,7 @@ fun BrowserMainScreen(
                     isReaderMode = activeTab?.isReaderMode ?: false,
                     isDarkWeb = activeTab?.isDarkWeb ?: false,
                     tabCount = tabManager.tabs.size,
+                    isPrivate = activeTab?.isPrivate ?: false,
                     onOpenClearData = { showClearDataSheet = true },
                     onOpenHistory = { showHistoryPage = true },
                     onOpenTabs = { showTabSwitcher = true },
@@ -198,10 +206,8 @@ fun BrowserMainScreen(
                 AnimatedContent(
                     targetState = Pair(activeTab?.id ?: "empty", isHomePage),
                     transitionSpec = {
-                        (fadeIn(animationSpec = androidx.compose.animation.core.tween(240, easing = androidx.compose.animation.core.FastOutSlowInEasing)) +
-                         scaleIn(initialScale = 0.96f, animationSpec = androidx.compose.animation.core.tween(240, easing = androidx.compose.animation.core.FastOutSlowInEasing))) togetherWith
-                        (fadeOut(animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)) +
-                         scaleOut(targetScale = 1.03f, animationSpec = androidx.compose.animation.core.tween(180, easing = androidx.compose.animation.core.FastOutSlowInEasing)))
+                        fadeIn(animationSpec = androidx.compose.animation.core.tween(200, easing = androidx.compose.animation.core.FastOutSlowInEasing)) togetherWith
+                        fadeOut(animationSpec = androidx.compose.animation.core.tween(150, easing = androidx.compose.animation.core.FastOutSlowInEasing))
                     },
                     label = "mainViewTransition"
                 ) { (_, homeActive) ->
@@ -209,6 +215,23 @@ fun BrowserMainScreen(
                         SafariHomePage(
                             favorites = favoritesRepo.favorites,
                             preferencesRepo = preferencesRepo,
+                            isPrivate = activeTab?.isPrivate ?: false,
+                            onSwitchToPrivate = {
+                                val privateIndex = tabManager.tabs.indexOfFirst { it.isPrivate }
+                                if (privateIndex != -1) {
+                                    tabManager.selectTab(privateIndex)
+                                } else {
+                                    tabManager.createNewTab(runtime, "about:home", isPrivate = true)
+                                }
+                            },
+                            onSwitchToNormal = {
+                                val normalIndex = tabManager.tabs.indexOfFirst { !it.isPrivate }
+                                if (normalIndex != -1) {
+                                    tabManager.selectTab(normalIndex)
+                                } else {
+                                    tabManager.createNewTab(runtime, "about:home", isPrivate = false)
+                                }
+                            },
                             onNavigate = { targetUrl ->
                                 activeTab?.let { tab ->
                                     tabManager.loadUri(tab, targetUrl, runtime)
@@ -239,12 +262,14 @@ fun BrowserMainScreen(
             }
 
             // 3. Bottom Bar with Page Progress, Quick Tools & Navigation
+            val detectedVideosCount = if (preferencesRepo.videoDownloaderEnabled) (activeTab?.detectedVideos?.size ?: 0) else 0
             BottomBar(
                 progress = activeTab?.progress ?: 0,
                 isLoading = activeTab?.isLoading ?: false,
                 canGoBack = activeTab?.canGoBack ?: false,
                 canGoForward = activeTab?.canGoForward ?: false,
                 activeDownloadsCount = activeDownloadsCount,
+                detectedVideosCount = detectedVideosCount,
                 onBack = {
                     if (activeTab != null && activeTab.canGoBack) {
                         activeTab.session.goBack()
@@ -260,6 +285,7 @@ fun BrowserMainScreen(
                 },
                 onOpenBookmarks = { showBookmarksPage = true },
                 onOpenDownloads = { showDownloadsSheet = true },
+                onOpenVideoDownloader = { showVideoDownloadSheet = true },
                 onOpenSettings = { showSettingsSheet = true },
                 onOpenTabs = { showTabSwitcher = true },
                 onSwipeLeft = { tabManager.nextTab() },
@@ -394,8 +420,8 @@ fun BrowserMainScreen(
             )
         }
 
-        // Offer to Save Password Prompt
-        if (pendingSaveLogin != null) {
+        // Offer to Save Password Prompt (Disabled in private mode)
+        if (pendingSaveLogin != null && activeTab?.isPrivate != true) {
             SavePasswordPromptDialog(
                 pendingLogin = pendingSaveLogin,
                 onSave = onSaveLogin,
@@ -425,12 +451,16 @@ fun BrowserMainScreen(
                 onCloseTab = { index ->
                     tabManager.closeTab(index, runtime)
                 },
-                onNewTab = {
-                    tabManager.createNewTab(runtime, "about:home")
+                onNewTab = { isPrivate ->
+                    tabManager.createNewTab(runtime, "about:home", isPrivate = isPrivate)
                     showTabSwitcher = false
                 },
                 onCloseAllTabs = {
                     tabManager.closeAllTabs(runtime)
+                    showTabSwitcher = false
+                },
+                onCloseAllPrivateTabs = {
+                    tabManager.closePrivateTabs(runtime)
                     showTabSwitcher = false
                 },
                 onDismissRequest = { showTabSwitcher = false }
@@ -445,6 +475,29 @@ fun BrowserMainScreen(
                 onRemove = { item -> downloadManager.removeDownload(item) },
                 onClearCompleted = { downloadManager.clearCompleted() },
                 onDismissRequest = { showDownloadsSheet = false }
+            )
+        }
+
+        // Universal Video Downloader Sheet
+        if (showVideoDownloadSheet && activeTab != null && activeTab.detectedVideos.isNotEmpty()) {
+            val primaryVideo = activeTab.detectedVideos.first()
+            VideoDownloadSheet(
+                video = primaryVideo,
+                preferAv1 = preferencesRepo.preferAv1Codec,
+                onDownload = { option, filename ->
+                    val extraHeaders = mutableMapOf<String, String>()
+                    if (activeTab.url.isNotBlank()) {
+                        extraHeaders["Referer"] = activeTab.url
+                    }
+                    downloadManager.startDownload(
+                        url = option.url,
+                        customFileName = filename,
+                        mimeType = option.mimeType,
+                        referer = activeTab.url,
+                        extraHeaders = extraHeaders
+                    )
+                },
+                onDismiss = { showVideoDownloadSheet = false }
             )
         }
 
@@ -473,6 +526,18 @@ fun BrowserMainScreen(
                     tabManager.toggleDesktopMode(activeTab)
                 },
                 onDismissRequest = { showShieldsSheet = false }
+            )
+        }
+
+        // Floating draggable video download pill
+        val detectedVideosCountForFloat = if (preferencesRepo.videoDownloaderEnabled) (activeTab?.detectedVideos?.size ?: 0) else 0
+        if (!showVideoDownloadSheet) {
+            FloatingVideoDownloadButton(
+                videoCount = detectedVideosCountForFloat,
+                onTap = { showVideoDownloadSheet = true },
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(bottom = 90.dp, end = 16.dp)
             )
         }
 

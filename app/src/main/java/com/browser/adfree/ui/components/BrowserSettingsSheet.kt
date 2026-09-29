@@ -892,6 +892,32 @@ private fun MainSettingsView(
 
         Spacer(modifier = Modifier.height(18.dp))
 
+        // Section: Media & Video Downloader
+        SettingsSectionHeader(title = "MEDIA & DOWNLOADER")
+        SettingsCard {
+            SettingsSwitchRow(
+                title = "Video Downloader (Sniffer)",
+                subtitle = "Detect and offer downloads for videos playing on web pages",
+                icon = Icons.Rounded.Download,
+                checked = preferencesRepo.videoDownloaderEnabled,
+                onCheckedChange = {
+                    preferencesRepo.setVideoDownloaderEnabledPreference(it)
+                }
+            )
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
+            SettingsSwitchRow(
+                title = "Prioritize AV1 Video Format",
+                subtitle = "Offer high-efficiency AV1 streams when provided by platforms",
+                icon = Icons.Rounded.HighQuality,
+                checked = preferencesRepo.preferAv1Codec,
+                onCheckedChange = {
+                    preferencesRepo.setPreferAv1CodecPreference(it)
+                }
+            )
+        }
+
+        Spacer(modifier = Modifier.height(18.dp))
+
         // Section 5: Startup & Search
         SettingsSectionHeader(title = "STARTUP & SEARCH")
         SettingsCard {

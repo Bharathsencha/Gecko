@@ -48,11 +48,13 @@ fun BottomBar(
     canGoBack: Boolean,
     canGoForward: Boolean,
     activeDownloadsCount: Int,
+    detectedVideosCount: Int = 0,
     onBack: () -> Unit,
     onForward: () -> Unit,
     onShare: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenDownloads: () -> Unit,
+    onOpenVideoDownloader: () -> Unit = {},
     onOpenSettings: () -> Unit,
     onOpenTabs: () -> Unit,
     onSwipeLeft: () -> Unit,
@@ -172,7 +174,7 @@ fun BottomBar(
                 )
             }
 
-            // 5. Downloads Manager Button
+            // 5. Downloads Button
             Box(contentAlignment = Alignment.TopEnd) {
                 IconButton(
                     onClick = onOpenDownloads,

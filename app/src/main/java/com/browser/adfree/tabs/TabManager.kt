@@ -30,6 +30,11 @@ import com.browser.adfree.model.TabModel
 import com.browser.adfree.storage.BrowserPreferencesRepository
 import com.browser.adfree.storage.HistoryRepository
 import com.browser.adfree.storage.TabSessionRepository
+import android.util.Log
+import com.browser.adfree.download.YouTubeStreamExtractor
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.mozilla.geckoview.AllowOrDeny
 import org.mozilla.geckoview.GeckoResult
 import org.mozilla.geckoview.GeckoRuntime
@@ -66,7 +71,10 @@ class TabManager(private val context: Context) {
     }
 
     private fun buildSession(tab: TabModel): GeckoSession {
-        val session = GeckoSession()
+        val settings = GeckoSessionSettings.Builder()
+            .usePrivateMode(tab.isPrivate)
+            .build()
+        val session = GeckoSession(settings)
 
         // Chrome-like UA for proper Google/site layout; Desktop UA for desktop mode
         session.settings.userAgentOverride = if (tab.isDesktopMode) DESKTOP_UA else MODERN_MOBILE_UA
@@ -74,7 +82,7 @@ class TabManager(private val context: Context) {
         session.settings.viewportMode = if (tab.isDesktopMode) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
         
         val siteConfig = shieldsRepository?.getConfigForUrl(tab.url)
-        val shieldsActive = siteConfig?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true)
+        val shieldsActive = if (tab.isPrivate) true else (siteConfig?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true))
         val bgMedia = siteConfig?.backgroundMediaEnabled ?: true
         
         session.settings.useTrackingProtection = shieldsActive
@@ -84,9 +92,13 @@ class TabManager(private val context: Context) {
         session.mediaSessionDelegate = object : MediaSession.Delegate {
             override fun onActivated(session: GeckoSession, mediaSession: MediaSession) {
                 com.browser.adfree.media.MediaPlaybackService.start(context, tab.title, tab.url)
+                checkForVideos(tab, tab.url)
             }
             override fun onDeactivated(session: GeckoSession, mediaSession: MediaSession) {
                 com.browser.adfree.media.MediaPlaybackService.stop(context)
+            }
+            override fun onMetadata(session: GeckoSession, mediaSession: MediaSession, meta: MediaSession.Metadata) {
+                checkForVideos(tab, tab.url)
             }
         }
 
@@ -114,10 +126,20 @@ class TabManager(private val context: Context) {
                     tab.adBlockCount = 0
                     tab.isReaderMode = false
                     tab.articleData = null
+                    val oldVideoId = YouTubeStreamExtractor.extractVideoId(tab.url)
+                    val newVideoId = YouTubeStreamExtractor.extractVideoId(url)
+                    val isSameYouTubeVideo = (oldVideoId != null && newVideoId != null && oldVideoId == newVideoId)
+                    val oldHost = try { Uri.parse(tab.url).host } catch (e: Exception) { null }
+                    val newHost = try { Uri.parse(url).host } catch (e: Exception) { null }
+                    val isDifferentHost = (oldHost != null && newHost != null && oldHost != newHost)
+
+                    if (!isSameYouTubeVideo && isDifferentHost) {
+                        tab.detectedVideos.clear()
+                    }
 
                     // Dynamically apply per-site shield settings
                     val currentSiteConfig = shieldsRepository?.getConfigForUrl(url)
-                    val currentShieldsActive = currentSiteConfig?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true)
+                    val currentShieldsActive = if (tab.isPrivate) true else (currentSiteConfig?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true))
                     val currentBgMedia = currentSiteConfig?.backgroundMediaEnabled ?: true
                     session.settings.useTrackingProtection = currentShieldsActive
                     session.settings.suspendMediaWhenInactive = !currentBgMedia
@@ -137,7 +159,7 @@ class TabManager(private val context: Context) {
                 mainHandler.post {
                     tab.isLoading = false
                     tab.progress = 100
-                    if (success && tab.url != HOME_URL && !tab.url.startsWith("about:")) {
+                    if (success && !tab.isPrivate && tab.url != HOME_URL && !tab.url.startsWith("about:")) {
                         historyRepository?.addHistory(tab.title, tab.url)
                     }
                     if (tab.isDarkWeb) {
@@ -148,7 +170,10 @@ class TabManager(private val context: Context) {
                         val js = "try { document.documentElement.style.zoom = '$factor'; document.body.style.zoom = '$factor'; } catch(e) { document.body.style.transform = 'scale($factor)'; document.body.style.transformOrigin = '0 0'; }"
                         session.loadUri("javascript:(function(){$js})();")
                     }
-                    saveSession()
+                    if (!tab.isPrivate) {
+                        saveSession()
+                    }
+                    checkForVideos(tab, tab.url)
                 }
             }
 
@@ -164,8 +189,10 @@ class TabManager(private val context: Context) {
                     mainHandler.post {
                         if (nonNullTitle.isNotBlank() && nonNullTitle != "about:blank" && tab.url != HOME_URL) {
                             tab.title = nonNullTitle
-                            historyRepository?.addHistory(tab.title, tab.url)
-                            saveSession()
+                            if (!tab.isPrivate) {
+                                historyRepository?.addHistory(tab.title, tab.url)
+                                saveSession()
+                            }
                         }
                     }
                 }
@@ -275,8 +302,21 @@ class TabManager(private val context: Context) {
                 url?.let {
                     mainHandler.post {
                         if (it != "about:blank" && it != HOME_URL) {
+                            val oldVideoId = YouTubeStreamExtractor.extractVideoId(tab.url)
+                            val newVideoId = YouTubeStreamExtractor.extractVideoId(it)
+                            val isSameYouTubeVideo = (oldVideoId != null && newVideoId != null && oldVideoId == newVideoId)
+                            val oldHost = try { Uri.parse(tab.url).host } catch (e: Exception) { null }
+                            val newHost = try { Uri.parse(it).host } catch (e: Exception) { null }
+                            val isDifferentHost = (oldHost != null && newHost != null && oldHost != newHost)
+
+                            if (!isSameYouTubeVideo && isDifferentHost) {
+                                tab.detectedVideos.clear()
+                            }
                             tab.url = it
-                            saveSession()
+                            if (!tab.isPrivate) {
+                                saveSession()
+                            }
+                            checkForVideos(tab, it)
                         }
                     }
                 }
@@ -284,6 +324,36 @@ class TabManager(private val context: Context) {
         }
 
         return session
+    }
+
+    fun checkForVideos(tab: TabModel, targetUrl: String) {
+        if (preferencesRepository?.videoDownloaderEnabled == false) return
+        if (targetUrl.isBlank() || targetUrl == HOME_URL || targetUrl.startsWith("about:")) return
+
+        // 1. YouTube Native Stream Extraction
+        if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be")) {
+            val videoId = YouTubeStreamExtractor.extractVideoId(targetUrl)
+            if (videoId != null) {
+                CoroutineScope(Dispatchers.IO).launch {
+                    val detected = YouTubeStreamExtractor.extractById(videoId, targetUrl)
+                    if (detected != null && detected.qualities.isNotEmpty()) {
+                        mainHandler.post {
+                            if (tab.url.contains(videoId) || targetUrl.contains(videoId)) {
+                                val existingIndex = tab.detectedVideos.indexOfFirst {
+                                    it.pageUrl == detected.pageUrl || (it.sourceDomain == "youtube.com" && it.pageUrl.contains(videoId))
+                                }
+                                if (existingIndex >= 0) {
+                                    tab.detectedVideos[existingIndex] = detected
+                                } else {
+                                    tab.detectedVideos.add(0, detected)
+                                }
+                                Log.d("VideoSniffer", "Detected YouTube video: ${detected.title} (${detected.qualities.size} streams)")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 
     fun restoreSession(runtime: GeckoRuntime, startupBehavior: StartupBehavior) {
@@ -305,7 +375,8 @@ class TabManager(private val context: Context) {
                     id = saved.id,
                     initialTitle = saved.title,
                     initialUrl = saved.url,
-                    initialSession = dummySession
+                    initialSession = dummySession,
+                    initialIsPrivate = false
                 ).apply {
                     isDesktopMode = saved.isDesktopMode
                     zoomLevel = saved.zoomLevel
@@ -345,21 +416,32 @@ class TabManager(private val context: Context) {
             sessionRepository.clearSession()
             return
         }
-        if (tabs.isNotEmpty()) {
-            sessionRepository.saveSession(tabs, activeTabIndex.intValue)
+        val normalTabs = tabs.filter { !it.isPrivate }
+        if (normalTabs.isNotEmpty()) {
+            val currentTab = activeTab
+            val normalActiveIndex = if (currentTab != null && !currentTab.isPrivate) {
+                normalTabs.indexOf(currentTab).coerceAtLeast(0)
+            } else {
+                0
+            }
+            sessionRepository.saveSession(normalTabs, normalActiveIndex)
         }
     }
 
     fun createNewTab(
         runtime: GeckoRuntime,
-        initialUrl: String = HOME_URL
+        initialUrl: String = HOME_URL,
+        isPrivate: Boolean = false
     ): TabModel {
-        // Create a placeholder session
-        val dummySession = GeckoSession()
+        // Create a placeholder session with proper private mode flag
+        val dummySession = GeckoSession(GeckoSessionSettings.Builder().usePrivateMode(isPrivate).build())
         val tab = TabModel(
-            initialTitle = if (initialUrl == HOME_URL) "Start Page" else "New Tab",
+            initialTitle = if (initialUrl == HOME_URL) {
+                if (isPrivate) "Private Browsing" else "Start Page"
+            } else if (isPrivate) "Private Tab" else "New Tab",
             initialUrl = initialUrl,
-            initialSession = dummySession
+            initialSession = dummySession,
+            initialIsPrivate = isPrivate
         )
 
         val session = buildSession(tab)
@@ -372,14 +454,18 @@ class TabManager(private val context: Context) {
 
         tabs.add(tab)
         activeTabIndex.intValue = tabs.size - 1
-        saveSession()
+        if (!isPrivate) {
+            saveSession()
+        }
         return tab
     }
 
     fun selectTab(index: Int) {
         if (index in tabs.indices) {
             activeTabIndex.intValue = index
-            saveSession()
+            if (!tabs[index].isPrivate) {
+                saveSession()
+            }
         }
     }
 
@@ -387,7 +473,9 @@ class TabManager(private val context: Context) {
         if (tabs.size > 1) {
             val next = (activeTabIndex.intValue + 1) % tabs.size
             activeTabIndex.intValue = next
-            saveSession()
+            if (!tabs[next].isPrivate) {
+                saveSession()
+            }
         }
     }
 
@@ -395,7 +483,9 @@ class TabManager(private val context: Context) {
         if (tabs.size > 1) {
             val prev = if (activeTabIndex.intValue - 1 < 0) tabs.size - 1 else activeTabIndex.intValue - 1
             activeTabIndex.intValue = prev
-            saveSession()
+            if (!tabs[prev].isPrivate) {
+                saveSession()
+            }
         }
     }
 
@@ -414,12 +504,34 @@ class TabManager(private val context: Context) {
             tabs.removeAt(index)
 
             if (tabs.isEmpty()) {
-                createNewTab(runtime, HOME_URL)
+                createNewTab(runtime, HOME_URL, isPrivate = false)
             } else if (activeTabIndex.intValue >= tabs.size) {
                 activeTabIndex.intValue = tabs.size - 1
             }
             saveSession()
         }
+    }
+
+    fun closePrivateTabs(runtime: GeckoRuntime) {
+        val privateTabs = tabs.filter { it.isPrivate }
+        for (tab in privateTabs) {
+            try {
+                tab.session.progressDelegate = null
+                tab.session.contentDelegate = null
+                tab.session.navigationDelegate = null
+                tab.session.promptDelegate = null
+                tab.session.mediaSessionDelegate = null
+                tab.session.contentBlockingDelegate = null
+                tab.session.close()
+            } catch (e: Exception) {}
+            tabs.remove(tab)
+        }
+        if (tabs.isEmpty()) {
+            createNewTab(runtime, HOME_URL, isPrivate = false)
+        } else {
+            activeTabIndex.intValue = activeTabIndex.intValue.coerceIn(0, tabs.size - 1)
+        }
+        saveSession()
     }
 
     fun closeAllTabs(runtime: GeckoRuntime) {
@@ -436,7 +548,7 @@ class TabManager(private val context: Context) {
         }
         tabs.clear()
         sessionRepository.clearSession()
-        createNewTab(runtime, HOME_URL)
+        createNewTab(runtime, HOME_URL, isPrivate = false)
         saveSession()
     }
 

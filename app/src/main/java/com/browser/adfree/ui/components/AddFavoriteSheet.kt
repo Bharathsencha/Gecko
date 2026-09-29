@@ -169,6 +169,11 @@ fun AddFavoriteSheet(
                     Icon(Icons.Default.Language, contentDescription = null, tint = AccentCyan)
                 },
                 singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Next,
+                    autoCorrect = false
+                ),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = TextPrimary,
@@ -194,6 +199,11 @@ fun AddFavoriteSheet(
                     Icon(Icons.Default.Title, contentDescription = null, tint = AccentCyan)
                 },
                 singleLine = true,
+                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
+                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
+                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                    autoCorrect = false
+                ),
                 shape = RoundedCornerShape(14.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedTextColor = TextPrimary,
