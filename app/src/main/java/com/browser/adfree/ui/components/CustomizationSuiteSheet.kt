@@ -17,7 +17,7 @@
 
 package com.browser.adfree.ui.components
 
-import android.content.Intent
+import android.content.Context
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -41,6 +41,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -52,6 +53,7 @@ import com.browser.adfree.storage.AppThemeMode
 import com.browser.adfree.storage.BrowserPreferencesRepository
 import com.browser.adfree.storage.HomepageWallpaper
 import com.browser.adfree.ui.theme.*
+import java.io.File
 
 @Composable
 fun CustomizationSuiteSubView(
@@ -61,20 +63,15 @@ fun CustomizationSuiteSubView(
 ) {
     val context = LocalContext.current
 
-    // Photo picker launcher for custom start page wallpaper
+    // Photo & GIF picker launcher for custom start page wallpaper (.gif, .png, .jpg, .jpeg, .webp)
     val photoPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
         if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    Intent.FLAG_GRANT_READ_URI_PERMISSION
-                )
-            } catch (e: Exception) {
-                // Ignore if persistable permission not supported by specific provider
+            val savedPath = saveCustomWallpaper(context, uri)
+            if (!savedPath.isNullOrBlank()) {
+                preferencesRepo.setHomepageWallpaperPreference(HomepageWallpaper.CUSTOM, savedPath)
             }
-            preferencesRepo.setHomepageWallpaperPreference(HomepageWallpaper.CUSTOM, uri.toString())
         }
     }
 
@@ -85,63 +82,57 @@ fun CustomizationSuiteSubView(
             .fillMaxWidth()
             .navigationBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
     ) {
-        // Navigation Header
+        // Compact & Scaled Subview Navigation Header
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 4.dp, vertical = 8.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .padding(top = 2.dp, bottom = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.weight(1f)
+            IconButton(
+                onClick = onBack,
+                modifier = Modifier
+                    .size(28.dp)
+                    .background(SurfaceElevated, CircleShape)
             ) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .size(32.dp)
-                        .background(Color(0xFF2C2C2E), CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.ArrowBack,
-                        contentDescription = "Back to Settings",
-                        tint = Color.White,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
+                Icon(
+                    imageVector = Icons.Rounded.ArrowBack,
+                    contentDescription = "Back to Settings",
+                    tint = TextPrimary,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
 
-                Spacer(modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(12.dp))
 
-                Column {
-                    Text(
-                        text = "Personalization Suite",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Themes, Accents & Visuals",
-                        fontSize = 11.5.sp,
-                        color = Color(0xFF8E8E93)
-                    )
-                }
+            Column {
+                Text(
+                    text = "Personalization Suite",
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = TextPrimary
+                )
+                Text(
+                    text = "Themes, wallpapers & dynamic accents",
+                    fontSize = 11.5.sp,
+                    color = TextSecondary
+                )
             }
         }
 
-        Spacer(modifier = Modifier.height(14.dp))
+        Spacer(modifier = Modifier.height(6.dp))
 
         // Section 1: Theme & Dark Flavors
         SettingsSectionHeader(title = "THEME & DARK FLAVORS")
         SettingsCard {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
-                    text = "App Background Flavor",
+                    text = "App Color Theme",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -150,42 +141,42 @@ fun CustomizationSuiteSubView(
                     AppThemeMode.values().forEach { mode ->
                         val isSelected = preferencesRepo.themeMode == mode
                         val (modeBg, modeDesc, modeIcon) = when (mode) {
-                            AppThemeMode.LIGHT -> Triple(Color(0xFFF2F2F7), "Bright, clean daylight UI", Icons.Rounded.LightMode)
-                            AppThemeMode.DARK_OLED -> Triple(Color(0xFF000000), "Pitch black #000000 • Saves battery", Icons.Rounded.DarkMode)
+                            AppThemeMode.LIGHT -> Triple(Color(0xFFF2F2F7), "Crisp daylight theme with dark text", Icons.Rounded.LightMode)
+                            AppThemeMode.DARK_OLED -> Triple(Color(0xFF000000), "Pitch black #000000 • Maximum battery savings", Icons.Rounded.DarkMode)
                             AppThemeMode.DARK_MIDNIGHT -> Triple(Color(0xFF070B14), "Deep navy cosmos glow", Icons.Rounded.Nightlight)
                             AppThemeMode.DARK_CHARCOAL -> Triple(Color(0xFF141416), "Modern matte charcoal dark", Icons.Rounded.Contrast)
-                            AppThemeMode.SYSTEM -> Triple(Color(0xFF1E1E22), "Matches device system theme", Icons.Rounded.SettingsBrightness)
+                            AppThemeMode.SYSTEM -> Triple(Color(0xFF2C2C2E), "Matches device system theme", Icons.Rounded.SettingsBrightness)
                         }
 
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) currentAccent.copy(alpha = 0.15f) else Color(0xFF141416))
+                                .background(if (isSelected) currentAccent.copy(alpha = 0.15f) else SurfaceCard)
                                 .border(
                                     width = 1.dp,
-                                    color = if (isSelected) currentAccent else Color(0xFF2C2C2E),
+                                    color = if (isSelected) currentAccent else BorderSubtle,
                                     shape = RoundedCornerShape(12.dp)
                                 )
                                 .clickable { preferencesRepo.setThemeModePreference(mode) }
-                                .padding(horizontal = 14.dp, vertical = 12.dp),
+                                .padding(horizontal = 14.dp, vertical = 11.dp),
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.SpaceBetween
                         ) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .size(32.dp)
+                                        .size(30.dp)
                                         .clip(CircleShape)
                                         .background(modeBg)
-                                        .border(1.dp, Color(0xFF3A3A3C), CircleShape),
+                                        .border(1.dp, BorderSubtle, CircleShape),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = modeIcon,
                                         contentDescription = null,
                                         tint = if (mode == AppThemeMode.LIGHT) Color(0xFF1C1C1E) else Color.White,
-                                        modifier = Modifier.size(17.dp)
+                                        modifier = Modifier.size(16.dp)
                                     )
                                 }
                                 Spacer(modifier = Modifier.width(12.dp))
@@ -194,12 +185,12 @@ fun CustomizationSuiteSubView(
                                         text = mode.displayName,
                                         fontSize = 14.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = Color.White
+                                        color = TextPrimary
                                     )
                                     Text(
                                         text = modeDesc,
-                                        fontSize = 11.5.sp,
-                                        color = Color(0xFF8E8E93)
+                                        fontSize = 11.sp,
+                                        color = TextSecondary
                                     )
                                 }
                             }
@@ -221,19 +212,19 @@ fun CustomizationSuiteSubView(
         Spacer(modifier = Modifier.height(18.dp))
 
         // Section 2: Dynamic Accent Colors
-        SettingsSectionHeader(title = "ACCENT COLOR ENGINE")
+        SettingsSectionHeader(title = "ACCENT COLOR PALETTE")
         SettingsCard {
             Column(modifier = Modifier.padding(14.dp)) {
                 Text(
                     text = "System Accent Highlight",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Text(
-                    text = "Controls buttons, progress indicators, active tabs and highlights",
+                    text = "Colors buttons, progress indicators, active tab indicators and highlights",
                     fontSize = 11.5.sp,
-                    color = Color(0xFF8E8E93)
+                    color = TextSecondary
                 )
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -251,16 +242,16 @@ fun CustomizationSuiteSubView(
                             modifier = Modifier
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { preferencesRepo.setAccentColorPreference(accent) }
-                                .padding(horizontal = 6.dp, vertical = 6.dp)
+                                .padding(horizontal = 4.dp, vertical = 4.dp)
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(46.dp)
+                                    .size(44.dp)
                                     .clip(CircleShape)
                                     .background(color)
                                     .border(
                                         width = if (isSelected) 3.dp else 1.dp,
-                                        color = if (isSelected) Color.White else Color.Transparent,
+                                        color = if (isSelected) TextPrimary else Color.Transparent,
                                         shape = CircleShape
                                     ),
                                 contentAlignment = Alignment.Center
@@ -270,7 +261,7 @@ fun CustomizationSuiteSubView(
                                         imageVector = Icons.Rounded.Check,
                                         contentDescription = "Selected",
                                         tint = if (accent == AppAccentColor.YELLOW || accent == AppAccentColor.MONOCHROME) Color.Black else Color.White,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(20.dp)
                                     )
                                 }
                             }
@@ -281,7 +272,7 @@ fun CustomizationSuiteSubView(
                                 text = accent.displayName.substringBefore(" "),
                                 fontSize = 11.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                color = if (isSelected) Color.White else Color(0xFF8E8E93)
+                                color = if (isSelected) TextPrimary else TextSecondary
                             )
                         }
                     }
@@ -291,7 +282,7 @@ fun CustomizationSuiteSubView(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // Section 3: Homepage Wallpapers & Visual FX
+        // Section 3: Homepage Wallpapers & Visual FX (.gif, .png, .jpg, .webp)
         SettingsSectionHeader(title = "START PAGE WALLPAPER & FX")
         SettingsCard {
             Column(modifier = Modifier.padding(14.dp)) {
@@ -299,7 +290,12 @@ fun CustomizationSuiteSubView(
                     text = "Start Page Background",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = TextPrimary
+                )
+                Text(
+                    text = "Supports preset gradients and animated GIFs, PNG, JPG, and WebP",
+                    fontSize = 11.5.sp,
+                    color = TextSecondary
                 )
                 Spacer(modifier = Modifier.height(12.dp))
 
@@ -322,10 +318,10 @@ fun CustomizationSuiteSubView(
                                     .weight(1f)
                                     .height(72.dp)
                                     .clip(RoundedCornerShape(14.dp))
-                                    .background(getWallpaperPreviewBrush(wp, preferencesRepo.customWallpaperUri))
+                                    .background(SurfaceElevated)
                                     .border(
                                         width = if (isSelected) 2.dp else 1.dp,
-                                        color = if (isSelected) currentAccent else Color(0xFF2C2C2E),
+                                        color = if (isSelected) currentAccent else BorderSubtle,
                                         shape = RoundedCornerShape(14.dp)
                                     )
                                     .clickable {
@@ -339,13 +335,38 @@ fun CustomizationSuiteSubView(
                                             preferencesRepo.setHomepageWallpaperPreference(wp)
                                         }
                                     }
-                                    .padding(8.dp),
-                                contentAlignment = Alignment.BottomStart
                             ) {
+                                // Background preview
+                                if (wp == HomepageWallpaper.CUSTOM && preferencesRepo.customWallpaperUri.isNotBlank()) {
+                                    val customFile = File(preferencesRepo.customWallpaperUri)
+                                    if (customFile.exists()) {
+                                        AsyncImage(
+                                            model = customFile,
+                                            contentDescription = "Custom Preview",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxSize()
+                                                .background(Color.Black.copy(alpha = 0.35f))
+                                        )
+                                    }
+                                } else {
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .background(getWallpaperPreviewBrush(wp))
+                                    )
+                                }
+
+                                // Overlay Text & Check
                                 Row(
-                                    modifier = Modifier.fillMaxWidth(),
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(10.dp),
                                     horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.Bottom
                                 ) {
                                     Text(
                                         text = wp.displayName,
@@ -358,7 +379,7 @@ fun CustomizationSuiteSubView(
                                             imageVector = Icons.Rounded.CheckCircle,
                                             contentDescription = "Active",
                                             tint = currentAccent,
-                                            modifier = Modifier.size(16.dp)
+                                            modifier = Modifier.size(18.dp)
                                         )
                                     }
                                 }
@@ -367,7 +388,7 @@ fun CustomizationSuiteSubView(
                     }
                 }
 
-                // If Custom is selected, show Gallery button
+                // If Custom is selected, show Gallery / GIF upload button
                 if (preferencesRepo.homepageWallpaper == HomepageWallpaper.CUSTOM) {
                     Spacer(modifier = Modifier.height(4.dp))
                     Button(
@@ -375,18 +396,19 @@ fun CustomizationSuiteSubView(
                         modifier = Modifier.fillMaxWidth(),
                         shape = RoundedCornerShape(10.dp),
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF2C2C2E),
-                            contentColor = Color.White
+                            containerColor = SurfaceElevated,
+                            contentColor = TextPrimary
                         )
                     ) {
                         Icon(
                             imageVector = Icons.Rounded.PhotoLibrary,
                             contentDescription = null,
+                            tint = currentAccent,
                             modifier = Modifier.size(18.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = if (preferencesRepo.customWallpaperUri.isBlank()) "Choose Photo from Gallery" else "Change Gallery Photo",
+                            text = if (preferencesRepo.customWallpaperUri.isBlank()) "Choose GIF, PNG, JPG, WebP" else "Change Custom Wallpaper",
                             fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold
                         )
@@ -395,7 +417,7 @@ fun CustomizationSuiteSubView(
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
-                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+                Divider(color = BorderSubtle, thickness = 0.5.dp)
                 Spacer(modifier = Modifier.height(12.dp))
 
                 // Wallpaper Blur Slider
@@ -408,7 +430,7 @@ fun CustomizationSuiteSubView(
                         text = "Wallpaper Blur",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color.White
+                        color = TextPrimary
                     )
                     Text(
                         text = "${preferencesRepo.wallpaperBlur.toInt()} dp",
@@ -425,7 +447,7 @@ fun CustomizationSuiteSubView(
                     colors = SliderDefaults.colors(
                         thumbColor = currentAccent,
                         activeTrackColor = currentAccent,
-                        inactiveTrackColor = Color(0xFF2C2C2E)
+                        inactiveTrackColor = BorderSubtle
                     )
                 )
 
@@ -441,7 +463,7 @@ fun CustomizationSuiteSubView(
                         text = "Dimming Overlay",
                         fontSize = 13.sp,
                         fontWeight = FontWeight.Medium,
-                        color = Color.White
+                        color = TextPrimary
                     )
                     Text(
                         text = "${(preferencesRepo.wallpaperDim * 100).toInt()}%",
@@ -458,7 +480,7 @@ fun CustomizationSuiteSubView(
                     colors = SliderDefaults.colors(
                         thumbColor = currentAccent,
                         activeTrackColor = currentAccent,
-                        inactiveTrackColor = Color(0xFF2C2C2E)
+                        inactiveTrackColor = BorderSubtle
                     )
                 )
             }
@@ -476,7 +498,7 @@ fun CustomizationSuiteSubView(
                 checked = preferencesRepo.showGreetingHeader,
                 onCheckedChange = { preferencesRepo.setShowGreetingHeaderPreference(it) }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             SettingsSwitchRow(
                 title = "Privacy & Shields Stats Widget",
                 subtitle = "Live blocked ads & trackers banner",
@@ -484,7 +506,7 @@ fun CustomizationSuiteSubView(
                 checked = preferencesRepo.showPrivacyStatsWidget,
                 onCheckedChange = { preferencesRepo.setShowPrivacyStatsPreference(it) }
             )
-            Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+            Divider(color = BorderSubtle, thickness = 0.5.dp)
             SettingsSwitchRow(
                 title = "Favorites Speed Dial Grid",
                 subtitle = "Quick access shortcut tiles",
@@ -494,13 +516,13 @@ fun CustomizationSuiteSubView(
             )
 
             if (preferencesRepo.showFavoritesGrid) {
-                Divider(color = Color(0xFF2C2C2E), thickness = 0.5.dp)
+                Divider(color = BorderSubtle, thickness = 0.5.dp)
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
                     Text(
                         text = "Favorites Grid Columns",
                         fontSize = 13.5.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White
+                        color = TextPrimary
                     )
                     Spacer(modifier = Modifier.height(8.dp))
 
@@ -509,7 +531,7 @@ fun CustomizationSuiteSubView(
                             .fillMaxWidth()
                             .height(36.dp)
                             .clip(RoundedCornerShape(8.dp))
-                            .background(Color(0xFF141416))
+                            .background(SurfaceCard)
                             .padding(2.dp),
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
@@ -528,7 +550,7 @@ fun CustomizationSuiteSubView(
                                     text = "$cols Columns",
                                     fontSize = 12.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                    color = if (isSelected) (if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White) else Color(0xFF8E8E93)
+                                    color = if (isSelected) (if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White) else TextSecondary
                                 )
                             }
                         }
@@ -547,7 +569,7 @@ fun CustomizationSuiteSubView(
                     text = "Address Bar Position",
                     fontSize = 14.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = Color.White
+                    color = TextPrimary
                 )
                 Spacer(modifier = Modifier.height(10.dp))
 
@@ -556,7 +578,7 @@ fun CustomizationSuiteSubView(
                         .fillMaxWidth()
                         .height(40.dp)
                         .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF141416))
+                        .background(SurfaceCard)
                         .padding(3.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
@@ -575,7 +597,7 @@ fun CustomizationSuiteSubView(
                                 text = label,
                                 fontSize = 12.5.sp,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) (if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White) else Color(0xFF8E8E93)
+                                color = if (isSelected) (if (preferencesRepo.accentColor == AppAccentColor.YELLOW || preferencesRepo.accentColor == AppAccentColor.MONOCHROME) Color.Black else Color.White) else TextSecondary
                             )
                         }
                     }
@@ -587,7 +609,28 @@ fun CustomizationSuiteSubView(
     }
 }
 
-private fun getWallpaperPreviewBrush(wp: HomepageWallpaper, customUri: String): Brush {
+fun saveCustomWallpaper(context: Context, uri: Uri): String? {
+    return try {
+        val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
+        val ext = when {
+            mimeType.contains("gif") -> "gif"
+            mimeType.contains("png") -> "png"
+            mimeType.contains("webp") -> "webp"
+            else -> "jpg"
+        }
+        val destinationFile = File(context.filesDir, "custom_wallpaper.$ext")
+        context.contentResolver.openInputStream(uri)?.use { input ->
+            destinationFile.outputStream().use { output ->
+                input.copyTo(output)
+            }
+        }
+        destinationFile.absolutePath
+    } catch (e: Exception) {
+        null
+    }
+}
+
+private fun getWallpaperPreviewBrush(wp: HomepageWallpaper): Brush {
     return when (wp) {
         HomepageWallpaper.DEFAULT -> Brush.radialGradient(listOf(Color(0xFF1B2A4A), Color(0xFF0D1525), Color(0xFF000000)))
         HomepageWallpaper.AURORA -> Brush.linearGradient(listOf(Color(0xFF031024), Color(0xFF0A2E38), Color(0xFF041E24), Color(0xFF020912)))

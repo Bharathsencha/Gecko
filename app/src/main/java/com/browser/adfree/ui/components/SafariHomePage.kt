@@ -72,12 +72,15 @@ fun SafariHomePage(
     val currentAccent = Color(preferencesRepo.accentColor.hex)
 
     Box(modifier = modifier.fillMaxSize()) {
-        // 1. Wallpaper Background Layer
+        // 1. Wallpaper Background Layer (Supports animated GIFs, PNG, JPG, WebP & Presets)
         if (preferencesRepo.homepageWallpaper == HomepageWallpaper.CUSTOM && preferencesRepo.customWallpaperUri.isNotBlank()) {
+            val customFile = java.io.File(preferencesRepo.customWallpaperUri)
+            val imageModel = if (customFile.exists()) customFile else Uri.parse(preferencesRepo.customWallpaperUri)
             AsyncImage(
-                model = Uri.parse(preferencesRepo.customWallpaperUri),
+                model = imageModel,
                 contentDescription = "Custom Wallpaper",
                 contentScale = ContentScale.Crop,
+                alignment = Alignment.Center,
                 modifier = Modifier
                     .fillMaxSize()
                     .then(if (preferencesRepo.wallpaperBlur > 0f) Modifier.blur(preferencesRepo.wallpaperBlur.dp) else Modifier)
@@ -337,16 +340,22 @@ fun SafariHomePage(
     }
 }
 
+@Composable
 private fun getHomeWallpaperBrush(wp: HomepageWallpaper): Brush {
+    val isDark = LocalBrowserColors.current.isDark
     return when (wp) {
-        HomepageWallpaper.DEFAULT -> Brush.radialGradient(listOf(Color(0xFF1B2A4A), Color(0xFF0D1525), Color(0xFF000000)))
+        HomepageWallpaper.DEFAULT -> if (isDark) {
+            Brush.radialGradient(listOf(Color(0xFF1B2A4A), Color(0xFF0D1525), Color(0xFF000000)))
+        } else {
+            Brush.verticalGradient(listOf(Color(0xFFFFFFFF), Color(0xFFF2F2F7), Color(0xFFE5E5EA)))
+        }
         HomepageWallpaper.AURORA -> Brush.linearGradient(listOf(Color(0xFF031024), Color(0xFF0A2E38), Color(0xFF041E24), Color(0xFF020912)))
         HomepageWallpaper.NEBULA -> Brush.radialGradient(listOf(Color(0xFF2A0845), Color(0xFF14052B), Color(0xFF000000)))
         HomepageWallpaper.CYBER -> Brush.linearGradient(listOf(Color(0xFF0D0221), Color(0xFF0F084B), Color(0xFF26408B), Color(0xFF000000)))
         HomepageWallpaper.OLED -> Brush.linearGradient(listOf(Color(0xFF000000), Color(0xFF000000)))
         HomepageWallpaper.FOREST -> Brush.linearGradient(listOf(Color(0xFF061A14), Color(0xFF0D2818), Color(0xFF040F0A), Color(0xFF000000)))
         HomepageWallpaper.SUNSET -> Brush.linearGradient(listOf(Color(0xFF2D0B00), Color(0xFF4A1500), Color(0xFF1A0500), Color(0xFF000000)))
-        HomepageWallpaper.CUSTOM -> Brush.linearGradient(listOf(Color(0xFF1C1C1E), Color(0xFF000000)))
+        HomepageWallpaper.CUSTOM -> Brush.linearGradient(listOf(SurfaceElevated, DarkBg))
     }
 }
 
@@ -359,6 +368,7 @@ fun FavoriteCard(
     onLongClick: () -> Unit,
     onDelete: () -> Unit
 ) {
+    val defaultBg = SurfaceElevated
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
@@ -378,7 +388,7 @@ fun FavoriteCard(
                 modifier = Modifier
                     .size(54.dp)
                     .clip(RoundedCornerShape(16.dp))
-                    .background(getFavoriteBgColor(fav))
+                    .background(getFavoriteBgColor(fav, defaultBg))
                     .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp)),
                 contentAlignment = Alignment.Center
             ) {
@@ -458,13 +468,13 @@ private fun getBuiltInIcon(type: String?): androidx.compose.ui.graphics.vector.I
     }
 }
 
-private fun getFavoriteBgColor(fav: FavoriteItem): Color {
+private fun getFavoriteBgColor(fav: FavoriteItem, defaultBg: Color): Color {
     return when (fav.builtInType) {
         "google" -> Color(0xFF4285F4)
         "youtube" -> Color(0xFFFF0000)
         "reddit" -> Color(0xFFFF4500)
         "wiki" -> Color(0xFF555555)
         "github" -> Color(0xFF24292E)
-        else -> Color(0xFF1E2230)
+        else -> defaultBg
     }
 }

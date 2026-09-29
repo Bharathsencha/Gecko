@@ -140,6 +140,14 @@ class BrowserPreferencesRepository(context: Context) {
     var bottomAddressBar by mutableStateOf(prefs.getBoolean("bottom_address_bar", false))
         private set
 
+    var defaultBrowserPromptDismissed by mutableStateOf(prefs.getBoolean("default_browser_prompt_dismissed", false))
+        private set
+
+    fun setDefaultBrowserPromptDismissedPreference(dismissed: Boolean) {
+        defaultBrowserPromptDismissed = dismissed
+        prefs.edit().putBoolean("default_browser_prompt_dismissed", dismissed).apply()
+    }
+
     fun setThemeModePreference(mode: AppThemeMode) {
         themeMode = mode
         prefs.edit().putString("theme_mode", mode.name).apply()

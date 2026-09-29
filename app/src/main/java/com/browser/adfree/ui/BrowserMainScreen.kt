@@ -65,6 +65,13 @@ fun BrowserMainScreen(
     var showHistoryPage by remember { mutableStateOf(false) }
     var showBookmarksPage by remember { mutableStateOf(false) }
     var showShieldsSheet by remember { mutableStateOf(false) }
+    var showDefaultPrompt by remember { mutableStateOf(!isAppDefaultBrowser(context) && !preferencesRepo.defaultBrowserPromptDismissed) }
+
+    val defaultBrowserLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.StartActivityForResult()
+    ) {
+        showDefaultPrompt = false
+    }
 
     var pendingInsecureHttpUrl by remember { mutableStateOf<String?>(null) }
     var pendingInsecureProceedCallback by remember { mutableStateOf<(() -> Unit)?>(null) }
@@ -339,6 +346,20 @@ fun BrowserMainScreen(
             SavedPasswordsSheet(
                 passwordRepository = passwordRepo,
                 onDismissRequest = { showPasswordsSheet = false }
+            )
+        }
+
+        // Startup Default Browser Setup Prompt
+        if (showDefaultPrompt) {
+            DefaultBrowserPromptDialog(
+                onSetDefault = {
+                    requestSetDefaultBrowser(context, defaultBrowserLauncher)
+                    showDefaultPrompt = false
+                },
+                onDismiss = {
+                    preferencesRepo.setDefaultBrowserPromptDismissedPreference(true)
+                    showDefaultPrompt = false
+                }
             )
         }
 

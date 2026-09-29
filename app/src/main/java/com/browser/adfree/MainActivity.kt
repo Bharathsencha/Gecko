@@ -108,6 +108,18 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Initialize Coil with Animated GIF & WebP decoder support for dynamic wallpapers
+        val imageLoader = coil.ImageLoader.Builder(this)
+            .components {
+                if (android.os.Build.VERSION.SDK_INT >= 28) {
+                    add(coil.decode.ImageDecoderDecoder.Factory())
+                } else {
+                    add(coil.decode.GifDecoder.Factory())
+                }
+            }
+            .build()
+        coil.Coil.setImageLoader(imageLoader)
+
         // 1. Initialize Repositories & Managers
         preferencesRepo = BrowserPreferencesRepository(this)
         shieldsRepo = com.browser.adfree.shields.ShieldsRepository(this)

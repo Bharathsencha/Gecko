@@ -49,6 +49,13 @@ import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import android.util.Log
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.ActivityResultLauncher
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import com.browser.adfree.model.CookiePolicy
 import com.browser.adfree.model.SearchEngine
 import com.browser.adfree.model.StartupBehavior
@@ -90,27 +97,29 @@ fun isAppDefaultBrowser(context: Context): Boolean {
     }
 }
 
-fun launchDefaultBrowserSettings(context: Context) {
-    try {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val roleManager = context.getSystemService(RoleManager::class.java)
-            if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER)) {
+fun requestSetDefaultBrowser(context: Context, launcher: ActivityResultLauncher<Intent>) {
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val roleManager = context.getSystemService(RoleManager::class.java)
+        if (roleManager != null && roleManager.isRoleAvailable(RoleManager.ROLE_BROWSER)) {
+            try {
                 val intent = roleManager.createRequestRoleIntent(RoleManager.ROLE_BROWSER)
-                context.startActivity(intent)
+                launcher.launch(intent)
                 return
+            } catch (e: Exception) {
+                Log.e("Settings", "RoleManager error", e)
             }
         }
+    }
+    try {
         val intent = Intent(Settings.ACTION_MANAGE_DEFAULT_APPS_SETTINGS)
-        context.startActivity(intent)
+        launcher.launch(intent)
     } catch (e: Exception) {
         try {
             val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
                 data = Uri.fromParts("package", context.packageName, null)
             }
-            context.startActivity(intent)
-        } catch (e2: Exception) {
-            // Fallback
-        }
+            launcher.launch(intent)
+        } catch (e2: Exception) {}
     }
 }
 
@@ -127,7 +136,6 @@ fun BrowserSettingsSheet(
     onOpenHistory: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
-    val context = LocalContext.current
     var currentScreen by remember { mutableStateOf(SettingsScreen.MAIN) }
     var showClearDialog by remember { mutableStateOf(false) }
 
@@ -141,14 +149,14 @@ fun BrowserSettingsSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = Color(0xFF141416),
+        containerColor = DarkBg,
         dragHandle = {
             Box(
                 modifier = Modifier
                     .padding(top = 10.dp, bottom = 6.dp)
                     .width(36.dp)
                     .height(4.dp)
-                    .background(Color(0xFF3A3A3C), RoundedCornerShape(2.dp))
+                    .background(BorderSubtle, RoundedCornerShape(2.dp))
             )
         },
         shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
@@ -230,8 +238,28 @@ private fun MainSettingsView(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
-    val isDefault = remember { isAppDefaultBrowser(context) }
+    var isDefault by remember { mutableStateOf(isAppDefaultBrowser(context)) }
     val currentAccent = Color(preferencesRepo.accentColor.hex)
+
+    val defaultBrowserLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        isDefault = isAppDefaultBrowser(context)
+    }
+
+    // Refresh default status on return from Android Settings
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isDefault = isAppDefaultBrowser(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -252,19 +280,19 @@ private fun MainSettingsView(
                 text = "Browser Settings",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = Color.White
+                color = TextPrimary
             )
 
             IconButton(
                 onClick = onClose,
                 modifier = Modifier
                     .size(32.dp)
-                    .background(Color(0xFF2C2C2E), CircleShape)
+                    .background(SurfaceElevated, CircleShape)
             ) {
                 Icon(
                     imageVector = Icons.Rounded.Close,
                     contentDescription = "Close",
-                    tint = Color(0xFF8E8E93),
+                    tint = TextSecondary,
                     modifier = Modifier.size(17.dp)
                 )
             }
@@ -280,7 +308,7 @@ private fun MainSettingsView(
                     .clip(RoundedCornerShape(18.dp))
                     .background(currentAccent.copy(alpha = 0.12f))
                     .border(1.dp, currentAccent.copy(alpha = 0.5f), RoundedCornerShape(18.dp))
-                    .clickable { launchDefaultBrowserSettings(context) }
+                    .clickable { requestSetDefaultBrowser(context, defaultBrowserLauncher) }
                     .padding(14.dp)
             ) {
                 Row(
@@ -312,12 +340,12 @@ private fun MainSettingsView(
                                 text = "Set as Default Browser",
                                 fontSize = 14.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color.White
+                                color = TextPrimary
                             )
                             Text(
                                 text = "Open all links ad-free & protected",
                                 fontSize = 11.5.sp,
-                                color = Color(0xFF8E8E93)
+                                color = TextSecondary
                             )
                         }
                     }
@@ -359,22 +387,22 @@ private fun MainSettingsView(
                                 text = "Default Web Browser",
                                 fontSize = 14.5.sp,
                                 fontWeight = FontWeight.SemiBold,
-                                color = Color.White
+                                color = TextPrimary
                             )
                             Text(
                                 text = "Gecko opens external web links",
                                 fontSize = 11.5.sp,
-                                color = Color(0xFF8E8E93)
+                                color = TextSecondary
                             )
                         }
                     }
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = Color(0xFF1A3320)
+                        color = ShieldGreen.copy(alpha = 0.2f)
                     ) {
                         Text(
                             text = "Active ✓",
-                            color = Color(0xFF34C759),
+                            color = ShieldGreen,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)

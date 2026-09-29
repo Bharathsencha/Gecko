@@ -95,8 +95,9 @@ dependencies {
     // SwipeRefreshLayout for smooth native pull-to-refresh
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 
-    // Coil for Dynamic Favicons
+    // Coil for Dynamic Favicons & Animated Wallpapers (.gif, .png, .jpg, .webp)
     implementation("io.coil-kt:coil-compose:2.5.0")
+    implementation("io.coil-kt:coil-gif:2.5.0")
 
     // Networking (OkHttp)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
