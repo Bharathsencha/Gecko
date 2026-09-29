@@ -53,6 +53,11 @@ class BrowserDownloadManager(private val context: Context) {
         userAgent: String? = null,
         referer: String? = null
     ): Long {
+        if (url.startsWith("data:")) {
+            val fileName = extractFileName(url, contentDisposition, mimeType)
+            return saveBase64Download(fileName, url, mimeType)
+        }
+
         try {
             val fileName = extractFileName(url, contentDisposition, mimeType)
             val uri = Uri.parse(url)
@@ -90,6 +95,83 @@ class BrowserDownloadManager(private val context: Context) {
             return downloadId
         } catch (e: Exception) {
             e.printStackTrace()
+            mainHandler.post {
+                Toast.makeText(context, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
+            }
+            return -1L
+        }
+    }
+
+    fun saveBase64Download(fileName: String, dataUrl: String, mimeType: String? = null): Long {
+        try {
+            val cleanName = sanitizeFileName(if (fileName.isNotBlank()) fileName else "download_${System.currentTimeMillis()}.bin")
+            val base64Index = dataUrl.indexOf("base64,")
+            val rawBytes = if (base64Index != -1) {
+                val base64String = dataUrl.substring(base64Index + 7).trim()
+                android.util.Base64.decode(base64String, android.util.Base64.DEFAULT)
+            } else if (dataUrl.startsWith("data:")) {
+                val commaIndex = dataUrl.indexOf(',')
+                if (commaIndex != -1) {
+                    java.net.URLDecoder.decode(dataUrl.substring(commaIndex + 1), "UTF-8").toByteArray()
+                } else {
+                    dataUrl.toByteArray()
+                }
+            } else {
+                dataUrl.toByteArray()
+            }
+
+            val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+            if (!downloadsDir.exists()) downloadsDir.mkdirs()
+            var targetFile = File(downloadsDir, cleanName)
+            var counter = 1
+            val nameWithoutExt = cleanName.substringBeforeLast(".")
+            val ext = cleanName.substringAfterLast(".", "")
+            while (targetFile.exists()) {
+                val numberedName = if (ext.isNotEmpty()) "$nameWithoutExt ($counter).$ext" else "$nameWithoutExt ($counter)"
+                targetFile = File(downloadsDir, numberedName)
+                counter++
+            }
+
+            targetFile.outputStream().use { output ->
+                output.write(rawBytes)
+                output.flush()
+            }
+
+            val finalMime = mimeType ?: (MimeTypeMap.getSingleton().getMimeTypeFromExtension(targetFile.extension.lowercase()) ?: "application/octet-stream")
+            val id = System.currentTimeMillis()
+
+            try {
+                systemDownloadManager.addCompletedDownload(
+                    targetFile.name,
+                    "Downloaded file",
+                    true,
+                    finalMime,
+                    targetFile.absolutePath,
+                    targetFile.length(),
+                    true
+                )
+            } catch (e: Exception) {}
+
+            val item = DownloadItem(
+                id = id,
+                fileName = targetFile.name,
+                url = "data:$finalMime",
+                mimeType = finalMime,
+                destinationPath = targetFile.absolutePath,
+                initialProgress = 100,
+                initialStatus = DownloadStatus.COMPLETED
+            ).apply {
+                currentBytes = targetFile.length()
+                totalBytes = targetFile.length()
+            }
+
+            mainHandler.post {
+                downloadsList.add(0, item)
+                Toast.makeText(context, "Saved ${targetFile.name} to Downloads", Toast.LENGTH_SHORT).show()
+            }
+            return id
+        } catch (e: Exception) {
+            android.util.Log.e("AdFreeBrowser", "Error saving base64 download", e)
             mainHandler.post {
                 Toast.makeText(context, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
             }

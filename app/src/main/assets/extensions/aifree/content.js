@@ -1,11 +1,109 @@
 /**
  * AI Free Content Script
- * Handles: Google AI Overview removal, Reader mode extraction, SPA Scroll Restoration, Background Media Playback
- * Ad blocking → real uBlock Origin
- * Dark mode → real Dark Reader
+ * Handles: Fast Cosmetic Ad-Hiding, Scriptlet Surrogates, Google AI Overview removal, Reader mode, SPA Scroll, Media
  */
 
-// ── 1. Google AI Overview Blocker ──────────────────────────────────────────
+// ── 0. High-Speed Cosmetic Ad Hiding & Scriptlet Surrogates ─────────────────
+const COSMETIC_AD_SELECTORS = [
+    ".adsbygoogle",
+    "[id*='google_ads']",
+    "[id^='ad-']",
+    "[id*='_ad_']",
+    "[class*='ad-banner']",
+    "[class*='dynamic-ad']",
+    "[class*='ad-placement']",
+    "[class*='ad-container']",
+    "[class*='ad-wrapper']",
+    "[data-ad-client]",
+    "[data-ad-slot]",
+    ".taboola-ad",
+    ".outbrain-ad",
+    "iframe[src*='doubleclick']",
+    "iframe[src*='googlesyndication']",
+    "iframe[src*='amazon-adsystem']",
+    ".banner-ad",
+    ".header-ad",
+    ".sidebar-ad",
+    ".sponsored-post",
+    "[aria-label='advertisement' i]",
+    "[aria-label='sponsored' i]"
+].join(", ");
+
+function injectCosmeticAdBlockStyle() {
+    let style = document.getElementById("aifree-cosmetic-ad-block");
+    if (!style) {
+        style = document.createElement("style");
+        style.id = "aifree-cosmetic-ad-block";
+        style.textContent = `
+            ${COSMETIC_AD_SELECTORS} {
+                display: none !important;
+                visibility: hidden !important;
+                opacity: 0 !important;
+                height: 0 !important;
+                min-height: 0 !important;
+                width: 0 !important;
+                min-width: 0 !important;
+                pointer-events: none !important;
+            }
+        `;
+        (document.head || document.documentElement).appendChild(style);
+    }
+}
+
+function injectScriptletSurrogates() {
+    try {
+        const script = document.createElement("script");
+        script.textContent = `(function() {
+            try {
+                // AdsByGoogle stub
+                window.adsbygoogle = window.adsbygoogle || [];
+                window.adsbygoogle.loaded = true;
+                window.adsbygoogle.push = function(a) {
+                    if (typeof a === 'function') {
+                        try { a(); } catch (e) {}
+                    }
+                };
+
+                // Google Publisher Tag (GPT) stub
+                window.googletag = window.googletag || { cmd: [] };
+                window.googletag.apiReady = true;
+                window.googletag.pubads = function() {
+                    return {
+                        addEventListener: function() {},
+                        enableSingleRequest: function() {},
+                        setTargeting: function() {},
+                        collapseEmptyDivs: function() {},
+                        clearTargeting: function() {},
+                        refresh: function() {},
+                        disableInitialLoad: function() {},
+                        getSlots: function() { return []; }
+                    };
+                };
+                window.googletag.enableServices = function() {};
+                window.googletag.display = function() {};
+                window.googletag.defineSlot = function() {
+                    return {
+                        addService: function() { return this; },
+                        setTargeting: function() { return this; },
+                        setCollapseEmptyDiv: function() { return this; }
+                    };
+                };
+
+                // Google Analytics / GTag stub
+                window.ga = window.ga || function() {};
+                window.gtag = window.gtag || function() {};
+                window.dataLayer = window.dataLayer || [];
+
+                // Facebook Pixel stub
+                window.fbq = window.fbq || function() {};
+                window._fbq = window._fbq || window.fbq;
+            } catch (e) {}
+        })();`;
+        (document.head || document.documentElement).appendChild(script);
+        script.remove();
+    } catch (e) {}
+}
+
 // ── 1. Google AI Overview Blocker ──────────────────────────────────────────
 const AI_OVERVIEW_SELECTORS = [
     "#Odp5De",
@@ -265,12 +363,117 @@ function extractArticleContent(doc) {
     }
 }
 
-// ── 5. Init ────────────────────────────────────────────────────────────────
+// ── 5. Client-Side Blob / Data URI Download Interceptor ──────────────────────
+function initClientDownloadInterceptor() {
+    async function handleDownloadElement(el) {
+        try {
+            let href = el.getAttribute("href") || el.href || "";
+            let downloadAttr = el.getAttribute("download") || "";
+
+            if (href.startsWith("blob:") || href.startsWith("data:")) {
+                let filename = downloadAttr || "";
+                let mimeType = "";
+
+                if (href.startsWith("data:")) {
+                    const match = href.match(/^data:([^;,]+)/);
+                    if (match) mimeType = match[1];
+                    if (!filename) {
+                        const ext = mimeType.includes("/") ? mimeType.split("/")[1] : "txt";
+                        filename = "export_" + Date.now() + "." + ext;
+                    }
+                    browser.runtime.sendMessage({
+                        action: "download_blob",
+                        dataUrl: href,
+                        filename: filename,
+                        mimeType: mimeType
+                    }).catch(() => {});
+                } else if (href.startsWith("blob:")) {
+                    const response = await fetch(href);
+                    const blob = await response.blob();
+                    mimeType = blob.type;
+                    if (!filename) {
+                        const ext = mimeType.includes("/") ? mimeType.split("/")[1] : "bin";
+                        filename = "export_" + Date.now() + "." + ext;
+                    }
+                    const reader = new FileReader();
+                    reader.onloadend = function() {
+                        const base64Data = reader.result;
+                        browser.runtime.sendMessage({
+                            action: "download_blob",
+                            dataUrl: base64Data,
+                            filename: filename,
+                            mimeType: mimeType
+                        }).catch(() => {});
+                    };
+                    reader.readAsDataURL(blob);
+                }
+            }
+        } catch (err) {}
+    }
+
+    document.addEventListener("click", (e) => {
+        const target = e.target;
+        if (!target) return;
+        const link = target.closest("a[download], a[href^='blob:'], a[href^='data:']");
+        if (link) {
+            handleDownloadElement(link);
+        }
+    }, true);
+}
+
+// ── 6. Web Share API Native Chooser Bridge ──────────────────────────────────
+function initWebShareBridge() {
+    try {
+        const script = document.createElement("script");
+        script.textContent = `(function() {
+            try {
+                const handler = async function(data) {
+                    window.postMessage({
+                        type: "__gecko_web_share__",
+                        title: (data && data.title) || document.title || "",
+                        text: (data && data.text) || "",
+                        url: (data && data.url) || window.location.href
+                    }, "*");
+                    return Promise.resolve();
+                };
+                if (navigator.share) {
+                    navigator.share = handler;
+                } else {
+                    Object.defineProperty(navigator, 'share', {
+                        value: handler,
+                        configurable: true,
+                        writable: true
+                    });
+                }
+            } catch (e) {}
+        })();`;
+        (document.head || document.documentElement).appendChild(script);
+        script.remove();
+
+        window.addEventListener("message", (event) => {
+            if (event.data && event.data.type === "__gecko_web_share__") {
+                browser.runtime.sendMessage({
+                    action: "share_payload",
+                    title: event.data.title,
+                    text: event.data.text,
+                    url: event.data.url
+                }).catch(() => {});
+            }
+        });
+    } catch (e) {}
+}
+
+// ── 7. Init ────────────────────────────────────────────────────────────────
+injectCosmeticAdBlockStyle();
+injectScriptletSurrogates();
 watchForGoogleAiOverview();
 initSpaScrollRestoration();
 initBackgroundMediaPlayback();
+initClientDownloadInterceptor();
+initWebShareBridge();
 
 window.addEventListener("DOMContentLoaded", () => {
+    injectCosmeticAdBlockStyle();
     removeAiNodes(document);
 });
 
@@ -281,3 +484,5 @@ browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
     }
     return true;
 });
+
+

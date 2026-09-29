@@ -179,6 +179,32 @@ class TabManager(private val context: Context) {
             }
         }
 
+        session.promptDelegate = object : GeckoSession.PromptDelegate {
+            override fun onSharePrompt(
+                session: GeckoSession,
+                prompt: GeckoSession.PromptDelegate.SharePrompt
+            ): GeckoResult<GeckoSession.PromptDelegate.PromptResponse>? {
+                mainHandler.post {
+                    try {
+                        val sendIntent = android.content.Intent().apply {
+                            action = android.content.Intent.ACTION_SEND
+                            putExtra(android.content.Intent.EXTRA_TEXT, prompt.text ?: prompt.uri ?: "")
+                            prompt.title?.let { putExtra(android.content.Intent.EXTRA_TITLE, it) }
+                            type = "text/plain"
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        val chooser = android.content.Intent.createChooser(sendIntent, prompt.title ?: "Share").apply {
+                            addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                        }
+                        context.startActivity(chooser)
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+                return GeckoResult.fromValue(prompt.confirm(GeckoSession.PromptDelegate.SharePrompt.Result.SUCCESS))
+            }
+        }
+
         session.navigationDelegate = object : GeckoSession.NavigationDelegate {
             override fun onLoadRequest(
                 session: GeckoSession,
@@ -186,6 +212,22 @@ class TabManager(private val context: Context) {
             ): GeckoResult<AllowOrDeny>? {
                 val uri = request.uri
                 val httpsOnly = preferencesRepository?.httpsOnlyMode ?: true
+
+                // Direct file download extension interceptor
+                val lowerUri = uri.lowercase().substringBefore("?")
+                val isDownloadable = lowerUri.endsWith(".apk") || lowerUri.endsWith(".pdf") ||
+                        lowerUri.endsWith(".zip") || lowerUri.endsWith(".rar") ||
+                        lowerUri.endsWith(".7z") || lowerUri.endsWith(".tar.gz") ||
+                        lowerUri.endsWith(".dmg") || lowerUri.endsWith(".iso") ||
+                        lowerUri.endsWith(".exe") || lowerUri.endsWith(".epub") ||
+                        lowerUri.endsWith(".csv") || lowerUri.endsWith(".json")
+
+                if (isDownloadable && (uri.startsWith("http://") || uri.startsWith("https://"))) {
+                    mainHandler.post {
+                        downloadManager?.startDownload(url = uri)
+                    }
+                    return GeckoResult.fromValue(AllowOrDeny.DENY)
+                }
 
                 // De-AMP Interception: Auto-bypass Google AMP wrappers to load canonical publisher page
                 val deAmped = com.browser.adfree.model.UrlSanitizer.deAmp(uri)

@@ -187,6 +187,20 @@ class MainActivity : ComponentActivity() {
             GeckoRuntime.getDefault(this)
         }
 
+        // Auto-grant permissions for built-in extensions (webRequest, webRequestBlocking, storage, etc.)
+        runtime.webExtensionController.promptDelegate = object : WebExtensionController.PromptDelegate {
+            override fun onInstallPrompt(extension: WebExtension): GeckoResult<AllowOrDeny>? {
+                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+            }
+            override fun onOptionalPrompt(
+                extension: WebExtension,
+                permissions: Array<String>,
+                origins: Array<String>
+            ): GeckoResult<AllowOrDeny>? {
+                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+            }
+        }
+
         // 3a. Load real uBlock Origin 1.75.0 — silent, no popup, blocks everything
         runtime.webExtensionController.ensureBuiltIn(
             "resource://android/assets/extensions/ublock_origin/",
@@ -365,8 +379,8 @@ class MainActivity : ComponentActivity() {
             val json = JSONObject(message.toString())
             val action = json.optString("action")
 
-            if (action == "ad_blocked") {
-                val count = json.optInt("tabBlockedCount", 1)
+            if (action == "ad_blocked" || action == "blocked_count") {
+                val count = json.optInt("count", json.optInt("tabBlockedCount", 1))
                 runOnUiThread {
                     tabManager.activeTab?.let { tab ->
                         if (count > tab.adBlockCount) {
@@ -374,6 +388,31 @@ class MainActivity : ComponentActivity() {
                         } else {
                             tab.adBlockCount++
                         }
+                    }
+                }
+            } else if (action == "download_blob") {
+                val filename = json.optString("filename")
+                val dataUrl = json.optString("dataUrl")
+                val mimeType = json.optString("mimeType")
+                if (dataUrl.isNotBlank()) {
+                    downloadManager.saveBase64Download(filename, dataUrl, mimeType.ifBlank { null })
+                }
+            } else if (action == "share_payload") {
+                val title = json.optString("title")
+                val text = json.optString("text")
+                val url = json.optString("url")
+                val shareBody = if (text.isNotBlank() && url.isNotBlank()) "$text\n$url" else (text.ifBlank { url })
+                runOnUiThread {
+                    try {
+                        val sendIntent = Intent().apply {
+                            this.action = Intent.ACTION_SEND
+                            putExtra(Intent.EXTRA_TEXT, shareBody)
+                            if (title.isNotBlank()) putExtra(Intent.EXTRA_TITLE, title)
+                            type = "text/plain"
+                        }
+                        startActivity(Intent.createChooser(sendIntent, title.ifBlank { "Share" }))
+                    } catch (e: Exception) {
+                        e.printStackTrace()
                     }
                 }
             } else if (action == "offer_save_password") {

@@ -5,6 +5,9 @@
   "description": "Removes Google AI Overviews and provides reader mode extraction",
   "permissions": [
     "storage",
+    "webRequest",
+    "webRequestBlocking",
+    "webNavigation",
     "<all_urls>"
   ],
   "background": {
