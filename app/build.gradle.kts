@@ -81,7 +81,11 @@ dependencies {
     // Mozilla GeckoView Engine
     implementation("org.mozilla.geckoview:geckoview-omni:122.0.20240205133611")
 
-    // NewPipeExtractor for YouTube stream extraction
+    // youtubedl-android (yt-dlp wrapper) & FFmpeg for Universal Video/Audio Extraction across 1800+ sites
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+
+    // NewPipeExtractor for YouTube stream extraction fallback
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.24.4")
 
     // AndroidX & Lifecycle

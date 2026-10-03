@@ -27,6 +27,18 @@
     @android.webkit.JavascriptInterface <methods>;
 }
 
+# youtubedl-android (yt-dlp), FFmpeg & Apache Commons Compress/Jackson rules
+-keep class com.yausername.youtubedl_android.** { *; }
+-keep class io.github.junkfood02.youtubedl.** { *; }
+-keep class org.apache.commons.compress.** { *; }
+-keep class org.apache.commons.io.** { *; }
+-keep class com.fasterxml.jackson.** { *; }
+-dontwarn com.yausername.youtubedl_android.**
+-dontwarn io.github.junkfood02.youtubedl.**
+-dontwarn org.apache.commons.compress.**
+-dontwarn org.apache.commons.io.**
+-dontwarn com.fasterxml.jackson.**
+
 # NewPipeExtractor & Rhino JavaScript Engine
 -keep class org.mozilla.javascript.** { *; }
 -keep class org.mozilla.classfile.ClassFileWriter { *; }

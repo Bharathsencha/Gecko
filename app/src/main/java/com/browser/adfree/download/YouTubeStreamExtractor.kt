@@ -73,30 +73,35 @@ object YouTubeStreamExtractor {
     }
 
     suspend fun extractById(videoId: String, pageUrl: String): DetectedVideo? = withContext(Dispatchers.IO) {
-        // Tier 1: WebPage direct extraction (bypasses bot check by using real browser player response)
-        var detected = fetchFromWebPage(videoId, pageUrl)
+        // Tier 1: InnerTube ANDROID_VR (Direct Playback Stream URLs - Fast & Unciphered)
+        var detected = fetchInnerTube(videoId, pageUrl, clientName = "ANDROID_VR", clientVersion = "1.43.32", sdkVersion = 30)
 
-        // Tier 2: InnerTube ANDROID_VR (Direct Playback Stream URLs - Fast & Unciphered)
+        // Tier 2: InnerTube IOS (Modern iOS Payload)
         if (detected == null || detected.qualities.isEmpty()) {
-            detected = fetchInnerTube(videoId, pageUrl, clientName = "ANDROID_VR", clientVersion = "1.43.32", sdkVersion = 30)
+            detected = fetchInnerTube(videoId, pageUrl, clientName = "IOS", clientVersion = "19.29.1", sdkVersion = null)
         }
 
-        // Tier 3: InnerTube TVHTML5
+        // Tier 3: InnerTube TVHTML5 Embedded Player
         if (detected == null || detected.qualities.isEmpty()) {
             detected = fetchInnerTube(videoId, pageUrl, clientName = "TVHTML5_SIMPLY_EMBEDDED_PLAYER", clientVersion = "2.0", sdkVersion = null)
         }
 
-        // Tier 4: InnerTube IOS
+        // Tier 4: InnerTube ANDROID_TESTSUITE
         if (detected == null || detected.qualities.isEmpty()) {
-            detected = fetchInnerTube(videoId, pageUrl, clientName = "IOS", clientVersion = "19.09.3", sdkVersion = null)
+            detected = fetchInnerTube(videoId, pageUrl, clientName = "ANDROID_TESTSUITE", clientVersion = "1.9", sdkVersion = 30)
         }
 
-        // Tier 5: InnerTube ANDROID
+        // Tier 5: WebPage direct extraction (real browser player response)
         if (detected == null || detected.qualities.isEmpty()) {
-            detected = fetchInnerTube(videoId, pageUrl, clientName = "ANDROID", clientVersion = "19.09.37", sdkVersion = 30)
+            detected = fetchFromWebPage(videoId, pageUrl)
         }
 
-        // Tier 6: NewPipeExtractor Fallback
+        // Tier 6: InnerTube ANDROID Standard Client
+        if (detected == null || detected.qualities.isEmpty()) {
+            detected = fetchInnerTube(videoId, pageUrl, clientName = "ANDROID", clientVersion = "19.29.35", sdkVersion = 34)
+        }
+
+        // Tier 7: NewPipeExtractor Fallback
         if (detected == null || detected.qualities.isEmpty()) {
             detected = extractViaNewPipe(videoId, pageUrl)
         }
@@ -154,8 +159,12 @@ object YouTubeStreamExtractor {
 
             val qualityList = mutableListOf<VideoQualityOption>()
 
-            // Best audio stream for adaptive video muxing
-            val bestAudioStream = extractor.audioStreams?.maxByOrNull { it.averageBitrate }
+            // Best audio stream for adaptive video muxing (prefer AAC / M4A)
+            val bestAudioStream = extractor.audioStreams?.filter {
+                val fmt = it.format?.getName()?.uppercase() ?: ""
+                fmt.contains("M4A") || fmt.contains("AAC") || fmt.contains("MP4")
+            }?.maxByOrNull { it.averageBitrate } ?: extractor.audioStreams?.maxByOrNull { it.averageBitrate }
+
             val bestAudioUrl = bestAudioStream?.content
             val bestAudioFormat = bestAudioStream?.format?.getName()?.uppercase() ?: "M4A"
 
@@ -293,16 +302,18 @@ object YouTubeStreamExtractor {
             val clientId = when (clientName) {
                 "ANDROID_VR" -> "28"
                 "TVHTML5_SIMPLY_EMBEDDED_PLAYER" -> "85"
-                "ANDROID" -> "3"
                 "IOS" -> "5"
+                "ANDROID_TESTSUITE" -> "3"
+                "ANDROID" -> "3"
                 else -> "3"
             }
 
             val userAgent = when (clientName) {
                 "ANDROID_VR" -> "Mozilla/5.0 (Linux; Android 10; Quest 2) AppleWebKit/537.36 (KHTML, like Gecko) OculusBrowser/15.0.0.0.22.280302912 Safari/537.36"
                 "TVHTML5_SIMPLY_EMBEDDED_PLAYER" -> "Mozilla/5.0 (SMART-TV; Linux; Tizen 5.0) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/2.2 Chrome/69.0.3497.106 TV Safari/537.36"
-                "IOS" -> "com.google.ios.youtube/19.09.3 (iPhone14,2; U; CPU iOS 17_4 like Mac OS X)"
-                else -> "com.google.android.youtube/19.09.37 (Linux; U; Android 11) gzip"
+                "IOS" -> "com.google.ios.youtube/19.29.1 (iPhone16,2; U; CPU iOS 17_5_1 like Mac OS X; en_US)"
+                "ANDROID_TESTSUITE" -> "com.google.android.youtube/1.9 (Linux; U; Android 11) gzip"
+                else -> "com.google.android.youtube/19.29.35 (Linux; U; Android 14; SM-S948B) gzip"
             }
 
             val clientJson = JSONObject().apply {
@@ -311,6 +322,11 @@ object YouTubeStreamExtractor {
                 put("hl", "en")
                 put("gl", "US")
                 sdkVersion?.let { put("androidSdkVersion", it) }
+                if (clientName == "IOS") {
+                    put("deviceModel", "iPhone16,2")
+                    put("osName", "iOS")
+                    put("osVersion", "17.5.1.21F90")
+                }
             }
 
             val requestBody = JSONObject().apply {
