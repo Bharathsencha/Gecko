@@ -353,29 +353,57 @@ if (browser.webNavigation && browser.webNavigation.onCommitted) {
 
 // Universal Network Media Sniffer (Cat-Catch Network Layer)
 const MEDIA_EXT_REGEX = /\.(mp4|webm|mkv|m4v|mov|m3u8|mpd|m4a|mp3|aac|opus|flv|f4v)($|\?|#)/i;
-const KNOWN_STREAM_REGEX = /googlevideo\.com\/videoplayback|v\.redd\.it\/|hotstar\.com.*\.m3u8|fbcdn\.net\/.*\.mp4|twimg\.com\/.*\.mp4|tiktokcdn\.com\/|byteoversea\.com\/|akamaihd\.net\/|cloudfront\.net\/.*(m3u8|mp4)|fastly\.net\/.*(m3u8|mp4)|vimeocdn\.com\/|dailymotion\.com\/.*\.m3u8/i;
+const KNOWN_STREAM_REGEX = /(googlevideo\.com\/videoplayback|v\.redd\.it\/|hotstar\.com.*\.m3u8|fbcdn\.net\/.*\.mp4|twimg\.com\/.*\.mp4|tiktokcdn\.com\/|byteoversea\.com\/|akamaihd\.net\/|cloudfront\.net\/.*(m3u8|mp4)|fastly\.net\/.*(m3u8|mp4)|vimeocdn\.com\/|dailymotion\.com\/.*\.m3u8)/i;
 const detectedMediaUrls = new Set();
 
-if (browser.webRequest && browser.webRequest.onHeadersReceived) {
-    browser.webRequest.onHeadersReceived.addListener(
+// 1. Instant Request Sniffer (onBeforeRequest)
+if (browser.webRequest && browser.webRequest.onBeforeRequest) {
+    browser.webRequest.onBeforeRequest.addListener(
         (details) => {
             try {
-                if (!details || details.tabId < 0) return;
+                if (!details || !details.url) return;
                 const url = details.url;
-                if (!url || url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:") || detectedMediaUrls.has(url)) return;
-
-                // Ignore chunk segments (.ts, .m4s) to avoid spamming tiny fragments
-                if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) {
-                    return;
-                }
+                if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:") || detectedMediaUrls.has(url)) return;
+                if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) return;
 
                 const isMediaExt = MEDIA_EXT_REGEX.test(url);
                 const isKnownStream = KNOWN_STREAM_REGEX.test(url);
 
+                if (isMediaExt || isKnownStream || details.type === "media") {
+                    detectedMediaUrls.add(url);
+                    const isM3u8 = url.includes(".m3u8");
+                    const isAudio = url.includes("mime=audio") || url.includes(".m4a") || url.includes(".mp3") || url.includes(".aac");
+                    notifyNative({
+                        action: "media_detected",
+                        tabId: details.tabId,
+                        url: url,
+                        mimeType: isM3u8 ? "application/x-mpegURL" : (isAudio ? "audio/mp4" : "video/mp4"),
+                        contentLength: 0,
+                        isAudio: isAudio,
+                        type: details.type || "media"
+                    });
+                }
+            } catch (e) {}
+            return {};
+        },
+        { urls: ["<all_urls>"] },
+        ["blocking"]
+    );
+}
+
+// 2. Response Headers Inspector (onHeadersReceived)
+if (browser.webRequest && browser.webRequest.onHeadersReceived) {
+    browser.webRequest.onHeadersReceived.addListener(
+        (details) => {
+            try {
+                if (!details || !details.url) return;
+                const url = details.url;
+                if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:")) return;
+                if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) return;
+
                 let contentType = "";
                 let contentLength = 0;
 
-                // Inspect responseHeaders if available
                 if (details.responseHeaders) {
                     for (const header of details.responseHeaders) {
                         const name = (header.name || "").toLowerCase();
@@ -394,22 +422,26 @@ if (browser.webRequest && browser.webRequest.onHeadersReceived) {
                                     contentType.includes("video/mp4") ||
                                     contentType.includes("video/webm");
                 const isAudioMime = contentType.startsWith("audio/") || contentType.includes("audio/x-m4a");
+                const isMediaExt = MEDIA_EXT_REGEX.test(url);
+                const isKnownStream = KNOWN_STREAM_REGEX.test(url);
 
                 if (isVideoMime || isAudioMime || isMediaExt || isKnownStream || details.type === "media") {
-                    if (contentLength > 0 && contentLength < 50000 && !url.includes(".m3u8") && !url.includes(".mpd") && !isKnownStream) {
+                    if (contentLength > 0 && contentLength < 30000 && !url.includes(".m3u8") && !url.includes(".mpd") && !isKnownStream) {
                         return;
                     }
 
-                    detectedMediaUrls.add(url);
-                    notifyNative({
-                        action: "media_detected",
-                        tabId: details.tabId,
-                        url: url,
-                        mimeType: contentType || (isMediaExt ? "video/mp4" : "application/x-mpegURL"),
-                        contentLength: contentLength,
-                        isAudio: isAudioMime && !isVideoMime,
-                        type: details.type || "media"
-                    });
+                    if (!detectedMediaUrls.has(url)) {
+                        detectedMediaUrls.add(url);
+                        notifyNative({
+                            action: "media_detected",
+                            tabId: details.tabId,
+                            url: url,
+                            mimeType: contentType || (isMediaExt ? "video/mp4" : "application/x-mpegURL"),
+                            contentLength: contentLength,
+                            isAudio: isAudioMime && !isVideoMime,
+                            type: details.type || "media"
+                        });
+                    }
                 }
             } catch (e) {}
             return {};
@@ -427,46 +459,22 @@ if (browser.webNavigation && browser.webNavigation.onCommitted) {
     });
 }
 
-// Native Port Bridge
-let isConnecting = false;
-
-function connectToNativeBridge() {
-    if (isConnecting) return;
-    isConnecting = true;
-    try {
-        if (browser.runtime && browser.runtime.connectNative) {
-            nativePort = browser.runtime.connectNative("browser_app");
-            nativePort.onMessage.addListener((msg) => {
-                handleConfigUpdate(msg);
-            });
-            nativePort.onDisconnect.addListener(() => {
-                nativePort = null;
-                isConnecting = false;
-                setTimeout(connectToNativeBridge, 2000);
-            });
-            isConnecting = false;
+if (browser.webNavigation && browser.webNavigation.onHistoryStateUpdated) {
+    browser.webNavigation.onHistoryStateUpdated.addListener((details) => {
+        if (details.frameId === 0) {
+            detectedMediaUrls.clear();
         }
-    } catch (e) {
-        nativePort = null;
-        isConnecting = false;
-    }
+    });
 }
 
+// Native Messaging Bridge for GeckoView Android
 function notifyNative(msg) {
+    if (!msg) return;
     try {
-        if (nativePort) {
-            nativePort.postMessage(msg);
-        } else if (browser.runtime && browser.runtime.sendNativeMessage) {
-            browser.runtime.sendNativeMessage("browser_app", msg).catch(() => {});
-            connectToNativeBridge();
-        } else {
-            connectToNativeBridge();
-        }
-    } catch (e) {
         if (browser.runtime && browser.runtime.sendNativeMessage) {
             browser.runtime.sendNativeMessage("browser_app", msg).catch(() => {});
         }
-    }
+    } catch (e) {}
 }
 
 function handleConfigUpdate(msg) {
@@ -496,6 +504,9 @@ function handleConfigUpdate(msg) {
 // Listen for messages from content scripts (download_blob, share_payload, video_detected, etc.) and forward to native app
 browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg) {
+        if (msg.action === "clear_detected_media") {
+            detectedMediaUrls.clear();
+        }
         if (sender && sender.tab && sender.tab.id >= 0 && !msg.tabId) {
             msg.tabId = sender.tab.id;
         }
