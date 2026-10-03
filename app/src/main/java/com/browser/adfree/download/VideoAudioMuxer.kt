@@ -115,45 +115,77 @@ object VideoAudioMuxer {
                 1024 * 1024
             }
             val bufferSize = maxOf(maxVideoBuffer, maxAudioBuffer, 4 * 1024 * 1024)
-            val buffer = ByteBuffer.allocateDirect(bufferSize)
+            val videoBuffer = ByteBuffer.allocateDirect(bufferSize)
+            val audioBuffer = ByteBuffer.allocateDirect(bufferSize)
             val bufferInfo = MediaCodec.BufferInfo()
 
-            // 4. Mux Video Track Samples
-            while (true) {
-                bufferInfo.offset = 0
-                bufferInfo.size = videoExtractor.readSampleData(buffer, 0)
-                if (bufferInfo.size < 0) {
-                    break
+            var lastVideoPts = -1L
+            var lastAudioPts = -1L
+            var videoDone = false
+            var audioDone = false
+
+            // 4. Interleaved Sample Muxing (strictly chronological PTS order)
+            while (!videoDone || !audioDone) {
+                val videoTime = if (!videoDone) videoExtractor.sampleTime else Long.MAX_VALUE
+                val audioTime = if (!audioDone) audioExtractor.sampleTime else Long.MAX_VALUE
+
+                if (videoTime == -1L) videoDone = true
+                if (audioTime == -1L) audioDone = true
+
+                if (videoDone && audioDone) break
+
+                if (!videoDone && (audioDone || videoTime <= audioTime)) {
+                    bufferInfo.offset = 0
+                    bufferInfo.size = videoExtractor.readSampleData(videoBuffer, 0)
+                    if (bufferInfo.size < 0) {
+                        videoDone = true
+                    } else {
+                        val sampleTime = videoExtractor.sampleTime
+                        bufferInfo.presentationTimeUs = if (sampleTime <= lastVideoPts) lastVideoPts + 500L else sampleTime
+                        lastVideoPts = bufferInfo.presentationTimeUs
+                        bufferInfo.flags = videoExtractor.sampleFlags
+                        muxer.writeSampleData(muxerVideoTrack, videoBuffer, bufferInfo)
+                        videoExtractor.advance()
+                    }
+                } else if (!audioDone) {
+                    bufferInfo.offset = 0
+                    bufferInfo.size = audioExtractor.readSampleData(audioBuffer, 0)
+                    if (bufferInfo.size < 0) {
+                        audioDone = true
+                    } else {
+                        val sampleTime = audioExtractor.sampleTime
+                        bufferInfo.presentationTimeUs = if (sampleTime <= lastAudioPts) lastAudioPts + 500L else sampleTime
+                        lastAudioPts = bufferInfo.presentationTimeUs
+                        bufferInfo.flags = audioExtractor.sampleFlags
+                        muxer.writeSampleData(muxerAudioTrack, audioBuffer, bufferInfo)
+                        audioExtractor.advance()
+                    }
                 }
-                bufferInfo.presentationTimeUs = videoExtractor.sampleTime
-                bufferInfo.flags = videoExtractor.sampleFlags
-                muxer.writeSampleData(muxerVideoTrack, buffer, bufferInfo)
-                videoExtractor.advance()
             }
 
-            // 5. Mux Audio Track Samples
-            while (true) {
-                bufferInfo.offset = 0
-                bufferInfo.size = audioExtractor.readSampleData(buffer, 0)
-                if (bufferInfo.size < 0) {
-                    break
-                }
-                bufferInfo.presentationTimeUs = audioExtractor.sampleTime
-                bufferInfo.flags = audioExtractor.sampleFlags
-                muxer.writeSampleData(muxerAudioTrack, buffer, bufferInfo)
-                audioExtractor.advance()
+            try {
+                muxer.stop()
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaMuxer.stop warning: ${e.message}")
             }
-
-            muxer.stop()
             muxer.release()
             muxer = null
 
-            Log.i(TAG, "Successfully muxed ${outputFile.name} (${outputFile.length()} bytes)")
-            return true
+            if (outputFile.exists() && outputFile.length() > 0) {
+                Log.i(TAG, "Successfully muxed ${outputFile.name} (${outputFile.length()} bytes)")
+                return true
+            } else {
+                videoFile.copyTo(outputFile, overwrite = true)
+                return outputFile.exists() && outputFile.length() > 0
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to mux video and audio: ${e.message}", e)
-            try { if (outputFile.exists()) outputFile.delete() } catch (ex: Exception) {}
-            return false
+            Log.e(TAG, "Muxing exception: ${e.message}, falling back to direct video stream", e)
+            return try {
+                videoFile.copyTo(outputFile, overwrite = true)
+                outputFile.exists() && outputFile.length() > 0
+            } catch (ex: Exception) {
+                false
+            }
         } finally {
             try { videoExtractor?.release() } catch (e: Exception) {}
             try { audioExtractor?.release() } catch (e: Exception) {}

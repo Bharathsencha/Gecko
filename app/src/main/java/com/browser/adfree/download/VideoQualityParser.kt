@@ -66,6 +66,41 @@ object VideoQualityParser {
     }
 
     /**
+     * Checks whether an M3U8 playlist is a master playlist (containing variant streams).
+     */
+    fun isMasterPlaylist(playlistText: String): Boolean {
+        return playlistText.contains("#EXT-X-STREAM-INF")
+    }
+
+    /**
+     * Parses an HLS .m3u8 media playlist to extract individual segment URLs.
+     */
+    fun parseM3u8Segments(playlistText: String, playlistUrl: String): List<String> {
+        val segments = mutableListOf<String>()
+        val lines = playlistText.lines()
+        var initSegmentUrl: String? = null
+
+        for (line in lines) {
+            val trimmed = line.trim()
+            if (trimmed.startsWith("#EXT-X-MAP:")) {
+                val uriMatch = Regex("URI=[\"']([^\"']+)[\"']", RegexOption.IGNORE_CASE).find(trimmed)
+                if (uriMatch != null) {
+                    initSegmentUrl = resolveUrl(playlistUrl, uriMatch.groupValues[1])
+                    if (initSegmentUrl.isNotBlank() && !segments.contains(initSegmentUrl)) {
+                        segments.add(initSegmentUrl)
+                    }
+                }
+            } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
+                val segUrl = resolveUrl(playlistUrl, trimmed)
+                if (segUrl.isNotBlank()) {
+                    segments.add(segUrl)
+                }
+            }
+        }
+        return segments
+    }
+
+    /**
      * Parses an HLS .m3u8 master playlist text to extract resolution variants (#EXT-X-STREAM-INF)
      */
     fun parseM3u8MasterPlaylist(
@@ -115,13 +150,13 @@ object VideoQualityParser {
                     currentCodecs?.contains("vp09", ignoreCase = true) == true -> "VP9"
                     currentCodecs?.contains("avc1", ignoreCase = true) == true -> "H.264"
                     currentCodecs?.contains("mp4a", ignoreCase = true) == true -> "AAC"
-                    else -> if (isAv1) "AV1" else "HLS"
+                    else -> if (isAv1) "AV1" else "H.264"
                 }
 
                 options.add(
                     VideoQualityOption(
                         label = label,
-                        resolution = currentResolution ?: "",
+                        resolution = currentResolution ?: (if (height > 0) "${height}p" else "Auto"),
                         codec = codecTag,
                         format = "M3U8",
                         url = streamUrl,
@@ -139,7 +174,7 @@ object VideoQualityParser {
             }
         }
 
-        return options.distinctBy { it.label + it.codec }
+        return options.distinctBy { it.label + it.resolution + it.codec }
     }
 
     /**
@@ -152,19 +187,29 @@ object VideoQualityParser {
         val cleanUrl = url.replace(Regex("&range=[^&]+"), "")
 
         return when (itag) {
-            18 -> VideoQualityOption(label = "360p SD (Video + Audio)", resolution = "640x360", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
-            22 -> VideoQualityOption(label = "720p HD (Video + Audio)", resolution = "1280x720", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
+            18 -> VideoQualityOption(label = "360p SD (Video + Audio)", resolution = "640x360", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, isProgressive = true, mimeType = "video/mp4")
+            22 -> VideoQualityOption(label = "720p HD (Video + Audio)", resolution = "1280x720", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, isProgressive = true, mimeType = "video/mp4")
+            313 -> VideoQualityOption(label = "4K Ultra HD (WebM)", resolution = "3840x2160", codec = "VP9", format = "WEBM", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/webm")
+            271 -> VideoQualityOption(label = "1440p QHD (WebM)", resolution = "2560x1440", codec = "VP9", format = "WEBM", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/webm")
+            299, 303 -> VideoQualityOption(label = "1080p60 Full HD", resolution = "1920x1080", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
             137 -> VideoQualityOption(label = "1080p Full HD", resolution = "1920x1080", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
+            298, 302 -> VideoQualityOption(label = "720p60 HD", resolution = "1280x720", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
             136 -> VideoQualityOption(label = "720p HD", resolution = "1280x720", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
             135 -> VideoQualityOption(label = "480p SD", resolution = "854x480", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
             134 -> VideoQualityOption(label = "360p SD", resolution = "640x360", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
-            140 -> VideoQualityOption(label = "Audio Track (M4A • 128 kbps)", resolution = "", codec = "AAC", format = "M4A", url = cleanUrl, isAudioOnly = true, isAv1 = false, mimeType = "audio/mp4")
-            251 -> VideoQualityOption(label = "Audio Track (Opus • 160 kbps)", resolution = "", codec = "Opus", format = "WEBM", url = cleanUrl, isAudioOnly = true, isAv1 = false, mimeType = "audio/webm")
+            133 -> VideoQualityOption(label = "240p SD", resolution = "426x240", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
+            160 -> VideoQualityOption(label = "144p", resolution = "256x144", codec = "H.264", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/mp4")
+            140 -> VideoQualityOption(label = "Audio Track (M4A • 128 kbps)", resolution = "", codec = "AAC", format = "M4A", url = cleanUrl, isAudioOnly = true, isAv1 = false, isProgressive = true, mimeType = "audio/mp4")
+            251 -> VideoQualityOption(label = "Audio Track (Opus • 160 kbps)", resolution = "", codec = "Opus", format = "WEBM", url = cleanUrl, isAudioOnly = true, isAv1 = false, isProgressive = true, mimeType = "audio/webm")
             248 -> VideoQualityOption(label = "1080p Full HD (WebM)", resolution = "1920x1080", codec = "VP9", format = "WEBM", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/webm")
             247 -> VideoQualityOption(label = "720p HD (WebM)", resolution = "1280x720", codec = "VP9", format = "WEBM", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/webm")
+            244 -> VideoQualityOption(label = "480p SD (WebM)", resolution = "854x480", codec = "VP9", format = "WEBM", url = cleanUrl, isAudioOnly = false, isAv1 = false, mimeType = "video/webm")
+            401 -> VideoQualityOption(label = "4K Ultra HD (AV1)", resolution = "3840x2160", codec = "AV1", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = true, mimeType = "video/mp4")
+            400 -> VideoQualityOption(label = "1440p QHD (AV1)", resolution = "2560x1440", codec = "AV1", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = true, mimeType = "video/mp4")
             399 -> VideoQualityOption(label = "1080p Full HD (AV1)", resolution = "1920x1080", codec = "AV1", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = true, mimeType = "video/mp4")
             398 -> VideoQualityOption(label = "720p HD (AV1)", resolution = "1280x720", codec = "AV1", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = true, mimeType = "video/mp4")
             397 -> VideoQualityOption(label = "480p SD (AV1)", resolution = "854x480", codec = "AV1", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = true, mimeType = "video/mp4")
+            396 -> VideoQualityOption(label = "360p SD (AV1)", resolution = "640x360", codec = "AV1", format = "MP4", url = cleanUrl, isAudioOnly = false, isAv1 = true, mimeType = "video/mp4")
             else -> {
                 val isAudio = url.contains("mime=audio")
                 VideoQualityOption(
@@ -175,13 +220,14 @@ object VideoQualityParser {
                     url = cleanUrl,
                     isAudioOnly = isAudio,
                     isAv1 = false,
+                    isProgressive = !isAudio,
                     mimeType = if (isAudio) "audio/mp4" else "video/mp4"
                 )
             }
         }
     }
 
-    private fun resolveUrl(baseUrl: String, relativeUrl: String): String {
+    fun resolveUrl(baseUrl: String, relativeUrl: String): String {
         return try {
             val base = URI(baseUrl)
             base.resolve(relativeUrl).toString()
@@ -194,4 +240,326 @@ object VideoQualityParser {
             }
         }
     }
+
+    /**
+     * Sorts video quality options in descending order of resolution / quality,
+     * placing video streams first (4K -> 144p) and audio-only streams at the end.
+     * Deduplicates options strictly by resolution and format.
+     */
+    fun sortQualities(list: List<VideoQualityOption>): List<VideoQualityOption> {
+        fun getScore(option: VideoQualityOption): Int {
+            if (option.isAudioOnly) return -100
+            val heightFromRes = option.resolution.substringAfter("x").filter { it.isDigit() }.toIntOrNull()
+            if (heightFromRes != null && heightFromRes > 0) return heightFromRes
+            val labelLower = option.label.lowercase(Locale.US)
+            return when {
+                labelLower.contains("4k") || labelLower.contains("2160") -> 2160
+                labelLower.contains("1440") -> 1440
+                labelLower.contains("1080") -> 1080
+                labelLower.contains("720") -> 720
+                labelLower.contains("480") -> 480
+                labelLower.contains("360") -> 360
+                labelLower.contains("240") -> 240
+                labelLower.contains("144") -> 144
+                else -> 100
+            }
+        }
+
+        val deduped = list.distinctBy {
+            val normRes = if (it.resolution.contains("x")) it.resolution.substringAfter("x") else it.resolution
+            "${normRes.trim()}_${it.format.uppercase().trim()}_${it.isAv1}_${it.isAudioOnly}"
+        }
+
+        return deduped.sortedWith(
+            compareByDescending<VideoQualityOption> { getScore(it) }
+                .thenByDescending { it.estimatedSizeBytes }
+                .thenBy { if (it.format == "MP4") 0 else 1 }
+        )
+    }
+
+    /**
+     * Synthesizes standard resolution variants (4K, 1440p, 1080p, 720p, 480p, 360p, MP4, WebM, AV1, and Audio)
+     * from a signed YouTube googlevideo.com/videoplayback URL.
+     */
+    fun generateYouTubeVariants(url: String): List<VideoQualityOption> {
+        if (!url.contains("googlevideo.com/videoplayback")) return emptyList()
+        val cleanUrl = url.replace(Regex("&range=[^&]+"), "")
+        val itagMatch = Regex("[?&]itag=(\\d+)").find(cleanUrl) ?: return emptyList()
+        val currentItag = itagMatch.groupValues[1]
+
+        val audioM4aUrl = cleanUrl.replace("itag=$currentItag", "itag=140")
+        val audioOpusUrl = cleanUrl.replace("itag=$currentItag", "itag=251")
+        val list = mutableListOf<VideoQualityOption>()
+
+        // 4K Ultra HD (AV1)
+        list.add(
+            VideoQualityOption(
+                label = "4K Ultra HD (AV1)",
+                resolution = "3840x2160",
+                codec = "AV1",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=401"),
+                isAudioOnly = false,
+                isAv1 = true,
+                isProgressive = false,
+                audioUrl = audioM4aUrl,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 4K Ultra HD (WebM VP9)
+        list.add(
+            VideoQualityOption(
+                label = "4K Ultra HD (WebM)",
+                resolution = "3840x2160",
+                codec = "VP9",
+                format = "WEBM",
+                url = cleanUrl.replace("itag=$currentItag", "itag=313"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = false,
+                audioUrl = audioOpusUrl,
+                mimeType = "video/webm"
+            )
+        )
+
+        // 1440p QHD (AV1)
+        list.add(
+            VideoQualityOption(
+                label = "1440p QHD (AV1)",
+                resolution = "2560x1440",
+                codec = "AV1",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=400"),
+                isAudioOnly = false,
+                isAv1 = true,
+                isProgressive = false,
+                audioUrl = audioM4aUrl,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 1440p QHD (WebM VP9)
+        list.add(
+            VideoQualityOption(
+                label = "1440p QHD (WebM)",
+                resolution = "2560x1440",
+                codec = "VP9",
+                format = "WEBM",
+                url = cleanUrl.replace("itag=$currentItag", "itag=271"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = false,
+                audioUrl = audioOpusUrl,
+                mimeType = "video/webm"
+            )
+        )
+
+        // 1080p Full HD (MP4 H.264)
+        list.add(
+            VideoQualityOption(
+                label = "1080p Full HD",
+                resolution = "1920x1080",
+                codec = "H.264",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=137"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = false,
+                audioUrl = audioM4aUrl,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 1080p Full HD (AV1)
+        list.add(
+            VideoQualityOption(
+                label = "1080p Full HD (AV1)",
+                resolution = "1920x1080",
+                codec = "AV1",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=399"),
+                isAudioOnly = false,
+                isAv1 = true,
+                isProgressive = false,
+                audioUrl = audioM4aUrl,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 1080p Full HD (WebM VP9)
+        list.add(
+            VideoQualityOption(
+                label = "1080p Full HD (WebM)",
+                resolution = "1920x1080",
+                codec = "VP9",
+                format = "WEBM",
+                url = cleanUrl.replace("itag=$currentItag", "itag=248"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = false,
+                audioUrl = audioOpusUrl,
+                mimeType = "video/webm"
+            )
+        )
+
+        // 720p HD (progressive Video + Audio combined MP4)
+        list.add(
+            VideoQualityOption(
+                label = "720p HD (Video + Audio)",
+                resolution = "1280x720",
+                codec = "H.264",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=22"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = true,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 720p HD (AV1)
+        list.add(
+            VideoQualityOption(
+                label = "720p HD (AV1)",
+                resolution = "1280x720",
+                codec = "AV1",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=398"),
+                isAudioOnly = false,
+                isAv1 = true,
+                isProgressive = false,
+                audioUrl = audioM4aUrl,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 720p HD (WebM VP9)
+        list.add(
+            VideoQualityOption(
+                label = "720p HD (WebM)",
+                resolution = "1280x720",
+                codec = "VP9",
+                format = "WEBM",
+                url = cleanUrl.replace("itag=$currentItag", "itag=247"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = false,
+                audioUrl = audioOpusUrl,
+                mimeType = "video/webm"
+            )
+        )
+
+        // 480p SD (MP4 H.264)
+        list.add(
+            VideoQualityOption(
+                label = "480p SD",
+                resolution = "854x480",
+                codec = "H.264",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=135"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = false,
+                audioUrl = audioM4aUrl,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 480p SD (AV1)
+        list.add(
+            VideoQualityOption(
+                label = "480p SD (AV1)",
+                resolution = "854x480",
+                codec = "AV1",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=397"),
+                isAudioOnly = false,
+                isAv1 = true,
+                isProgressive = false,
+                audioUrl = audioM4aUrl,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 480p SD (WebM VP9)
+        list.add(
+            VideoQualityOption(
+                label = "480p SD (WebM)",
+                resolution = "854x480",
+                codec = "VP9",
+                format = "WEBM",
+                url = cleanUrl.replace("itag=$currentItag", "itag=244"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = false,
+                audioUrl = audioOpusUrl,
+                mimeType = "video/webm"
+            )
+        )
+
+        // 360p SD (progressive Video + Audio combined MP4)
+        list.add(
+            VideoQualityOption(
+                label = "360p SD (Video + Audio)",
+                resolution = "640x360",
+                codec = "H.264",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=18"),
+                isAudioOnly = false,
+                isAv1 = false,
+                isProgressive = true,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // 360p SD (AV1)
+        list.add(
+            VideoQualityOption(
+                label = "360p SD (AV1)",
+                resolution = "640x360",
+                codec = "AV1",
+                format = "MP4",
+                url = cleanUrl.replace("itag=$currentItag", "itag=396"),
+                isAudioOnly = false,
+                isAv1 = true,
+                isProgressive = false,
+                audioUrl = audioM4aUrl,
+                mimeType = "video/mp4"
+            )
+        )
+
+        // Audio Track (M4A / AAC 128 kbps)
+        list.add(
+            VideoQualityOption(
+                label = "Audio Track (M4A • 128 kbps)",
+                resolution = "",
+                codec = "AAC",
+                format = "M4A",
+                url = audioM4aUrl,
+                isAudioOnly = true,
+                isAv1 = false,
+                isProgressive = true,
+                mimeType = "audio/mp4"
+            )
+        )
+
+        // Audio Track (Opus / WebM 160 kbps)
+        list.add(
+            VideoQualityOption(
+                label = "Audio Track (Opus • 160 kbps)",
+                resolution = "",
+                codec = "Opus",
+                format = "WEBM",
+                url = audioOpusUrl,
+                isAudioOnly = true,
+                isAv1 = false,
+                isProgressive = true,
+                mimeType = "audio/webm"
+            )
+        )
+
+        return sortQualities(list)
+    }
 }
+
