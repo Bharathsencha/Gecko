@@ -38,6 +38,9 @@ import com.browser.adfree.ui.theme.BrowserTheme
 import com.browser.adfree.vpn.FreeVpnManager
 import android.os.Build
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.mozilla.geckoview.*
 
@@ -151,6 +154,11 @@ class MainActivity : ComponentActivity() {
             this.preferencesRepository = preferencesRepo
             this.shieldsRepository = shieldsRepo
             this.downloadManager = downloadManager
+        }
+
+        // Initialize UniversalVideoExtractor (yt-dlp engine) in background
+        lifecycleScope.launch(Dispatchers.IO) {
+            com.browser.adfree.download.UniversalVideoExtractor.init(applicationContext)
         }
 
         // Wire real-time VPN config bridge to WebExtension
@@ -482,7 +490,11 @@ class MainActivity : ComponentActivity() {
             val json = parseToJsonObject(message)
             val action = json.optString("action")
 
-            if (action == "ad_blocked" || action == "blocked_count") {
+            if (action == "clear_detected_media") {
+                runOnUiThread {
+                    tabManager.activeTab?.detectedVideos?.clear()
+                }
+            } else if (action == "ad_blocked" || action == "blocked_count") {
                 val count = json.optInt("count", json.optInt("tabBlockedCount", 1))
                 runOnUiThread {
                     tabManager.activeTab?.let { tab ->
@@ -548,18 +560,24 @@ class MainActivity : ComponentActivity() {
                         for (i in 0 until qualitiesArr.length()) {
                             val q = qualitiesArr.getJSONObject(i)
                             val qUrl = q.optString("url")
-                            // Strictly filter out page URLs, blob URLs, data URLs
                             if (qUrl.isNotBlank() && qUrl.startsWith("http") && qUrl != pageUrl && !qUrl.contains("youtube.com/watch") && !qUrl.startsWith("blob:") && !qUrl.startsWith("data:")) {
+                                val isAudio = q.optBoolean("isAudioOnly", false)
+                                val format = q.optString("format", if (qUrl.contains(".m3u8")) "M3U8" else if (isAudio) "M4A" else "MP4")
+                                val isProgressive = q.optBoolean("isProgressive", !q.has("audioUrl") || q.optString("audioUrl").isBlank())
+                                val audioUrl = q.optString("audioUrl").ifBlank { null }
+
                                 qualityList.add(
                                     com.browser.adfree.model.VideoQualityOption(
                                         label = q.optString("label"),
                                         resolution = q.optString("resolution"),
                                         codec = q.optString("codec").ifBlank { null },
-                                        format = q.optString("format", "MP4"),
+                                        format = format,
                                         url = qUrl,
                                         estimatedSizeBytes = q.optLong("estimatedSizeBytes", 0L),
-                                        isAudioOnly = q.optBoolean("isAudioOnly", false),
+                                        isAudioOnly = isAudio,
                                         isAv1 = q.optBoolean("isAv1", false),
+                                        isProgressive = isProgressive,
+                                        audioUrl = audioUrl,
                                         mimeType = q.optString("mimeType").ifBlank { null }
                                     )
                                 )
@@ -570,34 +588,41 @@ class MainActivity : ComponentActivity() {
                     runOnUiThread {
                         tabManager.activeTab?.let { activeTab ->
                             val isYouTube = pageUrl.contains("youtube.com") || pageUrl.contains("youtu.be")
-                            val existingIndex = activeTab.detectedVideos.indexOfFirst {
-                                it.pageUrl == pageUrl || (isYouTube && it.sourceDomain == "youtube.com")
-                            }
+                            val cleanTitle = if (title.isNotBlank() && title != "Start Page" && title != "Video") title else activeTab.title
+                            val incomingVideoId = if (isYouTube) com.browser.adfree.download.YouTubeStreamExtractor.extractVideoId(pageUrl) else null
 
-                            if (existingIndex >= 0) {
-                                val existing = activeTab.detectedVideos[existingIndex]
-                                val mergedQualities = (existing.qualities + qualityList).distinctBy { it.url }
-                                activeTab.detectedVideos[existingIndex] = existing.copy(
-                                    title = if (existing.title == "Web Video" && title.isNotBlank() && title != "Video") title else existing.title,
-                                    thumbnail = thumbnail ?: existing.thumbnail,
-                                    durationSeconds = if (duration > 0) duration else existing.durationSeconds,
-                                    qualities = if (mergedQualities.isNotEmpty()) mergedQualities else existing.qualities
-                                )
-                            } else if (qualityList.isNotEmpty() || (thumbnail != null && title.isNotBlank() && title != "Start Page")) {
-                                val detected = com.browser.adfree.model.DetectedVideo(
-                                    pageUrl = pageUrl,
-                                    title = title,
-                                    thumbnail = thumbnail,
-                                    durationSeconds = duration,
-                                    sourceDomain = if (isYouTube) "youtube.com" else sourceDomain,
-                                    qualities = qualityList
-                                )
+                            val detected = com.browser.adfree.model.DetectedVideo(
+                                pageUrl = pageUrl.ifBlank { activeTab.url },
+                                title = cleanTitle.ifBlank { "Web Video" },
+                                thumbnail = thumbnail,
+                                durationSeconds = duration,
+                                sourceDomain = if (isYouTube) "youtube.com" else sourceDomain,
+                                qualities = sortQualities(qualityList)
+                            )
+
+                            if (activeTab.detectedVideos.isNotEmpty()) {
+                                val existing = activeTab.detectedVideos[0]
+                                val existingVideoId = if (isYouTube) com.browser.adfree.download.YouTubeStreamExtractor.extractVideoId(existing.pageUrl) else null
+
+                                if (isYouTube && existingVideoId != null && incomingVideoId != null && existingVideoId != incomingVideoId) {
+                                    // New video playing on same tab — replace completely
+                                    activeTab.detectedVideos.clear()
+                                    activeTab.detectedVideos.add(detected)
+                                } else {
+                                    val mergedQualities = sortQualities(existing.qualities + qualityList)
+                                    activeTab.detectedVideos[0] = existing.copy(
+                                        pageUrl = pageUrl.ifBlank { existing.pageUrl },
+                                        title = if (cleanTitle.isNotBlank() && cleanTitle != "Web Video" && cleanTitle != "YouTube Video") cleanTitle else existing.title,
+                                        thumbnail = thumbnail ?: existing.thumbnail,
+                                        durationSeconds = if (duration > 0) duration else existing.durationSeconds,
+                                        qualities = if (mergedQualities.isNotEmpty()) mergedQualities else existing.qualities
+                                    )
+                                }
+                            } else if (qualityList.isNotEmpty() || (thumbnail != null && cleanTitle.isNotBlank() && cleanTitle != "Start Page")) {
                                 activeTab.detectedVideos.add(0, detected)
                             }
-                            if (isYouTube && (activeTab.detectedVideos.isEmpty() || activeTab.detectedVideos.firstOrNull()?.qualities?.none { it.resolution.contains("1080") || it.resolution.contains("720") } == true)) {
-                                tabManager.checkForVideos(activeTab, pageUrl)
-                            }
-                            Log.i("VideoSniffer", "Updated detectedVideos on activeTab (${activeTab.detectedVideos.size} items)")
+
+                            Log.i("VideoSniffer", "Updated detectedVideos on activeTab (${activeTab.detectedVideos.size} items, ${activeTab.detectedVideos.firstOrNull()?.qualities?.size} streams)")
                         }
                     }
                 }
@@ -626,28 +651,60 @@ class MainActivity : ComponentActivity() {
                                 val format = if (isM3u8) "M3U8" else if (isWebm) "WEBM" else if (isAudio) "M4A" else "MP4"
                                 val label = if (isAudio) "Audio Track (Direct Stream)" else if (isM3u8) "HLS Master Stream" else "Direct Video ($format)"
 
-                                val newOption = parsedOption ?: com.browser.adfree.model.VideoQualityOption(
-                                    label = label,
-                                    format = format,
-                                    codec = if (isAv1) "AV1" else if (format == "WEBM") "VP9" else if (isAudio) "AAC" else "H.264",
-                                    url = mediaUrl,
-                                    estimatedSizeBytes = contentLength,
-                                    isAudioOnly = isAudio,
-                                    isAv1 = isAv1,
-                                    mimeType = mimeType.ifBlank { if (isM3u8) "application/x-mpegURL" else "video/mp4" }
-                                )
-
-                                val existingIndex = activeTab.detectedVideos.indexOfFirst {
-                                    it.pageUrl == pageUrl || (isYouTube && it.sourceDomain == "youtube.com")
+                                val newOptions = if (isYouTube && mediaUrl.contains("googlevideo.com/videoplayback")) {
+                                    com.browser.adfree.download.VideoQualityParser.generateYouTubeVariants(mediaUrl).ifEmpty {
+                                        listOfNotNull(parsedOption ?: com.browser.adfree.model.VideoQualityOption(
+                                            label = label,
+                                            format = format,
+                                            codec = if (isAv1) "AV1" else if (format == "WEBM") "VP9" else if (isAudio) "AAC" else "H.264",
+                                            url = mediaUrl,
+                                            estimatedSizeBytes = contentLength,
+                                            isAudioOnly = isAudio,
+                                            isAv1 = isAv1,
+                                            isProgressive = !isM3u8,
+                                            mimeType = mimeType.ifBlank { if (isM3u8) "application/x-mpegURL" else "video/mp4" }
+                                        ))
+                                    }
+                                } else {
+                                    listOf(
+                                        parsedOption ?: com.browser.adfree.model.VideoQualityOption(
+                                            label = label,
+                                            format = format,
+                                            codec = if (isAv1) "AV1" else if (format == "WEBM") "VP9" else if (isAudio) "AAC" else "H.264",
+                                            url = mediaUrl,
+                                            estimatedSizeBytes = contentLength,
+                                            isAudioOnly = isAudio,
+                                            isAv1 = isAv1,
+                                            isProgressive = !isM3u8,
+                                            mimeType = mimeType.ifBlank { if (isM3u8) "application/x-mpegURL" else "video/mp4" }
+                                        )
+                                    )
                                 }
+
+                                val existingIndex = if (activeTab.detectedVideos.isNotEmpty()) 0 else -1
 
                                 if (existingIndex >= 0) {
                                     val existing = activeTab.detectedVideos[existingIndex]
-                                    val cleanQualities = existing.qualities.filter { it.url.startsWith("http") && it.url != pageUrl && !it.url.contains("youtube.com/watch") }
-                                    if (cleanQualities.none { it.url == newOption.url || (it.label == newOption.label && it.format == newOption.format) }) {
-                                        val updated = existing.copy(qualities = cleanQualities + newOption)
+                                    val existingVideoId = if (isYouTube) com.browser.adfree.download.YouTubeStreamExtractor.extractVideoId(existing.pageUrl) else null
+                                    val currentVideoId = if (isYouTube) com.browser.adfree.download.YouTubeStreamExtractor.extractVideoId(pageUrl) else null
+
+                                    if (isYouTube && existingVideoId != null && currentVideoId != null && existingVideoId != currentVideoId) {
+                                        // Stale video on tab — replace with current video
+                                        val thumbnail = "https://i.ytimg.com/vi/$currentVideoId/hqdefault.jpg"
+                                        val detected = com.browser.adfree.model.DetectedVideo(
+                                            pageUrl = pageUrl,
+                                            title = title,
+                                            thumbnail = thumbnail,
+                                            sourceDomain = "youtube.com",
+                                            qualities = sortQualities(newOptions)
+                                        )
+                                        activeTab.detectedVideos.clear()
+                                        activeTab.detectedVideos.add(detected)
+                                    } else {
+                                        val cleanQualities = existing.qualities.filter { it.url.startsWith("http") && it.url != pageUrl && !it.url.contains("youtube.com/watch") }
+                                        val updated = existing.copy(qualities = sortQualities(cleanQualities + newOptions))
                                         activeTab.detectedVideos[existingIndex] = updated
-                                        Log.i("VideoSniffer", "Added stream to existing DetectedVideo on tab: ${newOption.label}")
+                                        Log.i("VideoSniffer", "Updated DetectedVideo on tab: ${existing.title} (${updated.qualities.size} streams)")
                                     }
                                 } else {
                                     val host = try { java.net.URI(pageUrl).host ?: "" } catch (e: Exception) { "" }
@@ -658,13 +715,41 @@ class MainActivity : ComponentActivity() {
                                         title = title,
                                         thumbnail = thumbnail,
                                         sourceDomain = if (isYouTube) "youtube.com" else host,
-                                        qualities = listOf(newOption)
+                                        qualities = sortQualities(newOptions)
                                     )
                                     activeTab.detectedVideos.add(0, detected)
-                                    Log.i("VideoSniffer", "Created new DetectedVideo from media_detected: ${detected.title}")
+                                    Log.i("VideoSniffer", "Created new DetectedVideo from media_detected: ${detected.title} (${detected.qualities.size} streams)")
                                 }
-                                if (isYouTube && activeTab.detectedVideos.firstOrNull()?.qualities?.none { it.resolution.contains("1080") || it.resolution.contains("720") } == true) {
-                                    tabManager.checkForVideos(activeTab, pageUrl)
+
+                                // Async HLS Master Playlist expander
+                                if (isM3u8) {
+                                    val reqUa = com.browser.adfree.tabs.TabManager.MODERN_MOBILE_UA
+                                    val req = okhttp3.Request.Builder().url(mediaUrl)
+                                        .header("User-Agent", reqUa)
+                                        .apply { if (pageUrl.isNotBlank()) header("Referer", pageUrl) }
+                                        .build()
+
+                                    kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+                                        try {
+                                             val resp = okhttp3.OkHttpClient().newCall(req).execute()
+                                            if (resp.isSuccessful) {
+                                                val text = resp.body?.string() ?: ""
+                                                if (com.browser.adfree.download.VideoQualityParser.isMasterPlaylist(text)) {
+                                                    val variants = com.browser.adfree.download.VideoQualityParser.parseM3u8MasterPlaylist(text, mediaUrl, mapOf("Referer" to pageUrl))
+                                                    if (variants.isNotEmpty()) {
+                                                        runOnUiThread {
+                                                            if (activeTab.detectedVideos.isNotEmpty()) {
+                                                                val current = activeTab.detectedVideos[0]
+                                                                val merged = sortQualities(variants + current.qualities)
+                                                                activeTab.detectedVideos[0] = current.copy(qualities = merged)
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            resp.close()
+                                        } catch (e: Exception) {}
+                                    }
                                 }
                             }
                         }
@@ -674,6 +759,10 @@ class MainActivity : ComponentActivity() {
         } catch (e: Exception) {
             Log.e("AdFreeBrowser", "Error parsing extension message", e)
         }
+    }
+
+    private fun sortQualities(list: List<com.browser.adfree.model.VideoQualityOption>): List<com.browser.adfree.model.VideoQualityOption> {
+        return com.browser.adfree.download.VideoQualityParser.sortQualities(list)
     }
 
     override fun onNewIntent(intent: Intent?) {

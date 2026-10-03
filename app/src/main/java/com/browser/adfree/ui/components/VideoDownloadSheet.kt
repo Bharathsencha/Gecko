@@ -71,11 +71,19 @@ fun VideoDownloadSheet(
 
     val rawVideoQualities = remember(video) { video.videoQualities }
     val videoQualities = remember(rawVideoQualities, showWebm) {
-        if (showWebm) rawVideoQualities else rawVideoQualities.filter { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }
+        if (showWebm || rawVideoQualities.none { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }) {
+            rawVideoQualities
+        } else {
+            rawVideoQualities.filter { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }
+        }
     }
     val rawAudioQualities = remember(video) { video.audioQualities }
     val audioQualities = remember(rawAudioQualities, showWebm) {
-        if (showWebm) rawAudioQualities else rawAudioQualities.filter { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }
+        if (showWebm || rawAudioQualities.none { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }) {
+            rawAudioQualities
+        } else {
+            rawAudioQualities.filter { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }
+        }
     }
 
     var selectedTab by remember {

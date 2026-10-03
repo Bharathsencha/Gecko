@@ -129,11 +129,9 @@ class TabManager(private val context: Context) {
                     val oldVideoId = YouTubeStreamExtractor.extractVideoId(tab.url)
                     val newVideoId = YouTubeStreamExtractor.extractVideoId(url)
                     val isSameYouTubeVideo = (oldVideoId != null && newVideoId != null && oldVideoId == newVideoId)
-                    val oldHost = try { Uri.parse(tab.url).host } catch (e: Exception) { null }
-                    val newHost = try { Uri.parse(url).host } catch (e: Exception) { null }
-                    val isDifferentHost = (oldHost != null && newHost != null && oldHost != newHost)
+                    val isSameUrl = tab.url.equals(url, ignoreCase = true)
 
-                    if (!isSameYouTubeVideo && isDifferentHost) {
+                    if (!isSameYouTubeVideo && !isSameUrl) {
                         tab.detectedVideos.clear()
                     }
 
@@ -305,11 +303,9 @@ class TabManager(private val context: Context) {
                             val oldVideoId = YouTubeStreamExtractor.extractVideoId(tab.url)
                             val newVideoId = YouTubeStreamExtractor.extractVideoId(it)
                             val isSameYouTubeVideo = (oldVideoId != null && newVideoId != null && oldVideoId == newVideoId)
-                            val oldHost = try { Uri.parse(tab.url).host } catch (e: Exception) { null }
-                            val newHost = try { Uri.parse(it).host } catch (e: Exception) { null }
-                            val isDifferentHost = (oldHost != null && newHost != null && oldHost != newHost)
+                            val isSameUrl = tab.url.equals(it, ignoreCase = true)
 
-                            if (!isSameYouTubeVideo && isDifferentHost) {
+                            if (!isSameYouTubeVideo && !isSameUrl) {
                                 tab.detectedVideos.clear()
                             }
                             tab.url = it
@@ -330,26 +326,50 @@ class TabManager(private val context: Context) {
         if (preferencesRepository?.videoDownloaderEnabled == false) return
         if (targetUrl.isBlank() || targetUrl == HOME_URL || targetUrl.startsWith("about:")) return
 
-        // 1. YouTube Native Stream Extraction
-        if (targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be")) {
-            val videoId = YouTubeStreamExtractor.extractVideoId(targetUrl)
-            if (videoId != null) {
-                CoroutineScope(Dispatchers.IO).launch {
-                    val detected = YouTubeStreamExtractor.extractById(videoId, targetUrl)
-                    if (detected != null && detected.qualities.isNotEmpty()) {
-                        mainHandler.post {
-                            if (tab.url.contains(videoId) || targetUrl.contains(videoId)) {
-                                val existingIndex = tab.detectedVideos.indexOfFirst {
-                                    it.pageUrl == detected.pageUrl || (it.sourceDomain == "youtube.com" && it.pageUrl.contains(videoId))
-                                }
-                                if (existingIndex >= 0) {
-                                    tab.detectedVideos[existingIndex] = detected
-                                } else {
-                                    tab.detectedVideos.add(0, detected)
-                                }
-                                Log.d("VideoSniffer", "Detected YouTube video: ${detected.title} (${detected.qualities.size} streams)")
+        val capturedUrl = targetUrl
+        CoroutineScope(Dispatchers.IO).launch {
+            val detected = com.browser.adfree.download.UniversalVideoExtractor.extract(capturedUrl, context)
+            if (detected != null && detected.qualities.isNotEmpty()) {
+                mainHandler.post {
+                    val currentUrl = tab.url
+                    val isYouTube = capturedUrl.contains("youtube.com") || capturedUrl.contains("youtu.be")
+                    val oldVideoId = if (isYouTube) YouTubeStreamExtractor.extractVideoId(currentUrl) else null
+                    val newVideoId = if (isYouTube) YouTubeStreamExtractor.extractVideoId(capturedUrl) else null
+                    val isMatching = if (isYouTube) {
+                        (oldVideoId != null && oldVideoId == newVideoId) || currentUrl.contains(newVideoId ?: "")
+                    } else {
+                        currentUrl.equals(capturedUrl, ignoreCase = true) || currentUrl.startsWith(capturedUrl) || capturedUrl.startsWith(currentUrl)
+                    }
+
+                    if (isMatching || tab.detectedVideos.isEmpty()) {
+                        val existingIndex = if (tab.detectedVideos.isNotEmpty()) 0 else -1
+                        if (existingIndex >= 0) {
+                            val existing = tab.detectedVideos[existingIndex]
+                            val isSameTarget = if (isYouTube) {
+                                val existId = YouTubeStreamExtractor.extractVideoId(existing.pageUrl)
+                                existId != null && existId == newVideoId
+                            } else {
+                                existing.pageUrl.equals(capturedUrl, ignoreCase = true)
                             }
+
+                            if (!isSameTarget) {
+                                // Different video / page navigated — replace with fresh detection
+                                tab.detectedVideos.clear()
+                                tab.detectedVideos.add(detected)
+                            } else {
+                                val mergedQualities = com.browser.adfree.download.VideoQualityParser.sortQualities(detected.qualities + existing.qualities)
+                                tab.detectedVideos[existingIndex] = existing.copy(
+                                    pageUrl = capturedUrl,
+                                    title = if (detected.title.isNotBlank() && detected.title != "Web Video" && detected.title != "YouTube Video") detected.title else existing.title,
+                                    thumbnail = detected.thumbnail ?: existing.thumbnail,
+                                    durationSeconds = if (detected.durationSeconds > 0) detected.durationSeconds else existing.durationSeconds,
+                                    qualities = mergedQualities
+                                )
+                            }
+                        } else {
+                            tab.detectedVideos.add(0, detected)
                         }
+                        Log.d("VideoSniffer", "Detected & Enriched media for tab: ${detected.title} (${detected.qualities.size} streams)")
                     }
                 }
             }
