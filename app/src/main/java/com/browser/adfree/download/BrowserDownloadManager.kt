@@ -31,6 +31,7 @@ import android.webkit.MimeTypeMap
 import android.widget.Toast
 import androidx.compose.runtime.mutableStateListOf
 import androidx.core.content.FileProvider
+import com.browser.adfree.download.DownloadForegroundService
 import com.browser.adfree.model.DownloadItem
 import com.browser.adfree.model.DownloadStatus
 import kotlinx.coroutines.*
@@ -65,6 +66,31 @@ class BrowserDownloadManager(private val context: Context) {
         }
     }
 
+    private fun notifyForegroundService() {
+        try {
+            val activeItems = downloadsList.filter { it.status == DownloadStatus.DOWNLOADING }
+            if (activeItems.isEmpty()) {
+                DownloadForegroundService.stop(context)
+                return
+            }
+
+            val primary = activeItems.first()
+            val count = activeItems.size
+            val title = if (count > 1) "${primary.fileName} (+${count - 1} more)" else primary.fileName
+
+            DownloadForegroundService.updateProgress(
+                context = context,
+                title = title,
+                progress = primary.progress,
+                downloadedBytes = primary.currentBytes,
+                totalBytes = primary.totalBytes,
+                activeCount = count
+            )
+        } catch (e: Exception) {
+            Log.w("DownloadManager", "Error updating foreground service: ${e.message}")
+        }
+    }
+
     fun startDownload(
         url: String,
         contentDisposition: String? = null,
@@ -80,26 +106,62 @@ class BrowserDownloadManager(private val context: Context) {
             return saveBase64Download(fileName, url, mimeType)
         }
 
-        // If audioUrl is provided, trigger the muxed stream download pipeline
-        if (!audioUrl.isNullOrBlank()) {
-            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
-            return startMuxedDownload(
-                videoUrl = url,
-                audioUrl = audioUrl,
+        val effectiveMime = mimeType ?: "video/mp4"
+        val isHls = url.contains(".m3u8") || effectiveMime.contains("mpegurl", ignoreCase = true) || effectiveMime.contains("application/x-mpegURL", ignoreCase = true)
+
+        // 1. If HLS (.m3u8), route to native HLS segment download engine
+        if (isHls) {
+            val fileName = customFileName ?: extractFileName(url, contentDisposition, "video/mp4")
+            return startHlsDownload(
+                playlistUrl = url,
                 fileName = fileName,
-                mimeType = mimeType ?: "video/mp4",
+                mimeType = "video/mp4",
                 userAgent = userAgent,
                 referer = referer,
                 extraHeaders = extraHeaders
             )
         }
 
+        // 2. If audioUrl is provided and distinct from videoUrl, trigger the muxed stream download pipeline
+        if (!audioUrl.isNullOrBlank() && audioUrl != url) {
+            val fileName = customFileName ?: extractFileName(url, contentDisposition, effectiveMime)
+            return startMuxedDownload(
+                videoUrl = url,
+                audioUrl = audioUrl,
+                fileName = fileName,
+                mimeType = effectiveMime,
+                userAgent = userAgent,
+                referer = referer,
+                extraHeaders = extraHeaders
+            )
+        }
+
+        // 3. For direct streaming media (YouTube googlevideo, v.redd.it, mp4, webm, m4a, or when headers/referer present)
+        val isStreamingMedia = url.contains("googlevideo.com") || url.contains("v.redd.it") ||
+                url.contains("fbcdn.net") || url.contains("twimg.com") || url.contains("tiktokcdn.com") ||
+                url.contains(".mp4") || url.contains(".webm") || url.contains(".m4a") || url.contains(".mp3") ||
+                effectiveMime.startsWith("video/") || effectiveMime.startsWith("audio/") ||
+                !referer.isNullOrBlank() || !extraHeaders.isNullOrEmpty()
+
+        if (isStreamingMedia) {
+            val fileName = customFileName ?: extractFileName(url, contentDisposition, effectiveMime)
+            return startInternalStreamDownload(
+                url = url,
+                fileName = fileName,
+                mimeType = effectiveMime,
+                userAgent = userAgent,
+                referer = referer,
+                extraHeaders = extraHeaders
+            )
+        }
+
+        // 4. Standard file downloads fallback to system DownloadManager
         try {
             val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
             val uri = Uri.parse(url)
             val request = DownloadManager.Request(uri).apply {
                 setTitle(fileName)
-                setDescription("Downloading media file...")
+                setDescription("Downloading file...")
                 setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, fileName)
                 val effectiveUa = userAgent ?: com.browser.adfree.tabs.TabManager.MODERN_MOBILE_UA
@@ -142,11 +204,328 @@ class BrowserDownloadManager(private val context: Context) {
             return downloadId
         } catch (e: Exception) {
             e.printStackTrace()
-            mainHandler.post {
-                Toast.makeText(context, "Download failed: ${e.localizedMessage}", Toast.LENGTH_SHORT).show()
-            }
-            return -1L
+            // If system DownloadManager fails, fallback to internal stream downloader
+            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
+            return startInternalStreamDownload(
+                url = url,
+                fileName = fileName,
+                mimeType = mimeType ?: "application/octet-stream",
+                userAgent = userAgent,
+                referer = referer,
+                extraHeaders = extraHeaders
+            )
         }
+    }
+
+    /**
+     * Downloads an HLS (.m3u8) master or media stream by fetching segments (.ts / .m4s)
+     * and writing them seamlessly into a playable .mp4 file.
+     */
+    fun startHlsDownload(
+        playlistUrl: String,
+        fileName: String,
+        mimeType: String = "video/mp4",
+        userAgent: String? = null,
+        referer: String? = null,
+        extraHeaders: Map<String, String>? = null
+    ): Long {
+        val downloadId = System.currentTimeMillis()
+        val cleanName = sanitizeFileName(if (fileName.endsWith(".mp4", ignoreCase = true)) fileName else "$fileName.mp4")
+
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!downloadsDir.exists()) downloadsDir.mkdirs()
+
+        var targetFile = File(downloadsDir, cleanName)
+        val nameWithoutExt = cleanName.substringBeforeLast(".")
+        val ext = cleanName.substringAfterLast(".", "mp4")
+        var counter = 1
+        while (targetFile.exists()) {
+            targetFile = File(downloadsDir, "$nameWithoutExt ($counter).$ext")
+            counter++
+        }
+
+        val item = DownloadItem(
+            id = downloadId,
+            fileName = targetFile.name,
+            url = playlistUrl,
+            mimeType = "video/mp4",
+            destinationPath = targetFile.absolutePath,
+            initialProgress = 0,
+            initialStatus = DownloadStatus.DOWNLOADING,
+            audioUrl = null,
+            userAgent = userAgent,
+            referer = referer
+        )
+
+        mainHandler.post {
+            downloadsList.add(0, item)
+            notifyForegroundService()
+            Toast.makeText(context, "Downloading ${targetFile.name} (HLS Stream)", Toast.LENGTH_SHORT).show()
+        }
+
+        launchHlsDownloadJob(item, extraHeaders)
+        return downloadId
+    }
+
+    private fun launchHlsDownloadJob(item: DownloadItem, extraHeaders: Map<String, String>? = null) {
+        val job = downloadScope.launch {
+            try {
+                notifyForegroundService()
+                val ua = item.userAgent ?: com.browser.adfree.tabs.TabManager.MODERN_MOBILE_UA
+                val reqBuilder = Request.Builder().url(item.url)
+                    .header("User-Agent", ua)
+                if (!item.referer.isNullOrBlank()) reqBuilder.header("Referer", item.referer)
+                extraHeaders?.forEach { (k, v) -> if (k != "User-Agent" && k != "Referer" && v.isNotBlank()) reqBuilder.header(k, v) }
+
+                val resp = okHttpClient.newCall(reqBuilder.build()).execute()
+                if (!resp.isSuccessful) {
+                    resp.close()
+                    mainHandler.post {
+                        item.status = DownloadStatus.FAILED
+                        notifyForegroundService()
+                        Toast.makeText(context, "HLS playlist request failed (${resp.code})", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+                val playlistText = resp.body?.string() ?: ""
+                resp.close()
+
+                var mediaPlaylistUrl = item.url
+                var mediaPlaylistText = playlistText
+
+                // If it's a master playlist, extract the best variant
+                if (VideoQualityParser.isMasterPlaylist(playlistText)) {
+                    val variants = VideoQualityParser.parseM3u8MasterPlaylist(playlistText, item.url)
+                    if (variants.isNotEmpty()) {
+                        val bestVariant = variants.maxByOrNull {
+                            val h = it.resolution.substringAfter("x").takeWhile { c -> c.isDigit() }.toIntOrNull() ?: 0
+                            h
+                        } ?: variants.first()
+                        mediaPlaylistUrl = bestVariant.url
+
+                        val variantReq = Request.Builder().url(mediaPlaylistUrl).header("User-Agent", ua).apply {
+                            if (!item.referer.isNullOrBlank()) header("Referer", item.referer)
+                            extraHeaders?.forEach { (k, v) -> if (k != "User-Agent" && k != "Referer" && v.isNotBlank()) header(k, v) }
+                        }.build()
+
+                        val variantResp = okHttpClient.newCall(variantReq).execute()
+                        if (variantResp.isSuccessful) {
+                            mediaPlaylistText = variantResp.body?.string() ?: ""
+                        }
+                        variantResp.close()
+                    }
+                }
+
+                val segments = VideoQualityParser.parseM3u8Segments(mediaPlaylistText, mediaPlaylistUrl)
+                if (segments.isEmpty()) {
+                    mainHandler.post {
+                        item.status = DownloadStatus.FAILED
+                        notifyForegroundService()
+                        Toast.makeText(context, "No stream segments found in HLS playlist", Toast.LENGTH_SHORT).show()
+                    }
+                    return@launch
+                }
+
+                val tempFile = File(context.cacheDir, "hls_${item.id}.tmp")
+                if (tempFile.exists()) tempFile.delete()
+
+                var downloadedSegments = 0
+                val totalSegments = segments.size
+                var success = true
+
+                FileOutputStream(tempFile, true).use { out ->
+                    for (segUrl in segments) {
+                        if (!isActive || item.status != DownloadStatus.DOWNLOADING) {
+                            success = false
+                            break
+                        }
+                        val segReq = Request.Builder().url(segUrl).header("User-Agent", ua).apply {
+                            if (!item.referer.isNullOrBlank()) header("Referer", item.referer)
+                            extraHeaders?.forEach { (k, v) -> if (k != "User-Agent" && k != "Referer" && v.isNotBlank()) header(k, v) }
+                        }.build()
+
+                        var segDownloaded = false
+                        for (retry in 0..2) {
+                            try {
+                                val segResp = okHttpClient.newCall(segReq).execute()
+                                if (segResp.isSuccessful) {
+                                    val segBody = segResp.body
+                                    if (segBody != null) {
+                                        segBody.byteStream().use { input ->
+                                            input.copyTo(out)
+                                        }
+                                        segDownloaded = true
+                                    }
+                                }
+                                segResp.close()
+                                if (segDownloaded) break
+                            } catch (e: Exception) {
+                                delay(400)
+                            }
+                        }
+
+                        downloadedSegments++
+                        val pct = ((downloadedSegments * 100) / totalSegments).coerceIn(0, 99)
+                        mainHandler.post {
+                            item.progress = pct
+                            item.currentBytes = tempFile.length()
+                            notifyForegroundService()
+                        }
+                    }
+                }
+
+                if (success && tempFile.exists() && tempFile.length() > 0) {
+                    val destFile = File(item.destinationPath)
+                    tempFile.copyTo(destFile, overwrite = true)
+                    try { tempFile.delete() } catch (e: Exception) {}
+
+                    mainHandler.post {
+                        item.progress = 100
+                        item.status = DownloadStatus.COMPLETED
+                        item.currentBytes = destFile.length()
+                        item.totalBytes = destFile.length()
+                        notifyForegroundService()
+                        Toast.makeText(context, "Saved ${destFile.name} to Downloads", Toast.LENGTH_SHORT).show()
+                    }
+                    registerCompletedDownload(destFile, "video/mp4")
+                } else if (item.status == DownloadStatus.DOWNLOADING) {
+                    mainHandler.post {
+                        item.status = DownloadStatus.FAILED
+                        notifyForegroundService()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("BrowserDownloadManager", "HLS download error", e)
+                if (isActive && item.status == DownloadStatus.DOWNLOADING) {
+                    mainHandler.post {
+                        item.status = DownloadStatus.FAILED
+                        notifyForegroundService()
+                    }
+                }
+            } finally {
+                activeJobs.remove(item.id)
+                mainHandler.post { notifyForegroundService() }
+            }
+        }
+        activeJobs[item.id] = job
+    }
+
+    /**
+     * Downloads a direct media stream using OkHttp directly into Downloads folder with progress & resume support.
+     */
+    fun startInternalStreamDownload(
+        url: String,
+        fileName: String,
+        mimeType: String = "video/mp4",
+        userAgent: String? = null,
+        referer: String? = null,
+        extraHeaders: Map<String, String>? = null
+    ): Long {
+        val downloadId = System.currentTimeMillis()
+        val cleanName = sanitizeFileName(fileName)
+
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!downloadsDir.exists()) downloadsDir.mkdirs()
+
+        var targetFile = File(downloadsDir, cleanName)
+        val nameWithoutExt = cleanName.substringBeforeLast(".")
+        val ext = cleanName.substringAfterLast(".", "mp4")
+        var counter = 1
+        while (targetFile.exists()) {
+            targetFile = File(downloadsDir, "$nameWithoutExt ($counter).$ext")
+            counter++
+        }
+
+        val item = DownloadItem(
+            id = downloadId,
+            fileName = targetFile.name,
+            url = url,
+            mimeType = mimeType,
+            destinationPath = targetFile.absolutePath,
+            initialProgress = 0,
+            initialStatus = DownloadStatus.DOWNLOADING,
+            audioUrl = null,
+            userAgent = userAgent,
+            referer = referer
+        )
+
+        mainHandler.post {
+            downloadsList.add(0, item)
+            notifyForegroundService()
+            Toast.makeText(context, "Downloading ${targetFile.name}", Toast.LENGTH_SHORT).show()
+        }
+
+        launchInternalStreamDownloadJob(item, extraHeaders)
+        return downloadId
+    }
+
+    private fun launchInternalStreamDownloadJob(item: DownloadItem, extraHeaders: Map<String, String>? = null) {
+        val job = downloadScope.launch {
+            try {
+                notifyForegroundService()
+                val tempFile = File(context.cacheDir, "stream_${item.id}.tmp")
+                val streamOk = downloadStream(
+                    url = item.url,
+                    targetFile = tempFile,
+                    userAgent = item.userAgent,
+                    referer = item.referer,
+                    isActive = { isActive && item.status == DownloadStatus.DOWNLOADING },
+                    onProgress = { cur, tot ->
+                        mainHandler.post {
+                            item.currentBytes = cur
+                            if (tot > 0) {
+                                item.totalBytes = tot
+                                item.progress = ((cur * 100) / tot).toInt().coerceIn(0, 99)
+                            }
+                            notifyForegroundService()
+                        }
+                    }
+                )
+
+                if (!isActive || item.status != DownloadStatus.DOWNLOADING || !streamOk) {
+                    if (item.status == DownloadStatus.DOWNLOADING) {
+                        mainHandler.post {
+                            item.status = DownloadStatus.FAILED
+                            notifyForegroundService()
+                        }
+                    }
+                    return@launch
+                }
+
+                val destFile = File(item.destinationPath)
+                tempFile.copyTo(destFile, overwrite = true)
+                try { tempFile.delete() } catch (e: Exception) {}
+
+                if (destFile.exists() && destFile.length() > 0) {
+                    mainHandler.post {
+                        item.progress = 100
+                        item.status = DownloadStatus.COMPLETED
+                        item.currentBytes = destFile.length()
+                        item.totalBytes = destFile.length()
+                        notifyForegroundService()
+                        Toast.makeText(context, "Saved ${destFile.name} to Downloads", Toast.LENGTH_SHORT).show()
+                    }
+                    registerCompletedDownload(destFile, item.mimeType)
+                } else {
+                    mainHandler.post {
+                        item.status = DownloadStatus.FAILED
+                        notifyForegroundService()
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("BrowserDownloadManager", "Internal stream download error", e)
+                if (isActive && item.status == DownloadStatus.DOWNLOADING) {
+                    mainHandler.post {
+                        item.status = DownloadStatus.FAILED
+                        notifyForegroundService()
+                    }
+                }
+            } finally {
+                activeJobs.remove(item.id)
+                mainHandler.post { notifyForegroundService() }
+            }
+        }
+        activeJobs[item.id] = job
     }
 
     /**
@@ -192,6 +571,7 @@ class BrowserDownloadManager(private val context: Context) {
 
         mainHandler.post {
             downloadsList.add(0, item)
+            notifyForegroundService()
             Toast.makeText(context, "Downloading ${targetFile.name} (with Audio)", Toast.LENGTH_SHORT).show()
         }
 
@@ -202,6 +582,7 @@ class BrowserDownloadManager(private val context: Context) {
     private fun launchMuxedDownloadJob(item: DownloadItem) {
         val job = downloadScope.launch {
             try {
+                notifyForegroundService()
                 val videoTmp = File(context.cacheDir, "vid_${item.id}.tmp")
                 val audioTmp = item.audioUrl?.let { File(context.cacheDir, "aud_${item.id}.tmp") }
 
@@ -224,6 +605,7 @@ class BrowserDownloadManager(private val context: Context) {
                                 item.totalBytes = estimatedTotal
                                 item.progress = ((item.currentBytes * 85) / estimatedTotal).toInt().coerceIn(0, 85)
                             }
+                            notifyForegroundService()
                         }
                     }
                 )
@@ -248,6 +630,7 @@ class BrowserDownloadManager(private val context: Context) {
                                     val pct = 85 + ((cur * 13) / tot).toInt()
                                     item.progress = pct.coerceIn(85, 98)
                                 }
+                                notifyForegroundService()
                             }
                         }
                     )
@@ -262,6 +645,7 @@ class BrowserDownloadManager(private val context: Context) {
                 if (videoDone && audioDone) {
                     mainHandler.post {
                         item.progress = 99
+                        notifyForegroundService()
                     }
 
                     val destFile = File(item.destinationPath)
@@ -281,12 +665,14 @@ class BrowserDownloadManager(private val context: Context) {
                             item.status = DownloadStatus.COMPLETED
                             item.currentBytes = destFile.length()
                             item.totalBytes = destFile.length()
+                            notifyForegroundService()
                             Toast.makeText(context, "Saved ${destFile.name} to Downloads", Toast.LENGTH_SHORT).show()
                         }
                         registerCompletedDownload(destFile, item.mimeType)
                     } else {
                         mainHandler.post {
                             item.status = DownloadStatus.FAILED
+                            notifyForegroundService()
                             Toast.makeText(context, "Failed to complete ${item.fileName}", Toast.LENGTH_SHORT).show()
                         }
                     }
@@ -296,10 +682,12 @@ class BrowserDownloadManager(private val context: Context) {
                 if (isActive && item.status == DownloadStatus.DOWNLOADING) {
                     mainHandler.post {
                         item.status = DownloadStatus.FAILED
+                        notifyForegroundService()
                     }
                 }
             } finally {
                 activeJobs.remove(item.id)
+                mainHandler.post { notifyForegroundService() }
             }
         }
         activeJobs[item.id] = job
@@ -398,6 +786,7 @@ class BrowserDownloadManager(private val context: Context) {
         activeJobs.remove(id)
         item.status = DownloadStatus.PAUSED
         mainHandler.post {
+            notifyForegroundService()
             Toast.makeText(context, "Download paused", Toast.LENGTH_SHORT).show()
         }
     }
@@ -406,10 +795,16 @@ class BrowserDownloadManager(private val context: Context) {
         val item = downloadsList.firstOrNull { it.id == id } ?: return
         if (item.status == DownloadStatus.PAUSED || item.status == DownloadStatus.FAILED) {
             item.status = DownloadStatus.DOWNLOADING
-            if (!item.audioUrl.isNullOrBlank() || item.url.startsWith("http")) {
+            val isHls = item.url.contains(".m3u8") || item.mimeType.contains("mpegurl", ignoreCase = true)
+            if (isHls) {
+                launchHlsDownloadJob(item)
+            } else if (!item.audioUrl.isNullOrBlank() && item.audioUrl != item.url) {
                 launchMuxedDownloadJob(item)
+            } else if (item.url.startsWith("http")) {
+                launchInternalStreamDownloadJob(item)
             }
             mainHandler.post {
+                notifyForegroundService()
                 Toast.makeText(context, "Resuming download...", Toast.LENGTH_SHORT).show()
             }
         }
@@ -424,8 +819,11 @@ class BrowserDownloadManager(private val context: Context) {
         } catch (e: Exception) {}
         try { File(context.cacheDir, "vid_${id}.tmp").delete() } catch (e: Exception) {}
         try { File(context.cacheDir, "aud_${id}.tmp").delete() } catch (e: Exception) {}
+        try { File(context.cacheDir, "hls_${id}.tmp").delete() } catch (e: Exception) {}
+        try { File(context.cacheDir, "stream_${id}.tmp").delete() } catch (e: Exception) {}
         item.status = DownloadStatus.CANCELLED
         mainHandler.post {
+            notifyForegroundService()
             Toast.makeText(context, "Download cancelled", Toast.LENGTH_SHORT).show()
         }
     }
@@ -439,8 +837,11 @@ class BrowserDownloadManager(private val context: Context) {
         try { File(item.destinationPath).delete() } catch (e: Exception) {}
         try { File(context.cacheDir, "vid_${item.id}.tmp").delete() } catch (e: Exception) {}
         try { File(context.cacheDir, "aud_${item.id}.tmp").delete() } catch (e: Exception) {}
+        try { File(context.cacheDir, "hls_${item.id}.tmp").delete() } catch (e: Exception) {}
+        try { File(context.cacheDir, "stream_${item.id}.tmp").delete() } catch (e: Exception) {}
         downloadsList.remove(item)
         mainHandler.post {
+            notifyForegroundService()
             Toast.makeText(context, "Deleted ${item.fileName}", Toast.LENGTH_SHORT).show()
         }
     }
@@ -597,6 +998,7 @@ class BrowserDownloadManager(private val context: Context) {
                                     }
                                 }
                             }
+                            notifyForegroundService()
                         }
                     }
                 }
