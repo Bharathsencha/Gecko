@@ -9,6 +9,8 @@ let totalBlocked = 0;
 
 let adBlockingActive = true;
 let nativePort = null;
+let nativeBridgeUp = false;
+let nativeBridgeRetries = 0;
 
 // High-speed pre-compiled surrogate data URIs (0ms network time, fires script.onload without errors)
 const SURROGATE_JS_NOOP = "data:application/javascript;charset=utf-8,%2F*%20noop%20*%2F";
@@ -351,10 +353,54 @@ if (browser.webNavigation && browser.webNavigation.onCommitted) {
     });
 }
 
-// Universal Network Media Sniffer (Cat-Catch Network Layer)
+// Universal Network Media Sniffer
+//
+// Detection is deliberately host-agnostic: a URL either looks like media
+// (extension or segmented/manifest path), is reported as media by Gecko, or is
+// answered with a video/audio content type. No allowlist of particular sites.
 const MEDIA_EXT_REGEX = /\.(mp4|webm|mkv|m4v|mov|m3u8|mpd|m4a|mp3|aac|opus|flv|f4v)($|\?|#)/i;
-const KNOWN_STREAM_REGEX = /(googlevideo\.com\/videoplayback|v\.redd\.it\/|hotstar\.com.*\.m3u8|fbcdn\.net\/.*\.mp4|twimg\.com\/.*\.mp4|tiktokcdn\.com\/|byteoversea\.com\/|akamaihd\.net\/|cloudfront\.net\/.*(m3u8|mp4)|fastly\.net\/.*(m3u8|mp4)|vimeocdn\.com\/|dailymotion\.com\/.*\.m3u8)/i;
+// Pages and video usually share a CDN. Without this, a host that serves both
+// turns every .js/.json/.jpg into a fake "video" option.
+const NON_MEDIA_EXT_REGEX = /\.(js|mjs|css|json|xml|html|htm|png|jpe?g|gif|avif|webp|svg|ico|woff2?|ttf|otf|map|txt|vtt|srt|ass|ssa|ttml|dfxp)($|\?|#)/i;
+// Hover/streaming previews and thumbnail hosts carry real video bytes, but they
+// are the wrong file: a progressive preview wins the "first progressive"
+// default in the download sheet and lands as a short silent clip.
+const PREVIEW_REGEX = /(^|\/)(preview|sample|trailer|teaser|clips?)([-_.][^/?]*)?\.(mp4|webm|m4v|mov|m3u8|mpd)($|\?|#)/i;
+const THUMB_HOST_REGEX = /(^|\/\/)(thumb|thumbs|img|media-thumb)[-.]/i;
+// Streams without a media extension are recognised by path: segmented delivery,
+// playlists and manifests.
+const STREAM_PATH_REGEX = /(\/videoplayback|[?&]itag=\d+|\/hls(\/|$)|\.m3u8(\?|#|$)|\.mpd(\?|#|$)|\/manifest(\?|#|$))/i;
 const detectedMediaUrls = new Set();
+
+function isLikelyStream(url, type) {
+    // Top-level documents and iframes are pages, never streams.
+    if (type === "main_frame" || type === "sub_frame") return false;
+    if (NON_MEDIA_EXT_REGEX.test(url)) return false;
+    if (PREVIEW_REGEX.test(url) || THUMB_HOST_REGEX.test(url)) return false;
+    if (MEDIA_EXT_REGEX.test(url)) return true;
+    if (type === "media") return true;
+    return STREAM_PATH_REGEX.test(url);
+}
+
+// YouTube serves a *new* URL for every range request (rn=2, rn=3, ...), so a
+// plain URL set lets one playing video flood the app. Collapse those back to
+// the logical stream (video id + itag) before reporting.
+function mediaKey(url) {
+    if (url.includes("googlevideo.com/videoplayback")) {
+        const id = /[?&]id=([^&]+)/.exec(url);
+        const itag = /[?&]itag=(\d+)/.exec(url);
+        if (id && itag) return "yt:" + id[1] + ":" + itag[1];
+    }
+    return url.replace(/([?&])rn=\d+&?/, "$1").replace(/[?&]$/, "");
+}
+function rememberMedia(url) {
+    const key = mediaKey(url);
+    if (detectedMediaUrls.has(key)) return null;
+    // Bound the set so a long browsing session cannot grow it without limit.
+    if (detectedMediaUrls.size > 600) detectedMediaUrls.clear();
+    detectedMediaUrls.add(key);
+    return key;
+}
 
 // 1. Instant Request Sniffer (onBeforeRequest)
 if (browser.webRequest && browser.webRequest.onBeforeRequest) {
@@ -363,16 +409,13 @@ if (browser.webRequest && browser.webRequest.onBeforeRequest) {
             try {
                 if (!details || !details.url) return;
                 const url = details.url;
-                if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:") || detectedMediaUrls.has(url)) return;
+                if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:")) return;
                 if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) return;
+                const isM3u8 = url.includes(".m3u8");
+                const isAudio = url.includes("mime=audio") || url.includes(".m4a") || url.includes(".mp3") || url.includes(".aac");
 
-                const isMediaExt = MEDIA_EXT_REGEX.test(url);
-                const isKnownStream = KNOWN_STREAM_REGEX.test(url);
-
-                if (isMediaExt || isKnownStream || details.type === "media") {
-                    detectedMediaUrls.add(url);
-                    const isM3u8 = url.includes(".m3u8");
-                    const isAudio = url.includes("mime=audio") || url.includes(".m4a") || url.includes(".mp3") || url.includes(".aac");
+                if (isLikelyStream(url, details.type)) {
+                    if (rememberMedia(url) === null) return;
                     notifyNative({
                         action: "media_detected",
                         tabId: details.tabId,
@@ -422,16 +465,15 @@ if (browser.webRequest && browser.webRequest.onHeadersReceived) {
                                     contentType.includes("video/mp4") ||
                                     contentType.includes("video/webm");
                 const isAudioMime = contentType.startsWith("audio/") || contentType.includes("audio/x-m4a");
+                if (NON_MEDIA_EXT_REGEX.test(url) || PREVIEW_REGEX.test(url) || THUMB_HOST_REGEX.test(url)) return;
                 const isMediaExt = MEDIA_EXT_REGEX.test(url);
-                const isKnownStream = KNOWN_STREAM_REGEX.test(url);
 
-                if (isVideoMime || isAudioMime || isMediaExt || isKnownStream || details.type === "media") {
-                    if (contentLength > 0 && contentLength < 30000 && !url.includes(".m3u8") && !url.includes(".mpd") && !isKnownStream) {
+                if (isLikelyStream(url, details.type) || isVideoMime || isAudioMime) {
+                    if (contentLength > 0 && contentLength < 30000 && !url.includes(".m3u8") && !url.includes(".mpd")) {
                         return;
                     }
 
-                    if (!detectedMediaUrls.has(url)) {
-                        detectedMediaUrls.add(url);
+                    if (rememberMedia(url) !== null) {
                         notifyNative({
                             action: "media_detected",
                             tabId: details.tabId,
@@ -514,6 +556,72 @@ browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     }
     return true;
 });
+
+/**
+ * Native port used for app -> extension requests (config toggles, cookie reads).
+ * `connectToNativeBridge` is invoked at load time below; it must exist or the
+ * ReferenceError aborts the remainder of this background script.
+ * `nativePort` is declared with the other module state near the top of the file.
+ */
+function connectToNativeBridge() {
+    try {
+        if (!browser.runtime || !browser.runtime.connectNative) return;
+        if (nativePort) {
+            try { nativePort.disconnect(); } catch (e) {}
+            nativePort = null;
+        }
+        nativePort = browser.runtime.connectNative("browser_app");
+        nativePort.onMessage.addListener(function (msg) {
+            if (!msg) return;
+            nativeBridgeUp = true;
+            nativeBridgeRetries = 0;
+            if (msg.action === "get_cookies") {
+                collectCookiesFor(msg.url).then(function (header) {
+                    try {
+                        nativePort.postMessage({
+                            action: "cookies_result",
+                            url: msg.url,
+                            cookieHeader: header
+                        });
+                    } catch (e) {}
+                });
+            }
+        });
+        nativePort.onDisconnect.addListener(function () {
+            nativePort = null;
+            scheduleNativeBridgeRetry();
+        });
+        scheduleNativeBridgeRetry();
+    } catch (e) {
+        scheduleNativeBridgeRetry();
+    }
+}
+
+/**
+ * The app installs its MessageDelegate only after ensureBuiltIn() resolves, so a
+ * connect issued during background-script load can be dropped. Retry a bounded
+ * number of times until the app talks back (syncExtensionConfig posts on connect).
+ */
+function scheduleNativeBridgeRetry() {
+    if (nativeBridgeUp || nativeBridgeRetries >= 10) return;
+    nativeBridgeRetries++;
+    setTimeout(function () {
+        if (!nativeBridgeUp) connectToNativeBridge();
+    }, 3000);
+}
+
+async function collectCookiesFor(url) {
+    if (!url || !browser.cookies || !browser.cookies.getAll) return "";
+    try {
+        const cookies = await browser.cookies.getAll({ url: url });
+        if (!cookies || !cookies.length) return "";
+        return cookies
+            .map(function (c) { return c.name + "=" + c.value; })
+            .join("; ");
+    } catch (e) {
+        return "";
+    }
+}
 
 connectToNativeBridge();
 

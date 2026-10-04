@@ -57,6 +57,8 @@ class TabManager(private val context: Context) {
     var preferencesRepository: BrowserPreferencesRepository? = null
     var shieldsRepository: com.browser.adfree.shields.ShieldsRepository? = null
     var downloadManager: BrowserDownloadManager? = null
+    /** Invoked on the main thread once a page finishes loading. */
+    var onCookiesRequested: ((String) -> Unit)? = null
     val sessionRepository = TabSessionRepository(context)
 
     var onInsecureHttpPrompt: ((url: String, onProceed: () -> Unit) -> Unit)? = null
@@ -121,6 +123,11 @@ class TabManager(private val context: Context) {
                     if (url != "about:blank" && url != HOME_URL) {
                         tab.url = url
                     }
+                    // Cookie prefetch runs at navigation start so the extractor has a
+                    // session cookie by the time onPageStop tries to pull stream URLs.
+                    if (!tab.isPrivate && (url.startsWith("http://") || url.startsWith("https://"))) {
+                        onCookiesRequested?.invoke(url)
+                    }
                     tab.isLoading = true
                     tab.progress = 10
                     tab.adBlockCount = 0
@@ -149,6 +156,9 @@ class TabManager(private val context: Context) {
                     tab.progress = progress
                     if (progress >= 100) {
                         tab.isLoading = false
+                        // Prefetch cookies once the page settled so a later download of a
+                        // discovered media URL can authenticate without an extra round trip.
+                        if (!tab.isPrivate) onCookiesRequested?.invoke(tab.url)
                     }
                 }
             }
@@ -322,15 +332,40 @@ class TabManager(private val context: Context) {
         return session
     }
 
+    // Playback fires media_detected for every range request, and mediaSession
+    // metadata events fire repeatedly, so without a guard one playing video
+    // spawns dozens of concurrent InnerTube/yt-dlp runs and cooks the phone.
+    private val inFlightExtractions: MutableSet<String> = java.util.concurrent.ConcurrentHashMap.newKeySet()
+    private val lastAttemptMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val lastSuccessMs = java.util.concurrent.ConcurrentHashMap<String, Long>()
+    private val EXTRACT_SUCCESS_COOLDOWN_MS = 15_000L
+    private val EXTRACT_RETRY_BACKOFF_MS = 45_000L
+
     fun checkForVideos(tab: TabModel, targetUrl: String) {
         if (preferencesRepository?.videoDownloaderEnabled == false) return
         if (targetUrl.isBlank() || targetUrl == HOME_URL || targetUrl.startsWith("about:")) return
 
+        // A search/playlist/channel tab is not one video: the extractor fans out
+        // into an InnerTube call per row, which is what overheats the device.
+        // The network sniffer still reports direct media found on those pages.
+        if ((targetUrl.contains("youtube.com") || targetUrl.contains("youtu.be")) &&
+            com.browser.adfree.download.YouTubeStreamExtractor.extractVideoId(targetUrl) == null
+        ) return
+
+        val now = System.currentTimeMillis()
+        if ((lastSuccessMs[targetUrl] ?: 0L).let { now - it < EXTRACT_SUCCESS_COOLDOWN_MS }) return
+        if ((lastAttemptMs[targetUrl] ?: 0L).let { now - it < EXTRACT_RETRY_BACKOFF_MS }) return
+        if (inFlightExtractions.contains(targetUrl)) return
+
         val capturedUrl = targetUrl
+        if (!inFlightExtractions.add(capturedUrl)) return
         CoroutineScope(Dispatchers.IO).launch {
-            val detected = com.browser.adfree.download.UniversalVideoExtractor.extract(capturedUrl, context)
-            if (detected != null && detected.qualities.isNotEmpty()) {
-                mainHandler.post {
+            lastAttemptMs[capturedUrl] = System.currentTimeMillis()
+            try {
+                val detected = com.browser.adfree.download.UniversalVideoExtractor.extract(capturedUrl, context)
+                if (detected != null && detected.qualities.isNotEmpty()) {
+                    lastSuccessMs[capturedUrl] = System.currentTimeMillis()
+                    mainHandler.post {
                     val currentUrl = tab.url
                     val isYouTube = capturedUrl.contains("youtube.com") || capturedUrl.contains("youtu.be")
                     val oldVideoId = if (isYouTube) YouTubeStreamExtractor.extractVideoId(currentUrl) else null
@@ -338,7 +373,7 @@ class TabManager(private val context: Context) {
                     val isMatching = if (isYouTube) {
                         (oldVideoId != null && oldVideoId == newVideoId) || currentUrl.contains(newVideoId ?: "")
                     } else {
-                        currentUrl.equals(capturedUrl, ignoreCase = true) || currentUrl.startsWith(capturedUrl) || capturedUrl.startsWith(currentUrl)
+                        com.browser.adfree.download.VideoQualityParser.samePage(currentUrl, capturedUrl)
                     }
 
                     if (isMatching || tab.detectedVideos.isEmpty()) {
@@ -349,7 +384,7 @@ class TabManager(private val context: Context) {
                                 val existId = YouTubeStreamExtractor.extractVideoId(existing.pageUrl)
                                 existId != null && existId == newVideoId
                             } else {
-                                existing.pageUrl.equals(capturedUrl, ignoreCase = true)
+                                com.browser.adfree.download.VideoQualityParser.samePage(existing.pageUrl, capturedUrl)
                             }
 
                             if (!isSameTarget) {
@@ -371,7 +406,12 @@ class TabManager(private val context: Context) {
                         }
                         Log.d("VideoSniffer", "Detected & Enriched media for tab: ${detected.title} (${detected.qualities.size} streams)")
                     }
+                    }
                 }
+            } catch (e: Exception) {
+                Log.w("VideoSniffer", "Extraction failed for $capturedUrl: ${e.message}")
+            } finally {
+                inFlightExtractions.remove(capturedUrl)
             }
         }
     }

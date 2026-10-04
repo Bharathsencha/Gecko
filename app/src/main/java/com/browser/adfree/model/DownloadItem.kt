@@ -35,17 +35,45 @@ class DownloadItem(
     val id: Long,
     val fileName: String,
     val url: String,
-    val mimeType: String,
-    val destinationPath: String,
+    mimeType: String,
+    destinationPath: String,
     initialProgress: Int = 0,
     initialStatus: DownloadStatus = DownloadStatus.DOWNLOADING,
     val timestamp: Long = System.currentTimeMillis(),
     val audioUrl: String? = null,
     val userAgent: String? = null,
-    val referer: String? = null
+    val referer: String? = null,
+    val extraHeaders: Map<String, String> = emptyMap(),
+    /** True when the id is a real android.app.DownloadManager id. */
+    val isSystemDownload: Boolean = false,
+    /** Which internal pipeline owns this item, so pause/resume re-enters correctly. */
+    val pipeline: DownloadPipeline = DownloadPipeline.STREAM
 ) {
+    var mimeType by mutableStateOf(mimeType)
+    var destinationPath by mutableStateOf(destinationPath)
+
     var progress by mutableIntStateOf(initialProgress)
     var status by mutableStateOf(initialStatus)
     var currentBytes by mutableLongStateOf(0L)
     var totalBytes by mutableLongStateOf(-1L)
+
+    /**
+     * Human readable failure reason. Persisted so the download list can explain
+     * a failure long after the toast that announced it has disappeared.
+     */
+    var errorMessage by mutableStateOf<String?>(null)
+}
+
+enum class DownloadPipeline {
+    /** Direct http(s) byte stream. */
+    STREAM,
+
+    /** HLS (.m3u8) segment assembly. */
+    HLS,
+
+    /** Separate video + audio streams remuxed into one file. */
+    MUXED,
+
+    /** Delegated to android.app.DownloadManager. */
+    SYSTEM
 }

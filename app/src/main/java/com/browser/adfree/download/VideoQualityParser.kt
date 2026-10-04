@@ -49,13 +49,13 @@ object VideoQualityParser {
 
     fun sanitizeFileName(title: String, qualityLabel: String? = null, extension: String = "mp4"): String {
         val cleanTitle = title
-            .replace(Regex("[\\\\/:*?\"<>|]"), "_")
+            .replace(Regex("[\\\\/:*?\"<>|•\u0000-\u001f]"), "_")
             .replace(Regex("\\s+"), " ")
             .trim()
             .take(60)
 
         val cleanQuality = qualityLabel
-            ?.replace(Regex("[\\\\/:*?\"<>|\\s]"), "_")
+            ?.replace(Regex("[\\\\/:*?\"<>|•\u0000-\u001f\\s]"), "_")
             ?.trim('_')
             ?: ""
 
@@ -110,9 +110,10 @@ object VideoQualityParser {
     ): List<VideoQualityOption> {
         val options = mutableListOf<VideoQualityOption>()
         val lines = playlistText.lines()
-        var currentResolution: String? = null
+var currentResolution: String? = null
         var currentBandwidth: Long = 0L
         var currentCodecs: String? = null
+        var currentAudioGroup: String? = null
 
         for (line in lines) {
             val trimmed = line.trim()
@@ -128,6 +129,9 @@ object VideoQualityParser {
                 // Extract CODECS="..."
                 val codecsMatch = Regex("CODECS=\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(trimmed)
                 currentCodecs = codecsMatch?.groupValues?.get(1)
+
+                // Extract AUDIO="group-id" so separate audio renditions can be fetched
+                currentAudioGroup = attribute(trimmed, "AUDIO")
             } else if (trimmed.isNotEmpty() && !trimmed.startsWith("#")) {
                 // Stream URL line
                 val streamUrl = resolveUrl(masterUrl, trimmed)
@@ -163,7 +167,8 @@ object VideoQualityParser {
                         isAudioOnly = false,
                         isAv1 = isAv1,
                         mimeType = "application/x-mpegURL",
-                        headers = headers
+                        headers = headers,
+                        audioGroupId = currentAudioGroup
                     )
                 )
 
@@ -171,6 +176,7 @@ object VideoQualityParser {
                 currentResolution = null
                 currentBandwidth = 0L
                 currentCodecs = null
+                currentAudioGroup = null
             }
         }
 
@@ -227,6 +233,38 @@ object VideoQualityParser {
         }
     }
 
+    /**
+     * Parses `#EXT-X-MEDIA:TYPE=AUDIO` entries from a master playlist and returns
+     * a map of audio group id -> rendition playlist URI.
+     *
+     * Picking only the highest-resolution variant used to select a video-only
+     * stream, which is why HLS downloads frequently came out silent.
+     */
+    fun parseM3u8AudioRenditions(playlistText: String, masterUrl: String): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+
+        for (line in playlistText.lines()) {
+            val trimmed = line.trim()
+            if (!trimmed.startsWith("#EXT-X-MEDIA:") || !trimmed.contains("TYPE=AUDIO", ignoreCase = true)) continue
+
+            val groupId = attribute(trimmed, "GROUP-ID") ?: continue
+            val uri = attribute(trimmed, "URI") ?: continue
+            if (uri.isBlank()) continue
+
+            // Prefer the first rendition per group; several playlists list multiple languages.
+            if (!result.containsKey(groupId)) {
+                result[groupId] = resolveUrl(masterUrl, uri)
+            }
+        }
+        return result
+    }
+
+    /** Extracts KEY="value" from an M3U attribute list. */
+    private fun attribute(line: String, key: String): String? {
+        val regex = Regex("$key=\"([^\"]*)\"", RegexOption.IGNORE_CASE)
+        return regex.find(line)?.groupValues?.get(1)
+    }
+
     fun resolveUrl(baseUrl: String, relativeUrl: String): String {
         return try {
             val base = URI(baseUrl)
@@ -246,9 +284,34 @@ object VideoQualityParser {
      * placing video streams first (4K -> 144p) and audio-only streams at the end.
      * Deduplicates options strictly by resolution and format.
      */
+    /**
+     * True when [a] and [b] address the same document (same host + path).
+     *
+     * Used to decide whether a newly detected stream belongs to the entry we
+     * already hold: a listing page must never be merged into the entry for the
+     * video page, or the download sheet ends up naming the site instead of the
+     * video.
+     */
+    fun samePage(a: String, b: String): Boolean {
+        if (a.isBlank() || b.isBlank()) return false
+        if (a.equals(b, ignoreCase = true)) return true
+        return try {
+            val ua = java.net.URI(a)
+            val ub = java.net.URI(b)
+            ua.host.equals(ub.host, ignoreCase = true) &&
+                ua.path.trimEnd('/') == ub.path.trimEnd('/')
+        } catch (e: Exception) {
+            false
+        }
+    }
+
     fun sortQualities(list: List<VideoQualityOption>): List<VideoQualityOption> {
         fun getScore(option: VideoQualityOption): Int {
             if (option.isAudioOnly) return -100
+            // An HLS master with no height in its URL carries every rendition
+            // (and any separate audio group), so it outranks the individual
+            // variants we may have sniffed alongside it.
+            if (option.format.equals("M3U8", true) && option.resolution.isBlank()) return 5000
             val heightFromRes = option.resolution.substringAfter("x").filter { it.isDigit() }.toIntOrNull()
             if (heightFromRes != null && heightFromRes > 0) return heightFromRes
             val labelLower = option.label.lowercase(Locale.US)

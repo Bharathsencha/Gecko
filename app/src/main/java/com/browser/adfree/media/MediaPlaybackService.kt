@@ -53,7 +53,13 @@ class MediaPlaybackService : Service() {
             val intent = Intent(context, MediaPlaybackService::class.java).apply {
                 action = ACTION_STOP
             }
-            context.startService(intent)
+            // Must match the start path: a plain startService() from the background
+            // is rejected on O+, which is how the notification outlived the app.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
         }
     }
 
@@ -62,7 +68,6 @@ class MediaPlaybackService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        acquireWakeLock()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -76,6 +81,7 @@ class MediaPlaybackService : Service() {
                 val title = intent?.getStringExtra(EXTRA_TITLE) ?: "AdFree Media Playback"
                 val url = intent?.getStringExtra(EXTRA_URL) ?: "Playing in background"
                 val notification = buildNotification(title, url)
+                acquireWakeLock()
 
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
                     startForeground(
@@ -88,7 +94,15 @@ class MediaPlaybackService : Service() {
                 }
             }
         }
-        return START_STICKY
+        // Sticky would resurrect this after the user dismissed the app.
+        return START_NOT_STICKY
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        releaseWakeLock()
+        stopForeground(STOP_FOREGROUND_REMOVE)
+        stopSelf()
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

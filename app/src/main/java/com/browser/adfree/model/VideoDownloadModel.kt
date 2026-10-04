@@ -39,7 +39,9 @@ data class VideoQualityOption(
     val audioUrl: String? = null,       // Paired high-bitrate audio stream for adaptive video muxing
     val mimeType: String? = null,
     val headers: Map<String, String> = emptyMap(),
-    val alternativeAv1Option: VideoQualityOption? = null
+    val alternativeAv1Option: VideoQualityOption? = null,
+    /** For HLS master variants: the EXT-X-MEDIA audio group this variant plays with. */
+    val audioGroupId: String? = null
 ) {
     val isWebm: Boolean get() = format.equals("WEBM", ignoreCase = true) || mimeType?.contains("webm", ignoreCase = true) == true || codec?.contains("vp", ignoreCase = true) == true || codec?.contains("opus", ignoreCase = true) == true
 }

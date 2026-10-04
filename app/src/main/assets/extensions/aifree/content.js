@@ -433,6 +433,16 @@ function initUniversalMediaSniffer() {
     function reportMedia(videoData) {
         if (!videoData || !videoData.qualities || videoData.qualities.length === 0) return;
         try {
+            if (!videoData.headers) {
+                const host = window.location.hostname;
+                const isYouTube = /(^|\.)youtube\.com$|(^|\.)youtu\.be$/.test(host);
+                if (!isYouTube) {
+                    videoData.headers = {
+                        Referer: window.location.href,
+                        Origin: window.location.origin
+                    };
+                }
+            }
             if (browser.runtime && browser.runtime.sendMessage) {
                 browser.runtime.sendMessage({
                     action: "video_detected",
@@ -491,10 +501,6 @@ function initUniversalMediaSniffer() {
                     const mime = f.mimeType || "";
                     if (mime.startsWith("audio/")) {
                         let streamUrl = f.url || "";
-                        if (!streamUrl && (f.signatureCipher || f.cipher)) {
-                            const params = new URLSearchParams(f.signatureCipher || f.cipher);
-                            streamUrl = params.get("url") || "";
-                        }
                         if (streamUrl && streamUrl.startsWith("http")) {
                             if (!bestAudioUrl || mime.includes("mp4") || mime.includes("m4a")) {
                                 bestAudioUrl = streamUrl;
@@ -507,11 +513,6 @@ function initUniversalMediaSniffer() {
                 allFormats.forEach(f => {
                     if (!f) return;
                     let streamUrl = f.url || "";
-                    if (!streamUrl && (f.signatureCipher || f.cipher)) {
-                        const cipher = f.signatureCipher || f.cipher;
-                        const params = new URLSearchParams(cipher);
-                        streamUrl = params.get("url") || "";
-                    }
                     if (streamUrl && streamUrl.startsWith("http")) {
                         const mime = f.mimeType || "";
                         const isAudio = mime.startsWith("audio/");
@@ -552,17 +553,15 @@ function initUniversalMediaSniffer() {
                 const thumb = (vDetails.thumbnail && vDetails.thumbnail.thumbnails && vDetails.thumbnail.thumbnails.slice(-1)[0]?.url) ||
                               (vDetails.videoId ? `https://i.ytimg.com/vi/${vDetails.videoId}/hqdefault.jpg` : null);
 
-                if (streamList.length > 0) {
-                    reportMedia({
-                        pageUrl: window.location.href,
-                        title: vDetails.title || document.title.replace(" - YouTube", "").trim(),
-                        thumbnail: thumb,
-                        durationSeconds: parseInt(vDetails.lengthSeconds || "0", 10),
-                        sourceDomain: "youtube.com",
-                        qualities: streamList
-                    });
-                    return true;
-                }
+                reportMedia({
+                    pageUrl: window.location.href,
+                    title: vDetails.title || document.title.replace(" - YouTube", "").trim(),
+                    thumbnail: thumb,
+                    durationSeconds: parseInt(vDetails.lengthSeconds || "0", 10),
+                    sourceDomain: "youtube.com",
+                    qualities: streamList
+                });
+                return true;
             }
         } catch(e) {}
         return false;

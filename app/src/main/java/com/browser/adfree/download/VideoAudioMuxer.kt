@@ -21,31 +21,115 @@ import android.media.MediaCodec
 import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
+import android.os.Build
 import android.util.Log
 import java.io.File
 import java.nio.ByteBuffer
 
+/**
+ * Lossless remuxing of separately downloaded media streams.
+ *
+ * Container selection follows the official AOSP MediaMuxer capability matrix:
+ *
+ * | Codec | MP4 | WebM | minSdk |
+ * |-------|-----|------|--------|
+ * | AVC (H.264) / MPEG-4 / H.263 | yes | -   | 16 |
+ * | HEVC                           | yes | -   | 24 |
+ * | AAC / AMR                      | yes | -   | 16 |
+ * | VP8 / VP9                      | -   | yes | 21 / 24 |
+ * | Vorbis / Opus                  | -   | yes | 21 / 29 |
+ * | AV1| yes | -   | 34 |
+ *
+ * Forcing MP4 for a VP9+Opus pair therefore fails on *every* API level, which is
+ * why this object picks the container from the actual codec of each track
+ * instead of from the file name.
+ *
+ * Note: MediaMuxer cannot write MPEG-TS, so an HLS transport stream is read with
+ * MediaExtractor and re-emitted as MP4 (or WebM when it carries VP9/Opus).
+ */
 object VideoAudioMuxer {
 
     private const val TAG = "VideoAudioMuxer"
 
+    /** Target container for the remuxed output. */
+    enum class Container(val extension: String, val mimeType: String) {
+        MP4("mp4", "video/mp4"),
+        WEBM("webm", "video/webm");
+
+        companion object {
+            fun forExtension(ext: String): Container =
+                if (ext.lowercase().removePrefix(".") == "webm") WEBM else MP4
+        }
+    }
+
+    sealed class Result {
+        /** Both streams were combined into a single playable file. */
+        data class Success(val file: File, val container: Container) : Result()
+
+        /**
+         * No single container can hold this codec pair. Both streams were written
+         * out separately and correctly named for their own codec, so the user
+         * still receives playable media instead of a silent file.
+         */
+        data class Split(val videoFile: File?, val audioFile: File?, val reason: String) : Result()
+
+        /** Nothing usable could be produced. */
+        data class Failure(val reason: String) : Result()
+    }
+
+    private fun MediaFormat.mime(): String =
+        runCatching { getString(MediaFormat.KEY_MIME) }.getOrNull().orEmpty()
+
+    /** True when this codec may legally be carried by the given container on this OS. */
+    private fun supports(container: Container, mime: String): Boolean {
+        val m = mime.lowercase()
+        return when (container) {
+            Container.MP4 -> when {
+                m == "video/avc" || m == "video/hevc" || m == "video/mpeg4" ||
+                    m == "video/3gpp" || m == "video/h263" -> true
+                m == "audio/mp4a-latm" || m.startsWith("audio/amr") -> true
+                // AV1 in MP4 only became available in MediaMuxer on Android 14.
+                m == "video/av01" -> Build.VERSION.SDK_INT >= 34
+                else -> false
+            }
+            Container.WEBM -> when {
+                m.startsWith("video/x-vnd.on2.vp8") || m.startsWith("video/x-vnd.on2.vp9") ||
+                    m == "video/vp8" || m == "video/vp9" -> true
+                m == "audio/opus" || m == "audio/vorbis" -> true
+                else -> false
+            }
+        }
+    }
+
+    private fun allContainers(): List<Container> = listOf(Container.MP4, Container.WEBM)
+
+    /** The container that can carry *both* tracks, or null when there is none. */
+    private fun pickContainer(videoMime: String, audioMime: String): Container? =
+        allContainers().firstOrNull { supports(it, videoMime) && supports(it, audioMime) }
+
+    /** The container a lone track can be written to. */
+    private fun nativeContainerFor(mime: String): Container =
+        allContainers().firstOrNull { supports(it, mime) } ?: Container.MP4
+
+    private fun Container.outputFormat(): Int = when (this) {
+        Container.MP4 -> MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4
+        Container.WEBM -> MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM
+    }
+
     /**
-     * Losslessly muxes a separate video stream file and audio stream file into a single MP4 container
-     * using Android's native MediaExtractor and MediaMuxer APIs.
+     * Muxes [videoFile] and [audioFile] into [outputFile].
      *
-     * @param videoFile Raw downloaded video stream file (e.g. 1080p H.264 / AV1)
-     * @param audioFile Raw downloaded audio stream file (e.g. AAC / M4A)
-     * @param outputFile Final destination file (.mp4)
-     * @return true if muxing succeeded, false otherwise
+     * The container is derived from the real codecs of the two inputs, so a
+     * VP9+Opus pair lands in WebM and an AVC+AAC pair lands in MP4. When the pair
+     * has no common container the streams are written out separately and reported
+     * as [Result.Split] — audio is never silently discarded.
      */
-    fun mux(videoFile: File, audioFile: File, outputFile: File): Boolean {
+    fun mux(videoFile: File, audioFile: File, outputFile: File): Result {
         if (!videoFile.exists() || videoFile.length() <= 0) {
-            Log.e(TAG, "Video file missing or empty: ${videoFile.absolutePath}")
-            return false
+            return Result.Failure("Video stream file is missing or empty")
         }
         if (!audioFile.exists() || audioFile.length() <= 0) {
-            Log.e(TAG, "Audio file missing or empty: ${audioFile.absolutePath}")
-            return false
+            return Result.Failure("Audio stream file is missing or empty")
         }
 
         var videoExtractor: MediaExtractor? = null
@@ -53,68 +137,49 @@ object VideoAudioMuxer {
         var muxer: MediaMuxer? = null
 
         try {
-            videoExtractor = MediaExtractor().apply { setDataSource(videoFile.absolutePath) }
-            audioExtractor = MediaExtractor().apply { setDataSource(audioFile.absolutePath) }
-
-            // 1. Locate Video Track
-            var videoTrackIndex = -1
-            var videoFormat: MediaFormat? = null
-            for (i in 0 until videoExtractor.trackCount) {
-                val format = videoExtractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("video/")) {
-                    videoTrackIndex = i
-                    videoFormat = format
-                    break
-                }
+            val ve = MediaExtractor()
+            videoExtractor = ve
+            try {
+                ve.setDataSource(videoFile.absolutePath)
+            } catch (e: Exception) {
+                return Result.Failure("Video stream is not a readable container: ${e.message}")
             }
 
-            // 2. Locate Audio Track
-            var audioTrackIndex = -1
-            var audioFormat: MediaFormat? = null
-            for (i in 0 until audioExtractor.trackCount) {
-                val format = audioExtractor.getTrackFormat(i)
-                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("audio/")) {
-                    audioTrackIndex = i
-                    audioFormat = format
-                    break
-                }
+            val ae = MediaExtractor()
+            audioExtractor = ae
+            try {
+                ae.setDataSource(audioFile.absolutePath)
+            } catch (e: Exception) {
+                return Result.Failure("Audio stream is not a readable container: ${e.message}")
             }
 
-            if (videoTrackIndex == -1 || videoFormat == null) {
-                Log.e(TAG, "No valid video track found in ${videoFile.name}")
-                return false
-            }
+            val videoTrack = ve.findTrack { it.mime().startsWith("video/") }
+                ?: return Result.Failure("No video track in ${videoFile.name}")
+            val audioTrack = ae.findTrack { it.mime().startsWith("audio/") }
+                ?: return Result.Failure("No audio track in ${audioFile.name}")
 
-            if (audioTrackIndex == -1 || audioFormat == null) {
-                Log.e(TAG, "No valid audio track found in ${audioFile.name}")
-                return false
-            }
+            val videoFormat = ve.getTrackFormat(videoTrack)
+            val audioFormat = ae.getTrackFormat(audioTrack)
+            val videoMime = videoFormat.mime()
+            val audioMime = audioFormat.mime()
 
-            videoExtractor.selectTrack(videoTrackIndex)
-            audioExtractor.selectTrack(audioTrackIndex)
+            val container = pickContainer(videoMime, audioMime)
+                ?: return writeSeparately(videoFile, audioFile, videoMime, audioMime, outputFile)
 
-            // 3. Initialize MP4 MediaMuxer
-            if (outputFile.exists()) outputFile.delete()
+            ve.selectTrack(videoTrack)
+            ae.selectTrack(audioTrack)
+
             outputFile.parentFile?.mkdirs()
+            if (outputFile.exists()) outputFile.delete()
 
-            muxer = MediaMuxer(outputFile.absolutePath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
-            val muxerVideoTrack = muxer.addTrack(videoFormat)
-            val muxerAudioTrack = muxer.addTrack(audioFormat)
-            muxer.start()
+            val m = MediaMuxer(outputFile.absolutePath, container.outputFormat())
+            muxer = m
 
-            val maxVideoBuffer = try {
-                videoFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
-            } catch (e: Exception) {
-                4 * 1024 * 1024
-            }
-            val maxAudioBuffer = try {
-                audioFormat.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
-            } catch (e: Exception) {
-                1024 * 1024
-            }
-            val bufferSize = maxOf(maxVideoBuffer, maxAudioBuffer, 4 * 1024 * 1024)
+            val muxerVideoTrack = m.addTrack(videoFormat)
+            val muxerAudioTrack = m.addTrack(audioFormat)
+            m.start()
+
+            val bufferSize = maxOf(maxInputSize(videoFormat), maxInputSize(audioFormat), 4 * 1024 * 1024)
             val videoBuffer = ByteBuffer.allocateDirect(bufferSize)
             val audioBuffer = ByteBuffer.allocateDirect(bufferSize)
             val bufferInfo = MediaCodec.BufferInfo()
@@ -123,73 +188,231 @@ object VideoAudioMuxer {
             var lastAudioPts = -1L
             var videoDone = false
             var audioDone = false
+            var samplesWritten = 0
 
-            // 4. Interleaved Sample Muxing (strictly chronological PTS order)
             while (!videoDone || !audioDone) {
-                val videoTime = if (!videoDone) videoExtractor.sampleTime else Long.MAX_VALUE
-                val audioTime = if (!audioDone) audioExtractor.sampleTime else Long.MAX_VALUE
+                val videoTime = if (videoDone) Long.MAX_VALUE else ve.sampleTime
+                val audioTime = if (audioDone) Long.MAX_VALUE else ae.sampleTime
 
-                if (videoTime == -1L) videoDone = true
-                if (audioTime == -1L) audioDone = true
-
+                if (!videoDone && videoTime <= -1L) videoDone = true
+                if (!audioDone && audioTime <= -1L) audioDone = true
                 if (videoDone && audioDone) break
 
                 if (!videoDone && (audioDone || videoTime <= audioTime)) {
                     bufferInfo.offset = 0
-                    bufferInfo.size = videoExtractor.readSampleData(videoBuffer, 0)
+                    bufferInfo.size = ve.readSampleData(videoBuffer, 0)
                     if (bufferInfo.size < 0) {
                         videoDone = true
                     } else {
-                        val sampleTime = videoExtractor.sampleTime
-                        bufferInfo.presentationTimeUs = if (sampleTime <= lastVideoPts) lastVideoPts + 500L else sampleTime
+                        val pts = ve.sampleTime
+                        bufferInfo.presentationTimeUs = if (pts <= lastVideoPts) lastVideoPts + PTS_STEP_US else pts
                         lastVideoPts = bufferInfo.presentationTimeUs
-                        bufferInfo.flags = videoExtractor.sampleFlags
-                        muxer.writeSampleData(muxerVideoTrack, videoBuffer, bufferInfo)
-                        videoExtractor.advance()
+                        bufferInfo.flags = ve.sampleFlags
+                        m.writeSampleData(muxerVideoTrack, videoBuffer, bufferInfo)
+                        ve.advance()
+                        samplesWritten++
                     }
-                } else if (!audioDone) {
+                } else {
                     bufferInfo.offset = 0
-                    bufferInfo.size = audioExtractor.readSampleData(audioBuffer, 0)
+                    bufferInfo.size = ae.readSampleData(audioBuffer, 0)
                     if (bufferInfo.size < 0) {
                         audioDone = true
                     } else {
-                        val sampleTime = audioExtractor.sampleTime
-                        bufferInfo.presentationTimeUs = if (sampleTime <= lastAudioPts) lastAudioPts + 500L else sampleTime
+                        val pts = ae.sampleTime
+                        bufferInfo.presentationTimeUs = if (pts <= lastAudioPts) lastAudioPts + PTS_STEP_US else pts
                         lastAudioPts = bufferInfo.presentationTimeUs
-                        bufferInfo.flags = audioExtractor.sampleFlags
-                        muxer.writeSampleData(muxerAudioTrack, audioBuffer, bufferInfo)
-                        audioExtractor.advance()
+                        bufferInfo.flags = ae.sampleFlags
+                        m.writeSampleData(muxerAudioTrack, audioBuffer, bufferInfo)
+                        ae.advance()
+                        samplesWritten++
                     }
                 }
             }
 
-            try {
-                muxer.stop()
-            } catch (e: Exception) {
-                Log.w(TAG, "MediaMuxer.stop warning: ${e.message}")
+            if (samplesWritten == 0) {
+                runCatching { m.stop() }
+                runCatching { m.release() }
+                muxer = null
+                outputFile.delete()
+                return Result.Failure("Muxer produced no samples")
             }
-            muxer.release()
+
+            try {
+                m.stop()
+            } catch (e: Exception) {
+                Log.w(TAG, "MediaMuxer.stop() failed: ${e.message}")
+                runCatching { m.release() }
+                muxer = null
+                outputFile.delete()
+                return Result.Failure("Muxer could not finalise the file: ${e.message}")
+            }
+            m.release()
             muxer = null
 
-            if (outputFile.exists() && outputFile.length() > 0) {
-                Log.i(TAG, "Successfully muxed ${outputFile.name} (${outputFile.length()} bytes)")
-                return true
-            } else {
-                videoFile.copyTo(outputFile, overwrite = true)
-                return outputFile.exists() && outputFile.length() > 0
+            if (!outputFile.exists() || outputFile.length() <= 0) {
+                outputFile.delete()
+                return Result.Failure("Muxer produced an empty file")
             }
+
+            Log.i(TAG, "Muxed $videoMime + $audioMime into ${outputFile.name} (${container.name})")
+            return Result.Success(outputFile, container)
+
         } catch (e: Exception) {
-            Log.e(TAG, "Muxing exception: ${e.message}, falling back to direct video stream", e)
-            return try {
-                videoFile.copyTo(outputFile, overwrite = true)
-                outputFile.exists() && outputFile.length() > 0
-            } catch (ex: Exception) {
-                false
-            }
+            Log.e(TAG, "Muxing failed for ${videoFile.name} + ${audioFile.name}", e)
+            runCatching { outputFile.delete() }
+            return Result.Failure("Muxing failed: ${e.message}")
         } finally {
-            try { videoExtractor?.release() } catch (e: Exception) {}
-            try { audioExtractor?.release() } catch (e: Exception) {}
-            try { muxer?.release() } catch (e: Exception) {}
+            runCatching { videoExtractor?.release() }
+            runCatching { audioExtractor?.release() }
+            runCatching { muxer?.release() }
         }
+    }
+
+    /**
+     * When no container can carry both streams, emit them as two individually
+     * valid files rather than producing a silent video.
+     */
+    private fun writeSeparately(
+        videoFile: File,
+        audioFile: File,
+        videoMime: String,
+        audioMime: String,
+        outputFile: File
+    ): Result {
+        val parent = outputFile.parentFile ?: return Result.Failure("Cannot resolve output directory")
+        val base = outputFile.nameWithoutExtension
+        val videoTarget = File(parent, "$base.video.${nativeContainerFor(videoMime).extension}")
+        val audioTarget = File(parent, "$base.audio.${nativeContainerFor(audioMime).extension}")
+
+        return try {
+            videoFile.copyTo(videoTarget, overwrite = true)
+            audioFile.copyTo(audioTarget, overwrite = true)
+            Result.Split(
+                videoFile = videoTarget.takeIf { it.exists() && it.length() > 0 },
+                audioFile = audioTarget.takeIf { it.exists() && it.length() > 0 },
+                reason = "$videoMime video and $audioMime audio cannot share one file format; " +
+                    "saved as ${videoTarget.name} and ${audioTarget.name}"
+            )
+        } catch (e: Exception) {
+            Result.Failure("Could not write streams separately: ${e.message}")
+        }
+    }
+
+    /**
+     * Re-wraps a single elementary stream (for example concatenated HLS
+     * transport-stream segments) into a real container instead of renaming the
+     * raw bytes. Picks the first container that can carry every track.
+     */
+    fun remux(sourceFile: File, outputFile: File, preferred: Container? = null): Result {
+        if (!sourceFile.exists() || sourceFile.length() <= 0) {
+            return Result.Failure("Source stream is missing or empty")
+        }
+
+        val extractor = MediaExtractor()
+        val tracks: List<Pair<Int, MediaFormat>>
+        try {
+            extractor.setDataSource(sourceFile.absolutePath)
+        } catch (e: Exception) {
+            runCatching { extractor.release() }
+            return Result.Failure("Stream is not a readable container: ${e.message}")
+        }
+
+        return try {
+            val formats = (0 until extractor.trackCount).map { extractor.getTrackFormat(it) }
+            if (formats.isEmpty()) return Result.Failure("Stream contains no tracks")
+
+            val candidates = if (preferred != null) listOf(preferred) else allContainers()
+            val container = candidates.firstOrNull { candidate ->
+                formats.all { supports(candidate, it.mime()) }
+            } ?: return Result.Failure(
+                "No output format supports ${formats.joinToString { it.mime() }}"
+            )
+
+            val selected = formats.withIndex().filter { supports(container, it.value.mime()) }
+            if (selected.isEmpty()) return Result.Failure("No usable tracks to write")
+
+            outputFile.parentFile?.mkdirs()
+            if (outputFile.exists()) outputFile.delete()
+
+            val m = MediaMuxer(outputFile.absolutePath, container.outputFormat())
+            var samples = 0
+            try {
+                val mapped = selected.map { (index, format) -> m.addTrack(format) to index }
+                m.start()
+
+                val buffer = ByteBuffer.allocateDirect(
+                    maxOf(selected.maxOf { maxInputSize(it.value) }, 4 * 1024 * 1024)
+                )
+                val bufferInfo = MediaCodec.BufferInfo()
+                val lastPts = mutableMapOf<Int, Long>()
+
+                for ((muxTrack, extractorTrack) in mapped) {
+                    extractor.selectTrack(extractorTrack)
+                    while (true) {
+                        bufferInfo.offset = 0
+                        bufferInfo.size = extractor.readSampleData(buffer, 0)
+                        if (bufferInfo.size < 0) break
+                        val pts = extractor.sampleTime
+                        val previous = lastPts[muxTrack] ?: -1L
+                        bufferInfo.presentationTimeUs = if (pts <= previous) previous + PTS_STEP_US else pts
+                        lastPts[muxTrack] = bufferInfo.presentationTimeUs
+                        bufferInfo.flags = extractor.sampleFlags
+                        m.writeSampleData(muxTrack, buffer, bufferInfo)
+                        extractor.advance()
+                        samples++
+                    }
+                    extractor.unselectTrack(extractorTrack)
+                }
+
+                if (samples == 0) {
+                    runCatching { m.stop() }
+                    outputFile.delete()
+                    return Result.Failure("Remuxer produced no samples")
+                }
+                try {
+                    m.stop()
+                } catch (e: Exception) {
+                    outputFile.delete()
+                    return Result.Failure("Remuxer could not finalise the file: ${e.message}")
+                }
+            } finally {
+                runCatching { m.release() }
+            }
+
+            if (!outputFile.exists() || outputFile.length() <= 0) {
+                outputFile.delete()
+                return Result.Failure("Remuxer produced an empty file")
+            }
+            Log.i(
+                TAG,
+                "Remuxed ${sourceFile.name} into ${outputFile.name} (${container.name}) " +
+                    "sourceTracks=[${formats.joinToString(",") { it.mime() }}] " +
+                    "keptTracks=[${selected.joinToString(",") { it.value.mime() }}]"
+            )
+            Result.Success(outputFile, container)
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Remux failed for ${sourceFile.name}", e)
+            runCatching { outputFile.delete() }
+            Result.Failure("Remux failed: ${e.message}")
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
+    private const val PTS_STEP_US = 500L
+
+    private fun maxInputSize(format: MediaFormat): Int = try {
+        format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+    } catch (e: Exception) {
+        2 * 1024 * 1024
+    }
+
+    private fun MediaExtractor.findTrack(predicate: (MediaFormat) -> Boolean): Int? {
+        for (i in 0 until trackCount) {
+            val format = try { getTrackFormat(i) } catch (e: Exception) { continue }
+            if (predicate(format)) return i
+        }
+        return null
     }
 }

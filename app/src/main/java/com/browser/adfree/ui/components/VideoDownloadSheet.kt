@@ -56,6 +56,15 @@ private enum class DownloadMediaType {
     AUDIO
 }
 
+/**
+ * True when the extractor flagged the stream as carrying no usable audio.
+ * Selecting one of these silently produces a file with no sound.
+ */
+private fun looksSilent(option: VideoQualityOption): Boolean =
+    option.label.contains("Video only", ignoreCase = true) ||
+        option.label.contains("Audio unknown", ignoreCase = true) ||
+        option.label.contains("no audio", ignoreCase = true)
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun VideoDownloadSheet(
@@ -93,7 +102,11 @@ fun VideoDownloadSheet(
     var selectedOption by remember(selectedTab, video, videoQualities, audioQualities, preferAv1) {
         mutableStateOf(
             if (selectedTab == DownloadMediaType.VIDEO) {
+                // Prefer a progressive stream: it already contains both tracks, so it
+                // needs no muxing and cannot end up silent or split into two files.
                 (if (preferAv1) videoQualities.firstOrNull { it.isAv1 } else null)
+                    ?: videoQualities.firstOrNull { it.isProgressive }
+                    ?: videoQualities.firstOrNull { !looksSilent(it) }
                     ?: videoQualities.firstOrNull()
                     ?: video.qualities.firstOrNull()
             } else {
@@ -359,7 +372,10 @@ fun VideoDownloadSheet(
                                 .padding(horizontal = 14.dp, vertical = 11.dp)
                         ) {
                             // Left: Radio + Label + Codec
-                            Row(verticalAlignment = Alignment.CenterVertically) {
+                            Row(
+                                modifier = Modifier.weight(1f),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
                                 RadioButton(
                                     selected = isSelected,
                                     onClick = { selectedOption = option },
@@ -423,6 +439,23 @@ fun VideoDownloadSheet(
                                             fontSize = 11.sp
                                         )
                                     }
+
+                                    val hostPath = remember(option.url) {
+                                        val withoutQuery = option.url.substringBefore("?")
+                                        val host = try { java.net.URI(withoutQuery).host ?: "" } catch (e: Exception) { "" }
+                                        val path = try { java.net.URI(withoutQuery).path ?: "" } catch (e: Exception) { "" }
+                                        val tail = path.substringAfterLast("/")
+                                        if (tail.length >= 18) "$host/…/$tail" else if (path.length > 1) "$host$path" else host
+                                    }
+                                    if (hostPath.isNotBlank()) {
+                                        Text(
+                                            text = hostPath,
+                                            color = TextSecondary.copy(alpha = 0.75f),
+                                            fontSize = 10.sp,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 }
                             }
 
@@ -444,6 +477,77 @@ fun VideoDownloadSheet(
                             }
                         }
                     }
+                }
+            }
+
+            // Exactly what will be downloaded: the page the stream was found on
+            // and the URL the current selection points at.
+            if (video.pageUrl.isNotBlank() || !selectedOption?.url.isNullOrBlank()) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(SurfaceElevated)
+                        .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    if (video.pageUrl.isNotBlank()) {
+                        Text(
+                            text = "Page: ${video.pageUrl}",
+                            color = TextSecondary,
+                            fontSize = 10.sp,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    selectedOption?.url?.let { streamUrl ->
+                        if (streamUrl.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(3.dp))
+                            Text(
+                                text = "Stream: $streamUrl",
+                                color = AccentCyan,
+                                fontSize = 10.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Adaptive YouTube formats answer 403 after the first ~minute without a
+            // PO token, so say so up front rather than after a truncated download.
+            selectedOption?.let { sel ->
+                if (sel.url.contains("googlevideo.com") && !sel.isProgressive && !sel.isAudioOnly) {
+                    val combined = videoQualities.firstOrNull {
+                        it.isProgressive && !it.isAudioOnly && !it.isWebm && it.id != sel.id
+                    }
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = if (combined != null) {
+                            "High quality streams here are PO-token gated and stop after ~1 min. " +
+                                "Download will use the ${combined.resolution} stream with audio instead."
+                        } else {
+                            "High quality streams here are PO-token gated and may stop after ~1 min."
+                        },
+                        color = WarningAmber,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
+                }
+            }
+
+            // A stream with no audio track downloads fine and plays back in silence,
+            // which reads as a broken player; say it before the tap instead.
+            selectedOption?.let { sel ->
+                if (looksSilent(sel) && !sel.isAudioOnly) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "This stream was detected without an audio track, so the file will play silently. Pick a \"Video + Audio\" or \"With Audio\" option instead.",
+                        color = WarningAmber,
+                        fontSize = 11.sp,
+                        lineHeight = 15.sp
+                    )
                 }
             }
 
@@ -482,15 +586,49 @@ fun VideoDownloadSheet(
                 Button(
                     onClick = {
                         selectedOption?.let { opt ->
+                            // Adaptive YouTube formats are PO-token gated: they serve about
+                            // a minute and then answer 403, which lands as a truncated file.
+                            // Swap to the combined progressive stream, which always completes
+                            // with its audio.
+                            val combined = if (opt.url.contains("googlevideo.com") &&
+                                !opt.isProgressive && !opt.isAudioOnly
+                            ) {
+                                videoQualities.firstOrNull {
+                                    it.isProgressive && !it.isAudioOnly &&
+                                        !it.isWebm && it.id != opt.id
+                                }
+                            } else null
+                            if (combined != null) {
+                                selectedOption = combined
+                                Toast.makeText(
+                                    context,
+                                    "Higher qualities need a PO token here — downloading the ${combined.resolution} combined stream instead",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                            val chosen = combined ?: opt
+
                             // Check if an AV1 variant exists and user hasn't chosen
-                            val matchingAv1 = videoQualities.firstOrNull { it.resolution == opt.resolution && it.isAv1 && it.id != opt.id }
-                            if (!preferAv1 && matchingAv1 != null && !opt.isAv1) {
-                                pendingDownloadOption = opt
+                            val matchingAv1 = if (combined != null) null
+                            else videoQualities.firstOrNull { it.resolution == chosen.resolution && it.isAv1 && it.id != chosen.id }
+                            if (!preferAv1 && matchingAv1 != null && !chosen.isAv1) {
+                                pendingDownloadOption = chosen
                                 showAv1ChoiceDialog = true
                             } else {
-                                val ext = if (opt.format == "M3U8") "m3u8" else if (opt.format == "WEBM") "webm" else if (opt.isAudioOnly) "m4a" else "mp4"
-                                val filename = VideoQualityParser.sanitizeFileName(video.title, opt.label, ext)
-                                onDownload(opt, filename)
+                                val ext = if (chosen.format == "M3U8") {
+                                    "m3u8"
+                                } else if (chosen.isAudioOnly) {
+                                    if (chosen.format == "WEBM" || chosen.codec?.contains("opus", ignoreCase = true) == true) "webm"
+                                    else if (chosen.format == "MP3") "mp3"
+                                    else "m4a"
+                                } else if (chosen.format == "WEBM") {
+                                    "webm"
+                                } else {
+                                    "mp4"
+                                }
+                                val cleanLabel = chosen.label.replace("•", "-").replace(Regex("\\s+"), " ")
+                                val filename = VideoQualityParser.sanitizeFileName(video.title, cleanLabel, ext)
+                                onDownload(chosen, filename)
                                 onDismiss()
                             }
                         }
@@ -553,7 +691,8 @@ fun VideoDownloadSheet(
                     onClick = {
                         val target = av1Opt ?: standardOpt
                         val ext = if (target.format == "WEBM") "webm" else "mp4"
-                        val filename = VideoQualityParser.sanitizeFileName(video.title, "${target.label}_AV1", ext)
+                        val cleanLabel = target.label.replace("•", "-").replace(Regex("\\s+"), " ")
+                        val filename = VideoQualityParser.sanitizeFileName(video.title, "${cleanLabel}_AV1", ext)
                         onDownload(target, filename)
                         showAv1ChoiceDialog = false
                         onDismiss()
@@ -568,7 +707,8 @@ fun VideoDownloadSheet(
                 TextButton(
                     onClick = {
                         val ext = if (standardOpt.format == "WEBM") "webm" else "mp4"
-                        val filename = VideoQualityParser.sanitizeFileName(video.title, standardOpt.label, ext)
+                        val cleanLabel = standardOpt.label.replace("•", "-").replace(Regex("\\s+"), " ")
+                        val filename = VideoQualityParser.sanitizeFileName(video.title, cleanLabel, ext)
                         onDownload(standardOpt, filename)
                         showAv1ChoiceDialog = false
                         onDismiss()

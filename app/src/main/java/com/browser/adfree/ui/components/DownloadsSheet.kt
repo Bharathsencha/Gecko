@@ -260,11 +260,23 @@ fun DownloadItemRow(
                     )
                 }
                 DownloadStatus.FAILED -> {
-                    Text(
-                        text = "Failed",
-                        color = DangerRed,
-                        fontSize = 11.sp
-                    )
+                    Column {
+                        Text(
+                            text = "Failed",
+                            color = DangerRed,
+                            fontSize = 11.sp
+                        )
+                        item.errorMessage?.takeIf { it.isNotBlank() }?.let { reason ->
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = reason,
+                                color = TextSecondary,
+                                fontSize = 11.sp,
+                                maxLines = 4,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
                 }
                 DownloadStatus.CANCELLED -> {
                     Text(

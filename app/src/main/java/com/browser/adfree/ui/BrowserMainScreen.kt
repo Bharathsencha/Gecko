@@ -44,6 +44,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.padding
 import androidx.compose.ui.unit.dp
 import com.browser.adfree.download.BrowserDownloadManager
+import com.browser.adfree.download.VideoQualityParser
 import com.browser.adfree.model.ArticleData
 import com.browser.adfree.model.DownloadStatus
 import com.browser.adfree.storage.BrowserPreferencesRepository
@@ -496,23 +497,31 @@ fun BrowserMainScreen(
 
         // Universal Video Downloader Sheet
         if (showVideoDownloadSheet && activeTab != null && activeTab.detectedVideos.isNotEmpty()) {
-            val primaryVideo = activeTab.detectedVideos.first()
+            // Entries from other pages can still be in the list; show the one the
+            // user is actually looking at, so the sheet header matches the tab.
+            val primaryVideo = activeTab.detectedVideos.firstOrNull { VideoQualityParser.samePage(it.pageUrl, activeTab.url) }
+                ?: activeTab.detectedVideos.first()
             VideoDownloadSheet(
                 video = primaryVideo,
                 preferAv1 = preferencesRepo.preferAv1Codec,
                 showWebm = preferencesRepo.showWebmFormats,
                 onDownload = { option, filename ->
                     val extraHeaders = mutableMapOf<String, String>()
-                    if (activeTab.url.isNotBlank()) {
+                    if (option.headers.isNotEmpty()) {
+                        extraHeaders.putAll(option.headers)
+                    }
+                    val isGooglevideo = option.url.contains("googlevideo.com")
+                    if (!isGooglevideo && activeTab.url.isNotBlank()) {
                         extraHeaders["Referer"] = activeTab.url
                     }
                     downloadManager.startDownload(
                         url = option.url,
                         customFileName = filename,
                         mimeType = option.mimeType,
-                        referer = activeTab.url,
+                        referer = if (isGooglevideo) null else activeTab.url,
                         extraHeaders = extraHeaders,
-                        audioUrl = option.audioUrl
+                        audioUrl = option.audioUrl,
+                        format = option.format
                     )
                 },
                 onDismiss = { showVideoDownloadSheet = false }

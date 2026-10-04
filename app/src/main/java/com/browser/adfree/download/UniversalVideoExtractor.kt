@@ -54,6 +54,35 @@ object UniversalVideoExtractor {
     private val cache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, DetectedVideo>>()
     private val CACHE_TTL_MS = 3 * 60 * 1000L
 
+    // youtubedl-android shares one stdout pipe: two concurrent runs kill each
+    // other with "I/O operation on closed file". One extractor at a time.
+    private val ytDlpLock = java.util.concurrent.locks.ReentrantLock(true)
+
+    /**
+     * True when a yt-dlp pass can plausibly produce something.
+     *
+     * Feeding it search engines, site roots and listing pages costs a full
+     * network round trip per navigation and yields either "Unsupported URL" or a
+     * page-wide fan-out, which is what cooked the device. The network sniffer
+     * still reports media found on those pages.
+     */
+    private fun shouldRunYtDlp(pageUrl: String): Boolean {
+        val lower = pageUrl.lowercase()
+        if (Regex("(^|\\.)(duckduckgo|google|bing|yahoo|ecosia|startpage)\\.").containsMatchIn(lower)) return false
+        if (Regex("[?&](q|query|search_query|s|search|text)=([^&]*)").containsMatchIn(lower)) return false
+
+        val path = try {
+            URI(pageUrl).path ?: ""
+        } catch (e: Exception) {
+            ""
+        }
+        if (path.isBlank() || path == "/") return false
+        return !Regex(
+            "^/(search|results|find|browse|categories|category|tags|channels|channels?|members|playlists|playlist)/",
+            RegexOption.IGNORE_CASE
+        ).containsMatchIn(path)
+    }
+
     suspend fun extract(pageUrl: String, context: Context): DetectedVideo? = withContext(Dispatchers.IO) {
         if (pageUrl.isBlank() || pageUrl.startsWith("about:") || pageUrl == "about:home") {
             return@withContext null
@@ -69,8 +98,22 @@ object UniversalVideoExtractor {
             init(context)
         }
 
-        // Tier 1: yt-dlp Engine (youtubedl-android) supporting 1,800+ websites
-        if (isInitialized) {
+        // Tier 1: YouTube Specialized In-Page / InnerTube Extractor (Instantaneous & Unciphered)
+        val isYouTube = pageUrl.contains("youtube.com") || pageUrl.contains("youtu.be")
+        if (isYouTube) {
+            val cookies = BrowserDownloadManager.cookieHeaderFor(pageUrl)
+            val ytResult = YouTubeStreamExtractor.extract(pageUrl, cookies)
+            if (ytResult != null && ytResult.qualities.isNotEmpty()) {
+                Log.i(TAG, "Successfully extracted via YouTubeStreamExtractor: ${ytResult.title}")
+                // Without cookies the PO-token-free TVHTML5 tier never ran, so the
+                // result is worth retrying once the cookie prefetch has landed.
+                if (cookies != null) cache[pageUrl] = Pair(System.currentTimeMillis(), ytResult)
+                return@withContext ytResult
+            }
+        }
+
+        // Tier 2: yt-dlp Engine (youtubedl-android) supporting 1,800+ websites
+        if (isInitialized && shouldRunYtDlp(pageUrl)) {
             val ytDlpResult = extractViaYtDlp(pageUrl)
             if (ytDlpResult != null && ytDlpResult.qualities.isNotEmpty()) {
                 Log.i(TAG, "Successfully extracted via yt-dlp: ${ytDlpResult.title} (${ytDlpResult.qualities.size} streams)")
@@ -79,21 +122,12 @@ object UniversalVideoExtractor {
             }
         }
 
-        // Tier 2: YouTube Specialized In-Page / InnerTube Extractor fallback for YouTube URLs
-        val isYouTube = pageUrl.contains("youtube.com") || pageUrl.contains("youtu.be")
-        if (isYouTube) {
-            val ytResult = YouTubeStreamExtractor.extract(pageUrl)
-            if (ytResult != null && ytResult.qualities.isNotEmpty()) {
-                Log.i(TAG, "Successfully extracted via YouTubeStreamExtractor: ${ytResult.title}")
-                cache[pageUrl] = Pair(System.currentTimeMillis(), ytResult)
-                return@withContext ytResult
-            }
-        }
-
         return@withContext null
     }
 
     private fun extractViaYtDlp(pageUrl: String): DetectedVideo? {
+        ytDlpLock.lock()
+        try {
         return try {
             val request = YoutubeDLRequest(pageUrl).apply {
                 addOption("--no-playlist")
@@ -112,8 +146,9 @@ object UniversalVideoExtractor {
                 // If direct stream URL is provided on VideoInfo itself
                 val directUrl = videoInfo.url
                 if (!directUrl.isNullOrBlank() && directUrl.startsWith("http")) {
-                    val isM3u8 = directUrl.contains(".m3u8")
-                    val isWebm = directUrl.contains(".webm")
+                    val cleanDirectUrl = directUrl.replace(Regex("&range=[^&]+"), "")
+                    val isM3u8 = cleanDirectUrl.contains(".m3u8")
+                    val isWebm = cleanDirectUrl.contains(".webm")
                     val format = if (isM3u8) "M3U8" else if (isWebm) "WEBM" else "MP4"
                     return DetectedVideo(
                         pageUrl = pageUrl,
@@ -127,12 +162,13 @@ object UniversalVideoExtractor {
                                 resolution = "Auto",
                                 codec = if (isWebm) "VP9" else "H.264",
                                 format = format,
-                                url = directUrl,
+                                url = cleanDirectUrl,
                                 estimatedSizeBytes = 0L,
                                 isAudioOnly = false,
                                 isAv1 = false,
                                 isProgressive = !isM3u8,
-                                mimeType = if (isM3u8) "application/x-mpegURL" else "video/mp4"
+                                mimeType = if (isM3u8) "application/x-mpegURL" else "video/mp4",
+                                headers = videoInfo.httpHeaders ?: emptyMap()
                             )
                         )
                     )
@@ -153,24 +189,36 @@ object UniversalVideoExtractor {
                 val bitrate = f.abr
                 (if (isAac) 10000 else 0) + bitrate.toInt()
             }
-            val bestAudioUrl = bestAudioFormat?.url
+            val bestAudioUrl = bestAudioFormat?.url?.replace(Regex("&range=[^&]+"), "")
 
             val qualityList = mutableListOf<VideoQualityOption>()
 
             for (f in rawFormats) {
                 val streamUrl = f.url
                 if (streamUrl.isNullOrBlank() || !streamUrl.startsWith("http")) continue
+                val cleanStreamUrl = streamUrl.replace(Regex("&range=[^&]+"), "")
 
-                val vcodec = f.vcodec?.lowercase() ?: "none"
-                val acodec = f.acodec?.lowercase() ?: "none"
+                val rawVcodec = f.vcodec?.lowercase()?.trim()
+                val rawAcodec = f.acodec?.lowercase()?.trim()
+                val vcodec = rawVcodec ?: "none"
+                val acodec = rawAcodec ?: "none"
                 val isAudioOnly = (vcodec == "none" || vcodec.isBlank()) && acodec != "none" && acodec.isNotBlank()
                 val isVideoOnly = (acodec == "none" || acodec.isBlank()) && vcodec != "none" && vcodec.isNotBlank()
-                val isProgressive = !isAudioOnly && !isVideoOnly
+                // Unknown codecs mean we cannot promise the stream carries audio.
+                // Calling it progressive produces silent files on DASH/hls sources.
+                val codecsUnknown = !isAudioOnly && !isVideoOnly &&
+                    (rawVcodec == null || rawVcodec == "unknown" || rawVcodec.isBlank()) &&
+                    (rawAcodec == null || rawAcodec == "unknown" || rawAcodec.isBlank())
+                val isProgressive = !isAudioOnly && !isVideoOnly && !codecsUnknown
+                // Paired audio track when this entry is video-only (or unknown and
+                // the source does publish a separate audio format).
+                val pairAudioUrl = if (isVideoOnly || codecsUnknown) bestAudioUrl else null
+                val hasAudio = isAudioOnly || isProgressive || pairAudioUrl != null
 
                 val height = f.height
                 val width = f.width
                 val ext = f.ext?.lowercase() ?: "mp4"
-                val isM3u8 = ext.contains("m3u8") || streamUrl.contains(".m3u8")
+                val isM3u8 = ext.contains("m3u8") || cleanStreamUrl.contains(".m3u8")
                 val isAv1 = vcodec.contains("av01") || vcodec.contains("av1")
                 val isWebm = ext.contains("webm") || vcodec.contains("vp9") || vcodec.contains("vp09")
 
@@ -185,9 +233,16 @@ object UniversalVideoExtractor {
                     "Audio Track ($formatName$abrStr)"
                 } else {
                     val resPrefix = if (height >= 2160) "4K Ultra HD" else if (height >= 1440) "1440p QHD" else if (height >= 1080) "1080p Full HD" else if (height >= 720) "720p HD" else if (height >= 480) "480p SD" else if (height >= 360) "360p" else if (height > 0) "${height}p" else "Video"
-                    val tag = if (isProgressive) "Video + Audio" else "With Audio"
+                    val tag = when {
+                        isProgressive -> "Video + Audio"
+                        hasAudio -> "With Audio"
+                        codecsUnknown -> "Audio unknown"
+                        else -> "Video only"
+                    }
                     "$resPrefix ($formatName • $tag)"
                 }
+
+                val formatHeaders = f.httpHeaders ?: (videoInfo.httpHeaders ?: emptyMap())
 
                 qualityList.add(
                     VideoQualityOption(
@@ -195,13 +250,14 @@ object UniversalVideoExtractor {
                         resolution = resolutionStr,
                         codec = codecName,
                         format = formatName,
-                        url = streamUrl,
+                        url = cleanStreamUrl,
                         estimatedSizeBytes = sizeBytes,
                         isAudioOnly = isAudioOnly,
                         isAv1 = isAv1,
                         isProgressive = isProgressive,
-                        audioUrl = if (isVideoOnly) bestAudioUrl else null,
-                        mimeType = if (isM3u8) "application/x-mpegURL" else if (isWebm) (if (isAudioOnly) "audio/webm" else "video/webm") else (if (isAudioOnly) "audio/mp4" else "video/mp4")
+                        audioUrl = pairAudioUrl,
+                        mimeType = if (isM3u8) "application/x-mpegURL" else if (isWebm) (if (isAudioOnly) "audio/webm" else "video/webm") else (if (isAudioOnly) "audio/mp4" else "video/mp4"),
+                        headers = formatHeaders
                     )
                 )
             }
@@ -221,6 +277,9 @@ object UniversalVideoExtractor {
         } catch (e: Exception) {
             Log.d(TAG, "yt-dlp extraction failed for $pageUrl: ${e.message}")
             null
+        }
+        } finally {
+            ytDlpLock.unlock()
         }
     }
 }
