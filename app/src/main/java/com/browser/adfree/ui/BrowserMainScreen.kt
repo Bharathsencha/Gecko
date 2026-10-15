@@ -277,7 +277,7 @@ fun BrowserMainScreen(
                     label = "mainViewTransition"
                 ) { (_, homeActive) ->
                     if (homeActive) {
-                        SafariHomePage(
+                        StartPage(
                             favorites = favoritesRepo.favorites,
                             preferencesRepo = preferencesRepo,
                             isPrivate = activeTab?.isPrivate ?: false,
@@ -538,7 +538,7 @@ fun BrowserMainScreen(
         ) {
             Box(Modifier.fillMaxSize().blockTouchesBelow()) {
             val article = activeTab?.articleData ?: return@AnimatedVisibility
-            SafariReaderView(
+            ReaderView(
                 article = article,
                 onCloseReader = {
                     activeTab?.isReaderMode = false

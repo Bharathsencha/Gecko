@@ -92,7 +92,7 @@ import java.net.URI
 
 
 @Composable
-fun SafariHomePage(
+fun StartPage(
     favorites: List<FavoriteItem>,
     preferencesRepo: BrowserPreferencesRepository,
     onNavigate: (String) -> Unit,
@@ -442,8 +442,9 @@ private fun brandFill(fav: FavoriteItem): Color = when (fav.builtInType) {
 }
 
 /**
- * Private browsing switch drawn as Firefox's mask: outline mask on a plain
- * tile in normal mode, inverted on a purple tile in private mode.
+ * Private browsing switch. The mask shape is inspired by Firefox's private
+ * browsing icon (https://support.mozilla.org/kb/private-browsing-firefox-android);
+ * it is drawn here from scratch.
  */
 @Composable
 private fun PrivateModeToggle(isPrivate: Boolean, onToggle: () -> Unit) {

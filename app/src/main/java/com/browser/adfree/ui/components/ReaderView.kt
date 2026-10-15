@@ -44,7 +44,7 @@ import com.browser.adfree.model.ReaderFont
 import com.browser.adfree.model.ReaderTheme
 
 @Composable
-fun SafariReaderView(
+fun ReaderView(
     article: ArticleData,
     onCloseReader: () -> Unit,
     modifier: Modifier = Modifier

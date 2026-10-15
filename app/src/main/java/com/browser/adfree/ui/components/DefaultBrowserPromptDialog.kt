@@ -57,21 +57,5 @@ fun DefaultBrowserPromptDialog(
             fontSize = 14.sp,
             lineHeight = 19.sp
         )
-        Point("uBlock Origin and strict tracking protection on every page")
-        Point("Same fingerprint as every other Gecko user")
-        Point("Change it any time in Settings")
-    }
-}
-
-@Composable
-private fun Point(text: String) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
-        androidx.compose.foundation.layout.Box(
-            Modifier
-                .size(8.dp)
-                .brutalBox(fill = AccentCyan, border = BorderSubtle, borderWidth = 1.5.dp, shape = androidx.compose.foundation.shape.RoundedCornerShape(1.dp))
-        )
-        Spacer(Modifier.width(10.dp))
-        Text(text, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }

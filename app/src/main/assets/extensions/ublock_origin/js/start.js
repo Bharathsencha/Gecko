@@ -17,6 +17,11 @@
     along with this program.  If not, see {http://www.gnu.org/licenses/}.
 
     Home: https://github.com/gorhill/uBlock
+
+    MODIFIED by Gibbly Gobbly for the Gecko browser, 15 October 2026:
+    onNetWhitelistReady() always adds two trusted-site directives
+    (search "Gecko AdFree" below). No other file of uBlock Origin was changed.
+    This modified file is distributed under the same GNU GPL v3 or later.
 */
 
 import './vapi-common.js';

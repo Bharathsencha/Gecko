@@ -31,7 +31,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.material.icons.filled.Cyclone
+import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.ContentCut
 import androidx.compose.material.icons.filled.CleaningServices
 import androidx.compose.material.icons.filled.Water
@@ -52,6 +52,7 @@ import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.pow
 import kotlin.math.sin
+import kotlin.math.cos
 import kotlin.random.Random
 
 private val FlameRed = Color(0xFFFF5A3C)
@@ -59,6 +60,10 @@ private val FlameOrange = Color(0xFFFF9A3C)
 private val FlameYellow = Color(0xFFFFD84D)
 
 /**
+ * The one-tap "burn everything" clear button is an idea from DuckDuckGo's Fire
+ * Button (https://duckduckgo.com/duckduckgo-help-pages/privacy/fire-button/).
+ * All animations below are original drawings.
+ *
  * Burn-it-all animation for the clear button, in the app's flat style:
  * three flame walls with ink outlines roll up from the bottom, swallow the
  * screen, [onCovered] runs while nothing underneath is visible (that is when
@@ -110,7 +115,7 @@ fun FireBurnOverlay(
             com.browser.adfree.storage.ClearStyle.FLOOD -> drawFlood(p, t)
             com.browser.adfree.storage.ClearStyle.SWEEP -> drawSweep(p)
             com.browser.adfree.storage.ClearStyle.SHRED -> drawShred(p)
-            com.browser.adfree.storage.ClearStyle.VORTEX -> drawVortex(p, t)
+            com.browser.adfree.storage.ClearStyle.PIXEL -> drawPixel(p)
         }
     }
 }
@@ -291,32 +296,38 @@ private fun DrawScope.drawShred(p: Float) {
     }
 }
 
-/** Vortex: a spinning disc of blocks spirals out to swallow the page, then collapses to a point. */
-private fun DrawScope.drawVortex(p: Float, t: Float) {
-    val center = Offset(size.width / 2, size.height / 2)
-    val maxR = kotlin.math.hypot(size.width / 2, size.height / 2) * 1.05f
-    val grow = (p / COVER_AT).coerceAtMost(1f).ease()
-    val shrink = ((p - COVER_AT) / (1f - COVER_AT)).coerceIn(0f, 1f).ease()
-    val r = maxR * grow * (1f - shrink)
-    if (r <= 1f) return
-    val colors = listOf(Color(0xFFFFD84D), Color(0xFFB49CFF), Color(0xFF7FD8C8), Color(0xFFFFB067))
-    val spin = t * 220f + p * 540f
-    rotate(spin, center) {
-        colors.forEachIndexed { i, c ->
-            drawArc(c, startAngle = i * 90f, sweepAngle = 90f, useCenter = true, topLeft = center - Offset(r, r), size = Size(r * 2, r * 2))
+/**
+ * Pixel: the page is covered cell by cell with chunky 8-bit blocks that pop
+ * in, then the blocks drop out of the bottom one by one.
+ */
+private fun DrawScope.drawPixel(p: Float) {
+    val cols = 9
+    val cell = size.width / cols
+    val rows = (size.height / cell).toInt() + 1
+    val colors = listOf(Color(0xFFFFD84D), Color(0xFFB49CFF), Color(0xFF7FD8C8), Color(0xFFFF9EC7), Color(0xFFFFB067), Color(0xFF8EC5FF))
+    val stroke = Stroke(2.dp.toPx())
+    val shadow = 4.dp.toPx()
+    for (r in 0 until rows) {
+        for (c in 0 until cols) {
+            // Stable pseudo-random order per cell
+            val h = ((r * 73856093) xor (c * 19349663)).let { (it and 0x7fffffff) % 1000 } / 1000f
+            val inAt = h * 0.32f
+            val outAt = COVER_AT + 0.02f + ((1f - h) * 0.6f + (r.toFloat() / rows) * 0.4f) * 0.32f
+            val pop = ((p - inAt) / 0.14f).coerceIn(0f, 1f)
+            if (pop <= 0f) continue
+            // Overshoot slightly as each block lands
+            val scale = (pop + sin(pop * PI.toFloat()) * 0.18f).coerceAtMost(1.18f)
+            val fall = ((p - outAt) / 0.16f).coerceIn(0f, 1f)
+            val dy = fall * fall * size.height * 1.2f
+            val y = r * cell + dy
+            if (y > size.height + cell) continue
+            val sz = cell * scale
+            val o = Offset(c * cell + (cell - sz) / 2, y + (cell - sz) / 2)
+            drawRect(InkBlack, o + Offset(shadow, shadow), Size(sz, sz))
+            drawRect(colors[((h * 97).toInt() + r + c) % colors.size], o, Size(sz, sz))
+            drawRect(InkBlack, o, Size(sz, sz), style = stroke)
         }
-        // spiral rings
-        var rr = r
-        var k = 0
-        while (rr > 8f) {
-            drawCircle(InkBlack, rr, center, style = Stroke((3 - k % 2).dp.toPx()))
-            rr *= 0.72f
-            k++
-        }
-        drawLine(InkBlack, center - Offset(r, 0f), center + Offset(r, 0f), 3.dp.toPx())
-        drawLine(InkBlack, center - Offset(0f, r), center + Offset(0f, r), 3.dp.toPx())
     }
-    drawCircle(InkBlack, r * 0.08f + 4f, center)
 }
 
 /** Icon for the clear button in each style. */
@@ -325,7 +336,7 @@ fun clearStyleIcon(style: com.browser.adfree.storage.ClearStyle): androidx.compo
     com.browser.adfree.storage.ClearStyle.FLOOD -> androidx.compose.material.icons.Icons.Default.Water
     com.browser.adfree.storage.ClearStyle.SWEEP -> androidx.compose.material.icons.Icons.Default.CleaningServices
     com.browser.adfree.storage.ClearStyle.SHRED -> androidx.compose.material.icons.Icons.Default.ContentCut
-    com.browser.adfree.storage.ClearStyle.VORTEX -> androidx.compose.material.icons.Icons.Default.Cyclone
+    com.browser.adfree.storage.ClearStyle.PIXEL -> androidx.compose.material.icons.Icons.Default.GridView
 }
 
 /** Tile colour for the clear button in each style. */
@@ -334,5 +345,5 @@ fun clearStyleFill(style: com.browser.adfree.storage.ClearStyle): Color = when (
     com.browser.adfree.storage.ClearStyle.FLOOD -> Color(0xFF8EC5FF)
     com.browser.adfree.storage.ClearStyle.SWEEP -> Color(0xFFFF9EC7)
     com.browser.adfree.storage.ClearStyle.SHRED -> Color(0xFFFFD84D)
-    com.browser.adfree.storage.ClearStyle.VORTEX -> Color(0xFFB49CFF)
+    com.browser.adfree.storage.ClearStyle.PIXEL -> Color(0xFFB49CFF)
 }

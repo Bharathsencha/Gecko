@@ -34,6 +34,7 @@ import com.browser.adfree.storage.BrowserPreferencesRepository
 import com.browser.adfree.ui.theme.*
 import java.net.URI
 
+/** Per-site protection panel; the idea follows Brave Shields (https://brave.com/shields/). */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ShieldsQuickSheet(

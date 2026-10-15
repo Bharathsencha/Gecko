@@ -29,7 +29,7 @@ Do not use Gecko to break the law or to harm, attack or gain unauthorised access
 
 ## Trademarks
 
-Gecko is not affiliated with Mozilla, the Tor Project, YouTube or any website or project it works with. Firefox, Tor and YouTube are trademarks of their owners.
+Gecko is not affiliated with Mozilla, the Tor Project, Brave, DuckDuckGo or any website or project it works with. Firefox, Tor, Brave and DuckDuckGo are trademarks of their owners.
 
 ## Changes
 

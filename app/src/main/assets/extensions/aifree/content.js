@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2024-2026 Gibbly Gobbly <gibblygobbly@proton.me>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /**
  * AI Free Content Script
  * Handles: Fast Cosmetic Ad-Hiding, Scriptlet Surrogates, Google AI Overview removal, Reader mode, SPA Scroll, Media
@@ -215,7 +232,9 @@ function initBackgroundMediaPlayback() {
     } catch (e) {}
 }
 
-// Reader Mode Article Extraction
+// Reader Mode Article Extraction.
+// A simplified take on the scoring idea in Mozilla Readability
+// (https://github.com/mozilla/readability); no code copied.
 function extractArticleContent(doc) {
     try {
         const documentClone = doc.cloneNode(true);
@@ -332,7 +351,8 @@ function initClientDownloadInterceptor() {
     }, true);
 }
 
-// Universal Video & Media Sniffer Engine (Cat-Catch In-Browser Architecture)
+// Universal Video & Media Sniffer Engine.
+// Approach inspired by Cat-Catch (https://github.com/xifangczy/cat-catch); no code copied.
 function initUniversalMediaSniffer() {
     if (window !== window.top) return;
 

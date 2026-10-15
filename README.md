@@ -12,7 +12,7 @@ License: GNU General Public License v3.0 or later
 ## Features
 
 - **Engine:** Mozilla GeckoView 157 with strict Enhanced Tracking Protection, Global Privacy Control and cookie-banner rejection.
-- **Ad blocking:** uBlock Origin 1.75 bundled, plus a native request filter. On YouTube, request blocking is turned off (YouTube walls players that filter it) and ads are muted, fast-forwarded and skipped instead.
+- **Ad blocking:** uBlock Origin 1.75 bundled, plus a native request filter.
 - **Anti-fingerprinting:** Gecko's fingerprinting protection with every resistFingerprinting target enabled (uniform user agent, screen, timezone, fonts, canvas and WebGL), except that sites still see your light or dark theme. WebRTC never exposes local or real addresses.
 - **VPN:**
   - *Tor*: an embedded Tor client, started only while connected, with a choice of exit country.
@@ -20,7 +20,7 @@ License: GNU General Public License v3.0 or later
   - Both fail closed, and downloads use the same route.
 - **Private tabs:** in-memory only, no history or session saved, screenshots and recent-apps previews blocked, no page titles on the lock screen.
 - **Incognito keyboard:** every text field, in the app and on web pages, asks the keyboard not to learn or store what you type.
-- **Downloads:** direct, HLS and split video and audio streams, remuxed on device. YouTube streams that get cut off fall back to yt-dlp. Audio is saved as a real `.m4a` or `.opus` file.
+- **Downloads:** an optional download button (off by default) saves video and audio from the page you are on: direct, HLS and split streams, remuxed on device. Audio is saved as a real `.m4a` or `.opus` file.
 - **Password vault:** AES-256-GCM with the key held in the Android Keystore. Opening it needs your fingerprint, the phone's screen lock or a 4-digit app PIN (checked against a hardware-held key, with lockouts).
 - **Clear button:** wipes history, cookies, cache and tabs behind one of five animations (Fire, Flood, Sweep, Shred, Vortex), chosen in Settings.
 - **Start page:** block compositions, patterns, solid colours, gradients or your own photo, plus a built-in designer for making and naming your own block layouts.
@@ -53,13 +53,13 @@ Gecko is built on these open-source projects. Thank you to their authors.
 | Component | Used for | License |
 | :--- | :--- | :--- |
 | [Mozilla GeckoView](https://mozilla.github.io/geckoview/) | Web engine | MPL 2.0 |
-| [uBlock Origin](https://github.com/gorhill/uBlock) | Ad and tracker blocking (bundled unmodified, apart from a YouTube exemption in `js/start.js`) | GPL 3.0 |
+| [uBlock Origin](https://github.com/gorhill/uBlock) | Ad and tracker blocking. Bundled with one change: a site exemption added to `js/start.js` (marked in the file) | GPL 3.0 |
 | [Tor](https://www.torproject.org/) | Anonymous network for the VPN | BSD 3-Clause |
 | [tor-android](https://github.com/guardianproject/tor-android) | Tor packaging for Android | BSD 3-Clause |
 | [jtorctl](https://github.com/guardianproject/jtorctl) | Tor control protocol | BSD 3-Clause |
 | [yt-dlp](https://github.com/yt-dlp/yt-dlp) | Video and audio extraction | Unlicense |
 | [youtubedl-android](https://github.com/JunkFood02/youtubedl-android) | yt-dlp runtime for Android | GPL 3.0 |
-| [NewPipe Extractor](https://github.com/TeamNewPipe/NewPipeExtractor) | YouTube stream extraction | GPL 3.0 |
+| [NewPipe Extractor](https://github.com/TeamNewPipe/NewPipeExtractor) | Stream extraction | GPL 3.0 |
 | [OkHttp](https://square.github.io/okhttp/) | Native HTTP client | Apache 2.0 |
 | [Coil](https://coil-kt.github.io/coil/) | Image loading | Apache 2.0 |
 | [SnakeYAML](https://bitbucket.org/snakeyaml/snakeyaml) | Engine configuration parsing | Apache 2.0 |
@@ -67,9 +67,25 @@ Gecko is built on these open-source projects. Thank you to their authors.
 | [Material Icons](https://fonts.google.com/icons) | Icons | Apache 2.0 |
 | [Space Grotesk](https://github.com/floriankarsten/space-grotesk) | Typeface | SIL Open Font License 1.1 (`app/src/main/assets/licenses/SpaceGrotesk-OFL.txt`) |
 
-The same list is shown in the app under Settings, then About.
+### Ideas from other projects
 
-Gecko is not affiliated with Mozilla, the Tor Project or any project listed above. Firefox and Tor are trademarks of their respective owners.
+These parts of Gecko follow ideas or approaches from other projects. No code was copied from them; the implementations are Gecko's own.
+
+| Project | What Gecko took from it |
+| :--- | :--- |
+| [DuckDuckGo Fire Button](https://duckduckgo.com/duckduckgo-help-pages/privacy/fire-button/) | The one-tap clear button with a fire animation |
+| [Firefox private browsing](https://support.mozilla.org/kb/private-browsing-firefox-android) | The mask icon for private mode |
+| [Brave Shields](https://brave.com/shields/) | The per-site protection panel |
+| [Cat-Catch](https://github.com/xifangczy/cat-catch) | The approach for detecting media on pages |
+| [Mozilla Readability](https://github.com/mozilla/readability) | The approach for reader view |
+| [Tor Browser](https://support.torproject.org/glossary/fingerprinting/) | Uniform anti-fingerprinting settings |
+| [EasyList](https://easylist.to/), [AdGuard filters](https://github.com/AdguardTeam/AdguardFilters), [Firebog](https://firebog.net/), [d3ward's ad block test](https://github.com/d3ward/toolz) | Sources for the built-in blocklist |
+
+Earlier development versions of Gecko (before October 2026) bundled the fire animation file from the [DuckDuckGo Android app](https://github.com/duckduckgo/Android) (Apache License 2.0). It is no longer included.
+
+The same lists are shown in the app under Settings, then About.
+
+Gecko is not affiliated with Mozilla, the Tor Project, Brave, DuckDuckGo or any project listed above. Firefox, Tor, Brave and DuckDuckGo are trademarks of their respective owners.
 
 ## License
 

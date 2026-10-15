@@ -46,7 +46,7 @@ class TabModel(
     val adBlockCount: Int get() = trackerBlockCount + extensionBlockCount
     var isDesktopMode by mutableStateOf(false)
 
-    // Safari Presentation features
+    // Page presentation
     var zoomLevel by mutableIntStateOf(100)
     var isDarkWeb by mutableStateOf(false)
     var isReaderMode by mutableStateOf(false)

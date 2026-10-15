@@ -1,3 +1,20 @@
+/*
+ * Copyright (C) 2024-2026 Gibbly Gobbly <gibblygobbly@proton.me>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
 /**
  * App bridge: native request filter, proxy routing for the VPN, media
  * detection and the messaging link to the app.
@@ -20,7 +37,9 @@ const SURROGATE_GA = "data:application/javascript;charset=utf-8,(function()%7Bwi
 const SURROGATE_FBQ = "data:application/javascript;charset=utf-8,(function()%7Bwindow.fbq%3Dwindow.fbq%7C%7Cfunction()%7B%7D%3Bwindow._fbq%3Dwindow._fbq%7C%7Cwindow.fbq%3B%7D)()%3B";
 const SURROGATE_1X1_GIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
 
-// Comprehensive built-in ad, tracker, popup, telemetry, and benchmark domain database
+// Built-in ad, tracker, popup and telemetry domains. Compiled with reference to
+// EasyList (https://easylist.to/), AdGuard filters (https://github.com/AdguardTeam/AdguardFilters),
+// the Firebog lists (https://firebog.net/) and d3ward's ad block test (https://github.com/d3ward/toolz).
 const coreBlocklist = [
     // Amazon Ads & S3 Endpoints
     "adtago.s3.amazonaws.com", "analyticsengine.s3.amazonaws.com", "advice-ads.s3.amazonaws.com",

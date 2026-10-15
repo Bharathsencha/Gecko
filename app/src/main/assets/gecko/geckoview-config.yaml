@@ -1,7 +1,8 @@
 # Read by GeckoView at startup via GeckoRuntimeSettings.configFilePath.
 # GeckoView ignores Bundle extras and user.js, so prefs must live here.
 prefs:
-  # Anti-fingerprinting (Tor Browser style): every protected user reports the
+  # Anti-fingerprinting modelled on Tor Browser / Firefox resistFingerprinting
+  # (https://support.torproject.org/glossary/fingerprinting/): every protected user reports the
   # same UA, screen, timezone (UTC), fonts, and spoofed canvas/WebGL values.
   # This is resistFingerprinting's full target list run through the tunable
   # fingerprintingProtection engine, minus one target: prefers-color-scheme,

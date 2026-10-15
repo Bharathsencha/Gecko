@@ -33,9 +33,9 @@ class BrowserPreferencesRepository(context: Context) {
 
     var searchEngine by mutableStateOf(
         try {
-            SearchEngine.valueOf(prefs.getString("search_engine", SearchEngine.GOOGLE.name) ?: SearchEngine.GOOGLE.name)
+            SearchEngine.valueOf(prefs.getString("search_engine", SearchEngine.DUCKDUCKGO.name) ?: SearchEngine.DUCKDUCKGO.name)
         } catch (e: Exception) {
-            SearchEngine.GOOGLE
+            SearchEngine.DUCKDUCKGO
         }
     )
         private set
@@ -111,7 +111,7 @@ class BrowserPreferencesRepository(context: Context) {
     var vpnTorExitCountry by mutableStateOf(prefs.getString("vpn_tor_exit", "") ?: "")
         private set
 
-    var videoDownloaderEnabled by mutableStateOf(prefs.getBoolean("video_downloader_enabled", true))
+    var videoDownloaderEnabled by mutableStateOf(prefs.getBoolean("video_downloader_enabled", false))
         private set
 
     var preferAv1Codec by mutableStateOf(prefs.getBoolean("prefer_av1_codec", false))
@@ -390,5 +390,5 @@ enum class ClearStyle(val displayName: String) {
     FLOOD("Flood"),
     SWEEP("Sweep"),
     SHRED("Shred"),
-    VORTEX("Vortex")
+    PIXEL("Pixel")
 }

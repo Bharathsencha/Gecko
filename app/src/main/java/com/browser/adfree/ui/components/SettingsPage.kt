@@ -910,13 +910,24 @@ private val CREDITS = listOf(
     Credit("jtorctl", "Tor control protocol", "BSD 3-Clause", "https://github.com/guardianproject/jtorctl"),
     Credit("yt-dlp", "Video and audio extraction", "Unlicense", "https://github.com/yt-dlp/yt-dlp"),
     Credit("youtubedl-android", "yt-dlp runtime for Android", "GPL 3.0", "https://github.com/JunkFood02/youtubedl-android"),
-    Credit("NewPipe Extractor", "YouTube stream extraction", "GPL 3.0", "https://github.com/TeamNewPipe/NewPipeExtractor"),
+    Credit("NewPipe Extractor", "Stream extraction", "GPL 3.0", "https://github.com/TeamNewPipe/NewPipeExtractor"),
     Credit("OkHttp", "Native HTTP client", "Apache 2.0", "https://square.github.io/okhttp/"),
     Credit("Coil", "Image loading", "Apache 2.0", "https://coil-kt.github.io/coil/"),
     Credit("SnakeYAML", "Engine configuration parsing", "Apache 2.0", "https://bitbucket.org/snakeyaml/snakeyaml"),
     Credit("Jetpack Compose and AndroidX", "User interface", "Apache 2.0", "https://developer.android.com/jetpack"),
     Credit("Material Icons", "Icons", "Apache 2.0", "https://fonts.google.com/icons"),
     Credit("Space Grotesk", "Typeface (Florian Karsten)", "SIL OFL 1.1", "https://github.com/floriankarsten/space-grotesk")
+)
+
+/** Projects whose ideas or approach Gecko follows, without copying their code. */
+private val INSPIRATIONS = listOf(
+    Credit("DuckDuckGo Fire Button", "Idea of a one-tap clear button with a fire animation", "Idea", "https://duckduckgo.com/duckduckgo-help-pages/privacy/fire-button/"),
+    Credit("Firefox private browsing", "Mask icon for private mode", "Idea", "https://support.mozilla.org/kb/private-browsing-firefox-android"),
+    Credit("Brave Shields", "Per-site protection panel", "Idea", "https://brave.com/shields/"),
+    Credit("Cat-Catch", "Approach for detecting media on pages", "Idea", "https://github.com/xifangczy/cat-catch"),
+    Credit("Mozilla Readability", "Approach for reader view", "Idea", "https://github.com/mozilla/readability"),
+    Credit("Tor Browser", "Uniform anti-fingerprinting settings", "Idea", "https://support.torproject.org/glossary/fingerprinting/"),
+    Credit("EasyList, AdGuard, Firebog, d3ward", "Sources for the built-in blocklist", "Lists", "https://easylist.to/")
 )
 
 @Composable
@@ -985,9 +996,21 @@ private fun AboutSettings(onOpenUrl: (String) -> Unit, onBack: () -> Unit) {
                 )
             }
         }
+        BrutalSectionLabel("Ideas from")
+        SettingsGroup(shadow = CardShadows[2]) {
+            INSPIRATIONS.forEachIndexed { index, credit ->
+                if (index > 0) BrutalHairline(startIndent = 16.dp)
+                BrutalListRow(
+                    title = credit.name,
+                    subtitle = credit.role,
+                    onClick = { onOpenUrl(credit.url) },
+                    trailing = { ValueChip(credit.license) }
+                )
+            }
+        }
         Text(
             "Gecko is not affiliated with Mozilla, the Tor Project or any project listed here. " +
-                "Firefox and Tor are trademarks of their owners.",
+                "Firefox, Tor, Brave and DuckDuckGo are trademarks of their owners.",
             color = TextSecondary,
             fontSize = 12.sp,
             lineHeight = 16.sp,

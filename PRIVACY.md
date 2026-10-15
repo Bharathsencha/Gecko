@@ -38,9 +38,9 @@ Besides loading the pages you open, Gecko makes these requests:
 | Extra blocking rules, checked at most once a day | raw.githubusercontent.com (this project's repository) | Your IP address |
 | Tracking protection lists of the browser engine | Mozilla | Your IP address |
 | Keeping the video downloader working, checked at most once a day | GitHub (yt-dlp releases) | Your IP address |
-| Searches typed in the address bar | The search engine you chose in Settings (Google by default) | Your search, as with any browser |
+| Searches typed in the address bar | The search engine you chose in Settings (DuckDuckGo by default) | Your search, as with any browser |
 | Site icons in history, bookmarks, tabs and favourites | The site itself (`/favicon.ico`) | That you have that site saved |
-| Video and audio downloads | The site the media comes from, only after you open the download sheet | That you requested the media |
+| Video and audio downloads | The site the media comes from, only if you turned on the download button and opened it | That you requested the media |
 
 ### VPN
 

@@ -818,7 +818,7 @@ class TabManager(private val context: Context) {
             trimmed = mdMatch.groupValues[1]
         }
 
-        val searchEngine = preferencesRepository?.searchEngine ?: SearchEngine.GOOGLE
+        val searchEngine = preferencesRepository?.searchEngine ?: SearchEngine.DUCKDUCKGO
 
         if (trimmed.startsWith("https://", ignoreCase = true) ||
             trimmed.startsWith("http://", ignoreCase = true)) {
