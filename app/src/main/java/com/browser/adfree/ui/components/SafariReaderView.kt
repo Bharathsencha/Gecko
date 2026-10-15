@@ -24,7 +24,6 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -50,7 +49,8 @@ fun SafariReaderView(
     onCloseReader: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    var currentTheme by remember { mutableStateOf(ReaderTheme.OLED_DARK) }
+    val appIsDark = com.browser.adfree.ui.theme.LocalBrowserColors.current.isDark
+    var currentTheme by remember { mutableStateOf(if (appIsDark) ReaderTheme.OLED_DARK else ReaderTheme.WHITE) }
     var currentFont by remember { mutableStateOf(ReaderFont.SERIF) }
     var fontSizeSp by remember { mutableFloatStateOf(18f) }
     var showFontMenu by remember { mutableStateOf(false) }
@@ -69,7 +69,7 @@ fun SafariReaderView(
                     .fillMaxWidth()
                     .statusBarsPadding()
                     .background(currentTheme.surfaceColor)
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .padding(horizontal = 4.dp, vertical = 4.dp)
             ) {
                 // Back / Close Button
                 IconButton(onClick = onCloseReader) {
@@ -88,13 +88,13 @@ fun SafariReaderView(
                     ReaderTheme.values().forEach { theme ->
                         Box(
                             modifier = Modifier
-                                .size(24.dp)
-                                .clip(CircleShape)
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(4.dp))
                                 .background(theme.backgroundColor)
                                 .border(
-                                    width = if (currentTheme == theme) 2.dp else 1.dp,
-                                    color = if (currentTheme == theme) MaterialTheme.colorScheme.primary else theme.textColor.copy(alpha = 0.4f),
-                                    shape = CircleShape
+                                    width = if (currentTheme == theme) 3.dp else 1.5.dp,
+                                    color = currentTheme.textColor,
+                                    shape = RoundedCornerShape(4.dp)
                                 )
                                 .clickable { currentTheme = theme }
                         )
@@ -168,6 +168,7 @@ fun SafariReaderView(
                 }
             }
 
+            Box(Modifier.fillMaxWidth().height(2.dp).background(currentTheme.textColor))
             // Scrollable Article Body
             Column(
                 modifier = Modifier

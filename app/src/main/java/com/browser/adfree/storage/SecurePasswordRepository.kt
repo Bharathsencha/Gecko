@@ -171,11 +171,6 @@ class SecurePasswordRepository(private val context: Context) {
         }
     }
 
-    fun getLoginsForDomain(domain: String): List<SavedLogin> {
-        val clean = domain.trim().lowercase()
-        return logins.filter { it.domain.contains(clean) || clean.contains(it.domain) }
-    }
-
     private fun persistLogins() {
         try {
             val jsonArray = JSONArray()

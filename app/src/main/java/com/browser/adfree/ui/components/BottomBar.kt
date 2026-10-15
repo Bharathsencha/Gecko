@@ -17,30 +17,45 @@
 
 package com.browser.adfree.ui.components
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowForward
+import androidx.compose.material.icons.filled.Bookmarks
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.browser.adfree.ui.theme.*
 
+/**
+ * Docked toolbar spanning the full width, sitting directly on the navigation
+ * bar. A horizontal swipe on it switches tabs.
+ */
 @Composable
 fun BottomBar(
     progress: Int,
@@ -48,15 +63,12 @@ fun BottomBar(
     canGoBack: Boolean,
     canGoForward: Boolean,
     activeDownloadsCount: Int,
-    detectedVideosCount: Int = 0,
     onBack: () -> Unit,
     onForward: () -> Unit,
     onShare: () -> Unit,
     onOpenBookmarks: () -> Unit,
     onOpenDownloads: () -> Unit,
-    onOpenVideoDownloader: () -> Unit = {},
     onOpenSettings: () -> Unit,
-    onOpenTabs: () -> Unit,
     onSwipeLeft: () -> Unit,
     onSwipeRight: () -> Unit,
     modifier: Modifier = Modifier
@@ -66,139 +78,58 @@ fun BottomBar(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .navigationBarsPadding()
+            .background(SurfaceDark)
     ) {
-        // Page Loading Progress Bar at bottom of page
-        AnimatedVisibility(
-            visible = isLoading && progress in 1..99,
-            enter = fadeIn(),
-            exit = fadeOut()
-        ) {
-            LinearProgressIndicator(
-                progress = progress / 100f,
-                color = AccentCyan,
-                trackColor = Color.Transparent,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.5.dp)
-            )
+        if (isLoading && progress in 1..99) {
+            BrutalProgressLine(progress = progress / 100f)
+        } else {
+            BrutalRule()
         }
 
-        // Frosted Glass Floating Toolbar with Swipe Gesture detection
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceAround,
+            horizontalArrangement = Arrangement.SpaceEvenly,
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 6.dp)
-                .height(52.dp)
-                .clip(RoundedCornerShape(26.dp))
-                .background(SurfaceElevated.copy(alpha = 0.94f))
-                .border(
-                    1.dp,
-                    Brush.horizontalGradient(
-                        listOf(BorderSubtle, AccentCyan.copy(alpha = 0.25f), BorderSubtle)
-                    ),
-                    RoundedCornerShape(26.dp)
-                )
+                .navigationBarsPadding()
+                .height(56.dp)
                 .pointerInput(Unit) {
                     detectHorizontalDragGestures(
                         onDragEnd = {
-                            if (dragOffset < -60f) {
-                                onSwipeLeft()
-                            } else if (dragOffset > 60f) {
-                                onSwipeRight()
-                            }
+                            if (dragOffset < -60f) onSwipeLeft() else if (dragOffset > 60f) onSwipeRight()
                             dragOffset = 0f
                         },
-                        onHorizontalDrag = { _, dragAmount ->
-                            dragOffset += dragAmount
-                        }
+                        onHorizontalDrag = { _, dragAmount -> dragOffset += dragAmount }
                     )
                 }
-                .padding(horizontal = 6.dp)
         ) {
-            // 1. Back Button
-            IconButton(
-                onClick = onBack,
-                enabled = canGoBack,
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = TextPrimary,
-                    disabledContentColor = TextSecondary.copy(alpha = 0.3f)
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ArrowBackIosNew,
-                    contentDescription = "Back",
-                    modifier = Modifier.size(19.dp)
-                )
-            }
+            BrutalIconButton(Icons.Default.ArrowBack, "Back", onBack, enabled = canGoBack)
+            BrutalIconButton(Icons.Default.ArrowForward, "Forward", onForward, enabled = canGoForward)
+            BrutalIconButton(Icons.Default.Share, "Share", onShare)
+            BrutalIconButton(Icons.Default.Bookmarks, "Bookmarks", onOpenBookmarks)
 
-            // 2. Forward Button
-            IconButton(
-                onClick = onForward,
-                enabled = canGoForward,
-                colors = IconButtonDefaults.iconButtonColors(
-                    contentColor = TextPrimary,
-                    disabledContentColor = TextSecondary.copy(alpha = 0.3f)
-                )
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ArrowForwardIos,
-                    contentDescription = "Forward",
-                    modifier = Modifier.size(19.dp)
-                )
-            }
-
-            // 3. Share Action Button
-            IconButton(
-                onClick = onShare,
-                colors = IconButtonDefaults.iconButtonColors(contentColor = TextPrimary)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Share,
-                    contentDescription = "Share",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // 4. Bookmarks Action Button
-            IconButton(
-                onClick = onOpenBookmarks,
-                colors = IconButtonDefaults.iconButtonColors(contentColor = TextPrimary)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Bookmarks,
-                    contentDescription = "Bookmarks",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            // 5. Downloads Button
             Box(contentAlignment = Alignment.TopEnd) {
-                IconButton(
+                BrutalIconButton(
+                    icon = Icons.Default.FileDownload,
+                    contentDescription = if (activeDownloadsCount > 0) "Downloads, $activeDownloadsCount active" else "Downloads",
                     onClick = onOpenDownloads,
-                    colors = IconButtonDefaults.iconButtonColors(contentColor = TextPrimary)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FileDownload,
-                        contentDescription = "Downloads",
-                        tint = if (activeDownloadsCount > 0) AccentCyan else TextPrimary,
-                        modifier = Modifier.size(21.dp)
-                    )
-                }
-
+                    boxed = activeDownloadsCount > 0,
+                    fill = AccentCyan,
+                    tint = if (activeDownloadsCount > 0) OnAccent else TextPrimary
+                )
                 if (activeDownloadsCount > 0) {
                     Box(
                         modifier = Modifier
-                            .offset(x = (-4).dp, y = 4.dp)
-                            .size(16.dp)
-                            .background(AccentCyan, CircleShape),
+                            .offset(x = (-2).dp, y = 2.dp)
+                            .widthIn(min = 18.dp)
+                            .height(18.dp)
+                            .brutalBox(fill = SurfaceDark, border = BorderSubtle, borderWidth = 1.5.dp, shape = RoundedCornerShape(3.dp))
+                            .padding(horizontal = 3.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Text(
                             text = activeDownloadsCount.toString(),
-                            color = DarkBg,
+                            color = TextPrimary,
                             fontSize = 10.sp,
                             fontWeight = FontWeight.Bold
                         )
@@ -206,17 +137,7 @@ fun BottomBar(
                 }
             }
 
-            // 6. Settings Button
-            IconButton(
-                onClick = onOpenSettings,
-                colors = IconButtonDefaults.iconButtonColors(contentColor = TextPrimary)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = "Settings",
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+            BrutalIconButton(Icons.Default.Settings, "Settings", onOpenSettings)
         }
     }
 }

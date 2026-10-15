@@ -41,6 +41,8 @@ import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.GeckoSession
 import org.mozilla.geckoview.GeckoSessionSettings
 import org.mozilla.geckoview.MediaSession
+import org.mozilla.geckoview.WebExtension
+import org.json.JSONObject
 import org.mozilla.geckoview.WebResponse
 import java.net.URLEncoder
 
@@ -66,10 +68,120 @@ class TabManager(private val context: Context) {
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    /** Bridge extension, set once it loads; each session gets a page port through it. */
+    private var pageBridge: WebExtension? = null
+
     companion object {
         const val HOME_URL = "about:home"
-        const val MODERN_MOBILE_UA = "Mozilla/5.0 (Linux; Android 14; SM-S948B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.6613.127 Mobile Safari/537.36"
-        const val DESKTOP_UA = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+
+        /**
+         * The UA resistFingerprinting reports for this engine. Pages get it from
+         * Gecko itself; native requests (downloads, playlist fetches) send the
+         * same string so the two never disagree. A Chrome UA on a Gecko engine
+         * is a fingerprint on its own.
+         */
+        const val MODERN_MOBILE_UA = "Mozilla/5.0 (Android 10; Mobile; rv:122.0) Gecko/122.0 Firefox/122.0"
+        const val DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0"
+
+        private val YOUTUBE_HOST = Regex("(^|\\.)(youtube\\.com|youtube-nocookie\\.com|youtu\\.be)$", RegexOption.IGNORE_CASE)
+
+        /** YouTube runs without request blocking; content.js fast-forwards its ads instead. */
+        fun isYouTube(url: String): Boolean {
+            val host = try { Uri.parse(url).host ?: "" } catch (e: Exception) { "" }
+            return YOUTUBE_HOST.containsMatchIn(host)
+        }
+    }
+
+    private fun applyUserAgent(tab: TabModel, session: GeckoSession) {
+        // Mobile: no override, RFP supplies the uniform UA.
+        session.settings.userAgentOverride = if (tab.isDesktopMode) DESKTOP_UA else null
+        session.settings.userAgentMode = if (tab.isDesktopMode) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
+        session.settings.viewportMode = if (tab.isDesktopMode) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
+    }
+
+    private fun trackingProtectionFor(tab: TabModel, url: String): Boolean {
+        if (isYouTube(url)) return false
+        if (tab.isPrivate) return true
+        return shieldsRepository?.getConfigForUrl(url)?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true)
+    }
+
+    fun attachPageBridge(extension: WebExtension) {
+        pageBridge = extension
+        tabs.forEach { bindPagePort(it, it.session) }
+    }
+
+    private fun bindPagePort(tab: TabModel, session: GeckoSession) {
+        val extension = pageBridge ?: return
+        session.webExtensionController.setMessageDelegate(extension, object : WebExtension.MessageDelegate {
+            override fun onConnect(port: WebExtension.Port) {
+                tab.pagePort = port
+                port.setDelegate(object : WebExtension.PortDelegate {
+                    override fun onPortMessage(message: Any, port: WebExtension.Port) {
+                        val json = message as? JSONObject ?: return
+                        mainHandler.post { handlePageMessage(tab, json) }
+                    }
+
+                    override fun onDisconnect(port: WebExtension.Port) {
+                        if (tab.pagePort === port) tab.pagePort = null
+                    }
+                })
+            }
+        }, "browser_app")
+    }
+
+    private fun handlePageMessage(tab: TabModel, json: JSONObject) {
+        when (json.optString("action")) {
+            "page_ready" -> {
+                // Per-page state is lost on navigation; re-apply what the user chose.
+                if (tab.zoomLevel != 100) sendPageCommand(tab, "set_zoom") { put("percent", tab.zoomLevel) }
+                val siteDark = shieldsRepository?.getConfigForUrl(tab.url)?.darkWebEnabled == true
+                if (tab.isDarkWeb || siteDark) {
+                    tab.isDarkWeb = true
+                    sendPageCommand(tab, "set_dark") { put("enabled", true) }
+                }
+            }
+            "article_result" -> {
+                tab.isExtractingArticle = false
+                val article = json.optJSONObject("article")
+                if (article != null && article.optBoolean("isArticle", false)) {
+                    tab.articleData = com.browser.adfree.model.ArticleData(
+                        title = article.optString("title").ifBlank { tab.title },
+                        byline = article.optString("byline").ifBlank { null },
+                        contentHtml = article.optString("contentHtml"),
+                        isArticle = true
+                    )
+                    tab.isReaderMode = true
+                } else {
+                    onReaderUnavailable?.invoke()
+                }
+            }
+        }
+    }
+
+    /** Shown when a page has no readable article or no page bridge yet. */
+    var onReaderUnavailable: (() -> Unit)? = null
+
+    private fun sendPageCommand(tab: TabModel, cmd: String, args: JSONObject.() -> Unit = {}): Boolean {
+        val port = tab.pagePort ?: return false
+        return try {
+            port.postMessage(JSONObject().apply { put("cmd", cmd); args() })
+            true
+        } catch (e: Exception) {
+            Log.w("TabManager", "Page command $cmd failed: ${e.message}")
+            false
+        }
+    }
+
+    fun requestReaderMode(tab: TabModel) {
+        if (tab.isReaderMode) {
+            tab.isReaderMode = false
+            return
+        }
+        if (sendPageCommand(tab, "extract_article")) {
+            tab.isExtractingArticle = true
+        } else {
+            onReaderUnavailable?.invoke()
+        }
     }
 
     private fun buildSession(tab: TabModel): GeckoSession {
@@ -78,22 +190,22 @@ class TabManager(private val context: Context) {
             .build()
         val session = GeckoSession(settings)
 
-        // Chrome-like UA for proper Google/site layout; Desktop UA for desktop mode
-        session.settings.userAgentOverride = if (tab.isDesktopMode) DESKTOP_UA else MODERN_MOBILE_UA
-        session.settings.userAgentMode = if (tab.isDesktopMode) GeckoSessionSettings.USER_AGENT_MODE_DESKTOP else GeckoSessionSettings.USER_AGENT_MODE_MOBILE
-        session.settings.viewportMode = if (tab.isDesktopMode) GeckoSessionSettings.VIEWPORT_MODE_DESKTOP else GeckoSessionSettings.VIEWPORT_MODE_MOBILE
-        
+        applyUserAgent(tab, session)
+
         val siteConfig = shieldsRepository?.getConfigForUrl(tab.url)
-        val shieldsActive = if (tab.isPrivate) true else (siteConfig?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true))
-        val bgMedia = siteConfig?.backgroundMediaEnabled ?: true
-        
-        session.settings.useTrackingProtection = shieldsActive
-        session.settings.suspendMediaWhenInactive = !bgMedia
+        session.settings.useTrackingProtection = trackingProtectionFor(tab, tab.url)
+        session.settings.suspendMediaWhenInactive = !(siteConfig?.backgroundMediaEnabled ?: true)
+        bindPagePort(tab, session)
 
         // Media Session Delegate for Android Foreground Service & Lockscreen playback
         session.mediaSessionDelegate = object : MediaSession.Delegate {
             override fun onActivated(session: GeckoSession, mediaSession: MediaSession) {
-                com.browser.adfree.media.MediaPlaybackService.start(context, tab.title, tab.url)
+                // Private tabs never put the page title or address on the lock screen.
+                if (tab.isPrivate) {
+                    com.browser.adfree.media.MediaPlaybackService.start(context, "Private tab", null)
+                } else {
+                    com.browser.adfree.media.MediaPlaybackService.start(context, tab.title, tab.url)
+                }
                 checkForVideos(tab, tab.url)
             }
             override fun onDeactivated(session: GeckoSession, mediaSession: MediaSession) {
@@ -111,7 +223,7 @@ class TabManager(private val context: Context) {
                 event: org.mozilla.geckoview.ContentBlocking.BlockEvent
             ) {
                 mainHandler.post {
-                    tab.adBlockCount++
+                    tab.trackerBlockCount++
                 }
             }
         }
@@ -130,7 +242,9 @@ class TabManager(private val context: Context) {
                     }
                     tab.isLoading = true
                     tab.progress = 10
-                    tab.adBlockCount = 0
+                    tab.trackerBlockCount = 0
+                    tab.extensionBlockCount = 0
+                    tab.isExtractingArticle = false
                     tab.isReaderMode = false
                     tab.articleData = null
                     val oldVideoId = YouTubeStreamExtractor.extractVideoId(tab.url)
@@ -142,12 +256,15 @@ class TabManager(private val context: Context) {
                         tab.detectedVideos.clear()
                     }
 
-                    // Dynamically apply per-site shield settings
+                    // Per-site shield settings
                     val currentSiteConfig = shieldsRepository?.getConfigForUrl(url)
-                    val currentShieldsActive = if (tab.isPrivate) true else (currentSiteConfig?.shieldsEnabled ?: (preferencesRepository?.adBlockingEnabled ?: true))
-                    val currentBgMedia = currentSiteConfig?.backgroundMediaEnabled ?: true
-                    session.settings.useTrackingProtection = currentShieldsActive
-                    session.settings.suspendMediaWhenInactive = !currentBgMedia
+                    session.settings.useTrackingProtection = trackingProtectionFor(tab, url)
+                    session.settings.suspendMediaWhenInactive = !(currentSiteConfig?.backgroundMediaEnabled ?: true)
+                    val siteDesktop = currentSiteConfig?.desktopModeEnabled == true
+                    if (siteDesktop && !tab.isDesktopMode) {
+                        tab.isDesktopMode = true
+                        applyUserAgent(tab, session)
+                    }
                 }
             }
 
@@ -169,14 +286,6 @@ class TabManager(private val context: Context) {
                     tab.progress = 100
                     if (success && !tab.isPrivate && tab.url != HOME_URL && !tab.url.startsWith("about:")) {
                         historyRepository?.addHistory(tab.title, tab.url)
-                    }
-                    if (tab.isDarkWeb) {
-                        injectDarkWebMode(tab, true)
-                    }
-                    if (tab.zoomLevel != 100) {
-                        val factor = tab.zoomLevel / 100f
-                        val js = "try { document.documentElement.style.zoom = '$factor'; document.body.style.zoom = '$factor'; } catch(e) { document.body.style.transform = 'scale($factor)'; document.body.style.transformOrigin = '0 0'; }"
-                        session.loadUri("javascript:(function(){$js})();")
                     }
                     if (!tab.isPrivate) {
                         saveSession()
@@ -305,7 +414,8 @@ class TabManager(private val context: Context) {
             override fun onLocationChange(
                 session: GeckoSession,
                 url: String?,
-                perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>
+                perms: MutableList<GeckoSession.PermissionDelegate.ContentPermission>,
+                hasUserGesture: Boolean
             ) {
                 url?.let {
                     mainHandler.post {
@@ -341,8 +451,32 @@ class TabManager(private val context: Context) {
     private val EXTRACT_SUCCESS_COOLDOWN_MS = 15_000L
     private val EXTRACT_RETRY_BACKOFF_MS = 45_000L
 
-    fun checkForVideos(tab: TabModel, targetUrl: String) {
+    fun checkForVideos(tab: TabModel, targetUrl: String, onDemand: Boolean = false) {
         if (preferencesRepository?.videoDownloaderEnabled == false) return
+        // YouTube's player response already lists every stream (content.js), so
+        // the heavy InnerTube/yt-dlp pass waits until the user opens the download
+        // sheet instead of competing with playback start.
+        if (!onDemand && isYouTube(targetUrl)) {
+            // Show the download button straight away; formats load when it is opened.
+            val videoId = YouTubeStreamExtractor.extractVideoId(targetUrl)
+            if (videoId != null && !tab.isPrivate && tab.detectedVideos.none { YouTubeStreamExtractor.extractVideoId(it.pageUrl) == videoId }) {
+                mainHandler.post {
+                    tab.detectedVideos.clear()
+                    tab.detectedVideos.add(
+                        com.browser.adfree.model.DetectedVideo(
+                            pageUrl = targetUrl,
+                            title = tab.title.removeSuffix(" - YouTube").ifBlank { "YouTube video" },
+                            thumbnail = "https://i.ytimg.com/vi/$videoId/hqdefault.jpg",
+                            sourceDomain = "youtube.com"
+                        )
+                    )
+                }
+            }
+            return
+        }
+        // The native extractor refetches the page with the normal session's
+        // cookies, which would tie a private tab to the user's identity.
+        if (tab.isPrivate) return
         if (targetUrl.isBlank() || targetUrl == HOME_URL || targetUrl.startsWith("about:")) return
 
         // A search/playlist/channel tab is not one video: the extractor fans out
@@ -614,67 +748,32 @@ class TabManager(private val context: Context) {
 
     fun toggleDesktopMode(tab: TabModel) {
         tab.isDesktopMode = !tab.isDesktopMode
-        if (tab.isDesktopMode) {
-            tab.session.settings.userAgentOverride = DESKTOP_UA
-            tab.session.settings.userAgentMode = GeckoSessionSettings.USER_AGENT_MODE_DESKTOP
-            tab.session.settings.viewportMode = GeckoSessionSettings.VIEWPORT_MODE_DESKTOP
-        } else {
-            tab.session.settings.userAgentOverride = MODERN_MOBILE_UA
-            tab.session.settings.userAgentMode = GeckoSessionSettings.USER_AGENT_MODE_MOBILE
-            tab.session.settings.viewportMode = GeckoSessionSettings.VIEWPORT_MODE_MOBILE
-        }
+        applyUserAgent(tab, tab.session)
         tab.session.reload()
         saveSession()
     }
 
     fun setZoom(tab: TabModel, percent: Int) {
         tab.zoomLevel = percent
-        val factor = percent / 100f
-        val js = "try { document.documentElement.style.zoom = '$factor'; document.body.style.zoom = '$factor'; } catch(e) { document.body.style.transform = 'scale($factor)'; document.body.style.transformOrigin = '0 0'; }"
-        tab.session.loadUri("javascript:(function(){$js})();")
+        sendPageCommand(tab, "set_zoom") { put("percent", percent) }
         saveSession()
     }
 
-    fun injectDarkWebMode(tab: TabModel, enabled: Boolean) {
+    fun setDarkWeb(tab: TabModel, enabled: Boolean) {
         tab.isDarkWeb = enabled
-        val js = """
-            (function() {
-                var el = document.getElementById('gecko-dark-web-style');
-                if ($enabled) {
-                    if (!el) {
-                        el = document.createElement('style');
-                        el.id = 'gecko-dark-web-style';
-                        el.textContent = 'html { filter: invert(90%) hue-rotate(180deg) !important; background: #121212 !important; } img, video, canvas, svg, picture, iframe, [style*="background-image"] { filter: invert(100%) hue-rotate(180deg) !important; }';
-                        (document.head || document.documentElement).appendChild(el);
-                    }
-                } else {
-                    if (el) el.remove();
-                }
-            })();
-        """.trimIndent().replace("\n", " ")
-        tab.session.loadUri("javascript:(function(){$js})();")
+        sendPageCommand(tab, "set_dark") { put("enabled", enabled) }
     }
 
-    fun toggleDarkWeb(tab: TabModel) {
-        injectDarkWebMode(tab, !tab.isDarkWeb)
-    }
+    fun toggleDarkWeb(tab: TabModel) = setDarkWeb(tab, !tab.isDarkWeb)
 
+    /** Applies the global Night Mode default to every open tab. New pages read it from the extension. */
     fun setDarkWebModeAll(enabled: Boolean) {
-        for (tab in tabs) {
-            injectDarkWebMode(tab, enabled)
-        }
+        tabs.forEach { setDarkWeb(it, enabled) }
     }
 
     fun updateAdBlocking(enabled: Boolean) {
         for (tab in tabs) {
-            tab.session.settings.useTrackingProtection = enabled
-        }
-    }
-
-    fun updateCosmeticBlocking(enabled: Boolean) {
-        val js = "if (typeof cosmeticBlockingActive !== 'undefined') { cosmeticBlockingActive = $enabled; if ($enabled) { injectStyleShield(); cleanAdNodes(document); } else { removeStyleShield(); } }"
-        for (tab in tabs) {
-            tab.session.loadUri("javascript:(function(){$js})();")
+            tab.session.settings.useTrackingProtection = enabled && !isYouTube(tab.url)
         }
     }
 
@@ -737,17 +836,6 @@ class TabManager(private val context: Context) {
         } catch (e: Exception) {
             searchEngine.searchUrl + trimmed.replace(" ", "+")
         }
-    }
-
-    fun resetToHome(runtime: GeckoRuntime) {
-        for (tab in tabs) {
-            try {
-                tab.session.close()
-            } catch (e: Exception) {}
-        }
-        tabs.clear()
-        sessionRepository.clearSession()
-        createNewTab(runtime, HOME_URL)
     }
 
     fun destroy() {

@@ -17,122 +17,32 @@
 
 package com.browser.adfree.model
 
+/** Exit location for Tor or the free-proxy relay. [code] is ISO 3166-1 alpha-2. */
 data class VpnCountry(
     val code: String,
-    val name: String,
-    val flag: String,
-    val city: String,
-    var host: String,
-    var port: Int,
-    var type: String = "socks",
-    val estimatedPingMs: Int = 45
+    val name: String
 ) {
     companion object {
         val COUNTRIES = listOf(
-            VpnCountry(
-                code = "US",
-                name = "United States",
-                flag = "🇺🇸",
-                city = "New York / Ashburn",
-                host = "107.150.41.226",
-                port = 18080,
-                type = "socks",
-                estimatedPingMs = 38
-            ),
-            VpnCountry(
-                code = "DE",
-                name = "Germany",
-                flag = "🇩🇪",
-                city = "Frankfurt",
-                host = "94.228.118.127",
-                port = 1414,
-                type = "socks",
-                estimatedPingMs = 42
-            ),
-            VpnCountry(
-                code = "JP",
-                name = "Japan",
-                flag = "🇯🇵",
-                city = "Tokyo",
-                host = "172.105.192.212",
-                port = 9080,
-                type = "socks",
-                estimatedPingMs = 75
-            ),
-            VpnCountry(
-                code = "GB",
-                name = "United Kingdom",
-                flag = "🇬🇧",
-                city = "London",
-                host = "144.24.111.128",
-                port = 1088,
-                type = "socks",
-                estimatedPingMs = 35
-            ),
-            VpnCountry(
-                code = "NL",
-                name = "Netherlands",
-                flag = "🇳🇱",
-                city = "Amsterdam",
-                host = "62.238.107.38",
-                port = 9050,
-                type = "socks",
-                estimatedPingMs = 40
-            ),
-            VpnCountry(
-                code = "SG",
-                name = "Singapore",
-                flag = "🇸🇬",
-                city = "Singapore Central",
-                host = "104.248.151.220",
-                port = 57554,
-                type = "socks",
-                estimatedPingMs = 68
-            ),
-            VpnCountry(
-                code = "CA",
-                name = "Canada",
-                flag = "🇨🇦",
-                city = "Toronto",
-                host = "142.54.228.193",
-                port = 4145,
-                type = "socks",
-                estimatedPingMs = 45
-            ),
-            VpnCountry(
-                code = "FR",
-                name = "France",
-                flag = "🇫🇷",
-                city = "Paris",
-                host = "51.79.11.180",
-                port = 10001,
-                type = "socks",
-                estimatedPingMs = 44
-            ),
-            VpnCountry(
-                code = "AU",
-                name = "Australia",
-                flag = "🇦🇺",
-                city = "Sydney",
-                host = "67.201.33.10",
-                port = 25283,
-                type = "socks",
-                estimatedPingMs = 92
-            ),
-            VpnCountry(
-                code = "IN",
-                name = "India",
-                flag = "🇮🇳",
-                city = "Mumbai / Bangalore",
-                host = "45.74.31.41",
-                port = 4967,
-                type = "socks",
-                estimatedPingMs = 28
-            )
+            VpnCountry("US", "United States"),
+            VpnCountry("CA", "Canada"),
+            VpnCountry("GB", "United Kingdom"),
+            VpnCountry("DE", "Germany"),
+            VpnCountry("NL", "Netherlands"),
+            VpnCountry("FR", "France"),
+            VpnCountry("SE", "Sweden"),
+            VpnCountry("CH", "Switzerland"),
+            VpnCountry("JP", "Japan"),
+            VpnCountry("SG", "Singapore"),
+            VpnCountry("IN", "India"),
+            VpnCountry("AU", "Australia"),
+            VpnCountry("BR", "Brazil")
         )
 
-        fun findByCode(code: String): VpnCountry {
-            return COUNTRIES.find { it.code.equals(code, ignoreCase = true) } ?: COUNTRIES[0]
-        }
+        fun findByCode(code: String): VpnCountry? =
+            COUNTRIES.find { it.code.equals(code, ignoreCase = true) }
+
+        fun nameFor(code: String): String =
+            findByCode(code)?.name ?: code.ifBlank { "Any country" }
     }
 }

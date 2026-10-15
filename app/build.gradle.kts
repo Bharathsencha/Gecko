@@ -1,16 +1,22 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
-    id("org.jetbrains.kotlin.android")
+    id("org.jetbrains.kotlin.plugin.compose")
 }
 
 android {
     namespace = "com.browser.adfree"
-    compileSdk = 34
+    compileSdk {
+        version = release(37) {
+            minorApiLevel = 1
+        }
+    }
 
     defaultConfig {
         applicationId = "com.browser.adfree"
         minSdk = 26
-        targetSdk = 34
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
 
@@ -23,11 +29,28 @@ android {
         }
     }
 
+    // Release key lives outside the repo; keystore.properties (git-ignored) points at it.
+    // Without it, release builds fall back to the debug key for local testing.
+    val keystoreProps = Properties().apply {
+        val f = rootProject.file("keystore.properties")
+        if (f.exists()) f.inputStream().use { load(it) }
+    }
+    signingConfigs {
+        if (keystoreProps.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = file(keystoreProps.getProperty("storeFile"))
+                storePassword = keystoreProps.getProperty("storePassword")
+                keyAlias = keystoreProps.getProperty("keyAlias")
+                keyPassword = keystoreProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
@@ -56,14 +79,9 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
     buildFeatures {
         compose = true
-    }
-    composeOptions {
-        kotlinCompilerExtensionVersion = "1.5.8"
+        buildConfig = true
     }
     packaging {
         resources {
@@ -76,25 +94,32 @@ android {
 }
 
 dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     // Mozilla GeckoView Engine
-    implementation("org.mozilla.geckoview:geckoview-omni:122.0.20240205133611")
+    implementation("org.mozilla.geckoview:geckoview:157.0.20261005135250")
 
-    // youtubedl-android (yt-dlp wrapper) & FFmpeg for Universal Video/Audio Extraction across 1800+ sites
+    // youtubedl-android (yt-dlp wrapper) for video/audio extraction across 1800+ sites
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
-    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
+
+    // Embedded Tor for the in-browser VPN. Started on the first connect.
+    implementation("info.guardianproject:tor-android:0.4.9.14")
+    implementation("androidx.localbroadcastmanager:localbroadcastmanager:1.1.0")
+
+    // Fingerprint / screen-lock prompt for the password vault
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.9.1")
 
     // NewPipeExtractor for YouTube stream extraction fallback
     implementation("com.github.teamnewpipe:NewPipeExtractor:v0.24.4")
 
     // AndroidX & Lifecycle
-    implementation("androidx.core:core-ktx:1.12.0")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.7.0")
-    implementation("androidx.activity:activity-compose:1.8.2")
+    implementation("androidx.core:core-ktx:1.19.1")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.11.0")
+    implementation("androidx.activity:activity-compose:1.13.0")
 
     // Jetpack Compose & Material 3
-    implementation(platform("androidx.compose:compose-bom:2023.10.01"))
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-graphics")
     implementation("androidx.compose.ui:ui-tooling-preview")
@@ -103,14 +128,12 @@ dependencies {
     implementation("androidx.compose.material:material-icons-extended")
 
     // SwipeRefreshLayout for smooth native pull-to-refresh
-    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.2.0")
 
     // Coil for Dynamic Favicons & Animated Wallpapers (.gif, .png, .jpg, .webp)
     implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("io.coil-kt:coil-gif:2.5.0")
 
-    // Lottie Compose for DuckDuckGo Fire Wipe Animation
-    implementation("com.airbnb.android:lottie-compose:6.3.0")
 
     // Networking (OkHttp)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")

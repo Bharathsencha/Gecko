@@ -44,6 +44,7 @@ object UniversalVideoExtractor {
             YoutubeDL.getInstance().init(context.applicationContext)
             isInitialized = true
             Log.i(TAG, "YoutubeDL engine initialized successfully")
+            updateIfStale(context.applicationContext)
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize YoutubeDL engine: ${e.message}", e)
         } finally {
@@ -51,12 +52,31 @@ object UniversalVideoExtractor {
         }
     }
 
+    /**
+     * YouTube changes its player often and an old yt-dlp stops working, so the
+     * bundled copy is refreshed from yt-dlp's stable releases at most once a day.
+     */
+    private fun updateIfStale(context: Context) {
+        val prefs = context.getSharedPreferences("ytdlp", Context.MODE_PRIVATE)
+        val last = prefs.getLong("last_update_check", 0L)
+        if (System.currentTimeMillis() - last < 24 * 60 * 60 * 1000L) return
+        try {
+            val status = YoutubeDL.getInstance().updateYoutubeDL(context, YoutubeDL.UpdateChannel._STABLE)
+            prefs.edit().putLong("last_update_check", System.currentTimeMillis()).apply()
+            Log.i(TAG, "yt-dlp update check: $status")
+        } catch (e: Exception) {
+            Log.w(TAG, "yt-dlp update failed: ${e.message}")
+        }
+    }
+
+    val isReady: Boolean get() = isInitialized
+
     private val cache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, DetectedVideo>>()
     private val CACHE_TTL_MS = 3 * 60 * 1000L
 
     // youtubedl-android shares one stdout pipe: two concurrent runs kill each
     // other with "I/O operation on closed file". One extractor at a time.
-    private val ytDlpLock = java.util.concurrent.locks.ReentrantLock(true)
+    internal val ytDlpLock = java.util.concurrent.locks.ReentrantLock(true)
 
     /**
      * True when a yt-dlp pass can plausibly produce something.
@@ -133,6 +153,7 @@ object UniversalVideoExtractor {
                 addOption("--no-playlist")
                 addOption("--no-warnings")
                 addOption("--socket-timeout", "10")
+                com.browser.adfree.vpn.NetworkRoute.ytDlpProxy?.let { addOption("--proxy", it) }
             }
 
             val videoInfo: VideoInfo = YoutubeDL.getInstance().getInfo(request)

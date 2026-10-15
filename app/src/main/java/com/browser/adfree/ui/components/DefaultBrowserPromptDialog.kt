@@ -17,207 +17,60 @@
 
 package com.browser.adfree.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.*
-import androidx.compose.material3.*
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.browser.adfree.R
 import com.browser.adfree.ui.theme.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** First-run offer to open links from other apps in Gecko. */
 @Composable
 fun DefaultBrowserPromptDialog(
     onSetDefault: () -> Unit,
     onDismiss: () -> Unit
 ) {
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        containerColor = SurfaceDark,
-        dragHandle = {
-            Box(
-                modifier = Modifier
-                    .padding(top = 10.dp, bottom = 6.dp)
-                    .width(36.dp)
-                    .height(4.dp)
-                    .background(BorderSubtle, RoundedCornerShape(2.dp))
-            )
-        },
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp, vertical = 12.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            // App Icon with glowing gradient ring
-            Box(
-                modifier = Modifier
-                    .size(68.dp)
-                    .clip(CircleShape)
-                    .background(
-                        Brush.linearGradient(
-                            listOf(AccentCyan, AccentCyan.copy(alpha = 0.6f))
-                        )
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Language,
-                    contentDescription = null,
-                    tint = Color.White,
-                    modifier = Modifier.size(38.dp)
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "Make Gecko your Default Browser",
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextPrimary,
-                textAlign = TextAlign.Center
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Open links automatically in Gecko with total ad eradication and hardware-encrypted privacy.",
-                fontSize = 13.5.sp,
-                color = TextSecondary,
-                textAlign = TextAlign.Center,
-                lineHeight = 18.sp
-            )
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            // Benefit cards
-            Column(
-                verticalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                BenefitRow(
-                    icon = Icons.Rounded.Shield,
-                    iconTint = ShieldGreen,
-                    title = "Complete Ad & Tracker Shield",
-                    subtitle = "Blocks intrusive video ads, popups, and cross-site telemetry."
-                )
-                BenefitRow(
-                    icon = Icons.Rounded.Bolt,
-                    iconTint = AccentCyan,
-                    title = "Lightning Fast Page Loads",
-                    subtitle = "Saves up to 70% data and loads pages up to 3x faster."
-                )
-                BenefitRow(
-                    icon = Icons.Rounded.Lock,
-                    iconTint = Color(0xFFFF9F0A),
-                    title = "Hardware Keystore Vault",
-                    subtitle = "Secure AES-256 autofill with zero analytics or telemetry."
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Action Buttons
-            Button(
-                onClick = onSetDefault,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentCyan,
-                    contentColor = Color.White
-                )
-            ) {
-                Text(
-                    text = "Set as Default Browser",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            TextButton(
-                onClick = onDismiss,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text(
-                    text = "Not Now",
-                    fontSize = 14.sp,
-                    color = TextSecondary,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
+    BrutalDialog(
+        title = "Open links in Gecko?",
+        onDismiss = onDismiss,
+        confirmLabel = "Set as default",
+        onConfirm = onSetDefault,
+        dismissLabel = "Not now",
+        header = {
+            Image(painterResource(R.drawable.gecko_logo), contentDescription = null, modifier = Modifier.size(56.dp))
         }
+    ) {
+        Text(
+            "Links you tap in other apps will open here, with ads and trackers blocked.",
+            color = TextSecondary,
+            fontSize = 14.sp,
+            lineHeight = 19.sp
+        )
+        Point("uBlock Origin and strict tracking protection on every page")
+        Point("Same fingerprint as every other Gecko user")
+        Point("Change it any time in Settings")
     }
 }
 
 @Composable
-private fun BenefitRow(
-    icon: ImageVector,
-    iconTint: Color,
-    title: String,
-    subtitle: String
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(SurfaceElevated)
-            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-            .padding(12.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Box(
-            modifier = Modifier
-                .size(36.dp)
-                .clip(CircleShape)
-                .background(iconTint.copy(alpha = 0.15f)),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = iconTint,
-                modifier = Modifier.size(20.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary
-            )
-            Text(
-                text = subtitle,
-                fontSize = 11.5.sp,
-                color = TextSecondary,
-                lineHeight = 15.sp
-            )
-        }
+private fun Point(text: String) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 10.dp)) {
+        androidx.compose.foundation.layout.Box(
+            Modifier
+                .size(8.dp)
+                .brutalBox(fill = AccentCyan, border = BorderSubtle, borderWidth = 1.5.dp, shape = androidx.compose.foundation.shape.RoundedCornerShape(1.dp))
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(text, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Medium)
     }
 }

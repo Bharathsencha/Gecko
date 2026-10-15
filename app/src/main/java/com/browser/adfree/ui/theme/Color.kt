@@ -22,31 +22,59 @@ import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
 
+/**
+ * Neo-brutalist palette: flat warm surfaces, a single ink colour for text,
+ * borders and hard shadows, and solid pastel accents. No gradients, no blur.
+ */
 data class BrowserColors(
     val background: Color,
     val surface: Color,
     val surfaceElevated: Color,
     val surfaceCard: Color,
+    /** Ink: 2dp outlines and dividers. */
     val border: Color,
     val textPrimary: Color,
     val textSecondary: Color,
+    /** Primary fill (user selectable). Content on it is always [onAccent]. */
     val accent: Color,
+    /** Hard offset shadow behind raised boxes. */
+    val shadow: Color,
+    val onAccent: Color,
     val isDark: Boolean
 )
 
-val LocalBrowserColors = staticCompositionLocalOf {
-    BrowserColors(
-        background = Color(0xFF000000),
-        surface = Color(0xFF0C0C0E),
-        surfaceElevated = Color(0xFF161618),
-        surfaceCard = Color(0xFF1E1E22),
-        border = Color(0xFF2C2C30),
-        textPrimary = Color(0xFFFFFFFF),
-        textSecondary = Color(0xFF8E8E93),
-        accent = Color(0xFF00D8F6),
-        isDark = true
-    )
-}
+val InkBlack = Color(0xFF111111)
+val PaperLight = Color(0xFFF4F1EA)
+
+val LightBrowserColors = BrowserColors(
+    background = PaperLight,
+    surface = Color(0xFFFFFFFF),
+    surfaceElevated = Color(0xFFFFFDF7),
+    surfaceCard = Color(0xFFEAE5D9),
+    border = InkBlack,
+    textPrimary = InkBlack,
+    textSecondary = Color(0xFF57534B),
+    accent = Color(0xFFFFD84D),
+    shadow = InkBlack,
+    onAccent = InkBlack,
+    isDark = false
+)
+
+val DarkBrowserColors = BrowserColors(
+    background = Color(0xFF111111),
+    surface = Color(0xFF1A1A1A),
+    surfaceElevated = Color(0xFF212121),
+    surfaceCard = Color(0xFF2A2A2A),
+    border = Color(0xFFEDE8DC),
+    textPrimary = Color(0xFFF2EEE4),
+    textSecondary = Color(0xFFA9A49A),
+    accent = Color(0xFFFFD84D),
+    shadow = Color(0xFFEDE8DC),
+    onAccent = InkBlack,
+    isDark = true
+)
+
+val LocalBrowserColors = staticCompositionLocalOf { LightBrowserColors }
 
 // Dynamic properties that automatically reflect the active theme & accent everywhere in Compose
 val DarkBg: Color
@@ -89,23 +117,22 @@ val AccentCyan: Color
     @ReadOnlyComposable
     get() = LocalBrowserColors.current.accent
 
-val AccentBlue: Color
+val OnAccent: Color
     @Composable
     @ReadOnlyComposable
-    get() = LocalBrowserColors.current.accent
+    get() = LocalBrowserColors.current.onAccent
 
-val IsDarkTheme: Boolean
+val HardShadow: Color
     @Composable
     @ReadOnlyComposable
-    get() = LocalBrowserColors.current.isDark
+    get() = LocalBrowserColors.current.shadow
 
-val SurfaceSelected: Color
-    @Composable
-    @ReadOnlyComposable
-    get() = if (LocalBrowserColors.current.isDark) LocalBrowserColors.current.surfaceCard else Color(0xFFE2E2E8)
+/** Solid fill marking private-browsing UI. Content on it is ink. */
+val PrivatePurple = Color(0xFFB49CFF)
 
-val DangerRed = Color(0xFFFF453A)
-val ShieldGreen = Color(0xFF30D158)
-val FlameOrange = Color(0xFFFF9500)
-val WarningAmber = Color(0xFFF59E0B)
+// Status colours, readable as text and icons on both paper and dark surfaces.
+val DangerRed = Color(0xFFE5483F)
+val ShieldGreen = Color(0xFF22A05A)
+val FlameOrange = Color(0xFFF08C2E)
+val WarningAmber = Color(0xFFE0A800)
 

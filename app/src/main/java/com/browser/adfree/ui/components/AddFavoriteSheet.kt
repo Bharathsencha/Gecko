@@ -17,33 +17,36 @@
 
 package com.browser.adfree.ui.components
 
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddLink
-import androidx.compose.material.icons.filled.Language
-import androidx.compose.material.icons.filled.Title
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.browser.adfree.ui.theme.*
 import java.net.URI
-import java.net.URLEncoder
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -53,249 +56,89 @@ fun AddFavoriteSheet(
 ) {
     var titleInput by remember { mutableStateOf("") }
     var urlInput by remember { mutableStateOf("") }
+    var titleEdited by remember { mutableStateOf(false) }
 
-    val cleanDomain = remember(urlInput) {
+    val host = remember(urlInput) {
         val trimmed = urlInput.trim()
-        try {
-            val formatted = if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-                "https://$trimmed"
-            } else trimmed
-            val uri = URI(formatted)
-            uri.host ?: trimmed
+        if (!trimmed.contains(".")) "" else try {
+            URI(if (trimmed.contains("://")) trimmed else "https://$trimmed").host?.removePrefix("www.") ?: ""
         } catch (e: Exception) {
-            trimmed
+            ""
         }
     }
+    val canAdd = host.isNotBlank()
 
-    val previewFaviconUrl = remember(cleanDomain) {
-        if (cleanDomain.isNotBlank() && cleanDomain.contains(".")) {
-            "https://www.google.com/s2/favicons?domain_url=" + URLEncoder.encode(cleanDomain, "UTF-8") + "&sz=128"
-        } else null
+    fun submit() {
+        if (!canAdd) return
+        onAdd(titleInput.ifBlank { host }, urlInput.trim())
+        onDismissRequest()
     }
-
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
 
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
-        sheetState = sheetState,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         containerColor = SurfaceDark,
         contentColor = TextPrimary,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        tonalElevation = 0.dp,
+        dragHandle = { BrutalSheetHandle() },
+        shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .imePadding()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(start = 16.dp, end = 16.dp, bottom = 16.dp)
         ) {
-            // Header
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 20.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.AddLink,
-                    contentDescription = null,
-                    tint = AccentCyan,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "Add Shortcut",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = TextPrimary
-                )
-            }
+            Text("Add favourite", fontSize = 20.sp, fontWeight = FontWeight.Bold, color = TextPrimary)
+            Spacer(Modifier.height(16.dp))
 
-            // Live Icon Preview Squircle
-            Box(
-                modifier = Modifier
-                    .size(64.dp)
-                    .clip(RoundedCornerShape(18.dp))
-                    .background(SurfaceElevated)
-                    .border(1.5.dp, if (previewFaviconUrl != null) AccentCyan else BorderSubtle, RoundedCornerShape(18.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                if (previewFaviconUrl != null) {
-                    AsyncImage(
-                        model = previewFaviconUrl,
-                        contentDescription = "Preview Favicon",
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(RoundedCornerShape(8.dp))
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Language,
-                        contentDescription = "Website",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = if (titleInput.isNotBlank()) titleInput else if (cleanDomain.isNotBlank()) cleanDomain else "Shortcut Preview",
-                fontSize = 14.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = TextPrimary
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // URL Input Field
-            OutlinedTextField(
+            BrutalTextField(
                 value = urlInput,
                 onValueChange = {
                     urlInput = it
-                    if (titleInput.isBlank() && it.contains(".")) {
-                        val host = cleanDomain.removePrefix("www.").substringBefore(".")
-                        if (host.isNotBlank()) {
-                            titleInput = host.replaceFirstChar { char -> char.uppercase() }
-                        }
+                    if (!titleEdited) {
+                        val name = it.trim().removePrefix("https://").removePrefix("http://").removePrefix("www.").substringBefore(".")
+                        titleInput = name.replaceFirstChar { c -> c.uppercase() }
                     }
                 },
-                label = { Text("Website URL", color = TextSecondary) },
-                placeholder = { Text("e.g. twitter.com or duckduckgo.com", color = TextSecondary.copy(alpha = 0.5f)) },
-                leadingIcon = {
-                    Icon(Icons.Default.Language, contentDescription = null, tint = AccentCyan)
-                },
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Uri,
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Next,
-                    autoCorrect = false
-                ),
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary,
-                    focusedBorderColor = AccentCyan,
-                    unfocusedBorderColor = BorderSubtle,
-                    cursorColor = Color.White,
-                    focusedContainerColor = SurfaceElevated,
-                    unfocusedContainerColor = SurfaceElevated
-                ),
-                modifier = Modifier.fillMaxWidth()
+                label = "Address",
+                placeholder = "example.com",
+                keyboardType = KeyboardType.Uri
             )
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Title Input Field
-            OutlinedTextField(
+            Spacer(Modifier.height(14.dp))
+            BrutalTextField(
                 value = titleInput,
-                onValueChange = { titleInput = it },
-                label = { Text("Name / Title (Optional)", color = TextSecondary) },
-                placeholder = { Text("e.g. Twitter", color = TextSecondary.copy(alpha = 0.5f)) },
-                leadingIcon = {
-                    Icon(Icons.Default.Title, contentDescription = null, tint = AccentCyan)
+                onValueChange = {
+                    titleInput = it
+                    titleEdited = true
                 },
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Done,
-                    autoCorrect = false
-                ),
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary,
-                    focusedBorderColor = AccentCyan,
-                    unfocusedBorderColor = BorderSubtle,
-                    cursorColor = Color.White,
-                    focusedContainerColor = SurfaceElevated,
-                    unfocusedContainerColor = SurfaceElevated
-                ),
-                modifier = Modifier.fillMaxWidth()
+                label = "Name",
+                placeholder = "Shown under the tile",
+                imeAction = ImeAction.Done,
+                onImeAction = { submit() }
             )
 
-            Spacer(modifier = Modifier.height(24.dp))
-
-            // Quick Suggestion Chips
-            Text(
-                text = "POPULAR SUGGESTIONS",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = TextSecondary,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 4.dp, bottom = 8.dp)
-            )
-
-            val suggestions = listOf(
-                Pair("X / Twitter", "x.com"),
-                Pair("DuckDuckGo", "duckduckgo.com"),
-                Pair("Twitch", "twitch.tv"),
-                Pair("Amazon", "amazon.com")
-            )
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                suggestions.forEach { (name, domain) ->
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(10.dp))
-                            .background(SurfaceElevated)
-                            .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
-                            .clickable {
-                                titleInput = name
-                                urlInput = domain
-                            }
-                            .padding(vertical = 8.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = name,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = TextPrimary,
-                            maxLines = 1
-                        )
+            if (canAdd) {
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    SiteFavicon(urlInput.trim().let { if (it.contains("://")) it else "https://$it" }, size = 40.dp)
+                    Spacer(Modifier.width(12.dp))
+                    Column {
+                        Text(titleInput.ifBlank { host }, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                        Text(host, color = TextSecondary, fontSize = 12.sp)
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Add Button
-            Button(
-                onClick = {
-                    if (urlInput.isNotBlank()) {
-                        onAdd(titleInput, urlInput)
-                        onDismissRequest()
-                    }
-                },
-                enabled = urlInput.isNotBlank(),
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = AccentCyan,
-                    contentColor = DarkBg,
-                    disabledContainerColor = SurfaceCard,
-                    disabledContentColor = TextSecondary
-                ),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(50.dp)
-            ) {
-                Text(
-                    text = "Add to Favorites",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
+            Spacer(Modifier.height(20.dp))
+            BrutalButton(
+                text = "Add",
+                icon = Icons.Default.Add,
+                onClick = { submit() },
+                enabled = canAdd,
+                modifier = Modifier.fillMaxWidth().padding(end = 3.dp)
+            )
         }
     }
 }

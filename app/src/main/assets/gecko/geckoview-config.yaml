@@ -1,0 +1,57 @@
+# Read by GeckoView at startup via GeckoRuntimeSettings.configFilePath.
+# GeckoView ignores Bundle extras and user.js, so prefs must live here.
+prefs:
+  # Anti-fingerprinting (Tor Browser style): every protected user reports the
+  # same UA, screen, timezone (UTC), fonts, and spoofed canvas/WebGL values.
+  # This is resistFingerprinting's full target list run through the tunable
+  # fingerprintingProtection engine, minus one target: prefers-color-scheme,
+  # which RFP pins to light and which made every site ignore dark mode.
+  privacy.resistFingerprinting: false
+  privacy.fingerprintingProtection: true
+  privacy.fingerprintingProtection.pbmode: true
+  privacy.fingerprintingProtection.overrides: "+AllTargets,-CSSPrefersColorScheme"
+  privacy.resistFingerprinting.block_mozAddonManager: true
+  # Ask every site for plain US English, like every other protected user.
+  privacy.spoof_english: 2
+  privacy.trackingprotection.fingerprinting.enabled: true
+  privacy.trackingprotection.cryptomining.enabled: true
+  webgl.enable-debug-renderer-info: false
+  dom.battery.enabled: false
+  device.sensors.enabled: false
+  media.navigator.enabled: false
+  dom.gamepad.enabled: false
+  dom.netinfo.enabled: false
+  browser.display.use_system_colors: false
+
+  # WebRTC: never expose local or real addresses, and go through the proxy
+  # when the VPN is on.
+  media.peerconnection.ice.default_address_only: true
+  media.peerconnection.ice.no_host: true
+  media.peerconnection.ice.proxy_only_if_behind_proxy: true
+
+  # Cookie banners: reject where possible, otherwise accept to close them.
+  cookiebanners.service.mode: 2
+  cookiebanners.service.mode.privateBrowsing: 2
+  cookiebanners.service.enableGlobalRules: true
+  cookiebanners.service.enableGlobalRules.subFrames: true
+
+  # Network privacy
+  network.http.referer.XOriginTrimmingPolicy: 2
+  network.http.speculative-parallel-limit: 0
+  network.dns.disablePrefetch: true
+  network.prefetch-next: false
+  network.predictor.enabled: false
+
+  # Telemetry off
+  toolkit.telemetry.enabled: false
+  datareporting.healthreport.uploadEnabled: false
+
+  # Playback
+  media.hardware-video-decoding.enabled: true
+  media.mediasource.enabled: true
+  media.mediasource.webm.enabled: true
+  media.autoplay.default: 0
+
+  # Back/forward cache and scroll restoration
+  browser.sessionhistory.max_total_viewers: 8
+  fission.bfcacheInParent: true

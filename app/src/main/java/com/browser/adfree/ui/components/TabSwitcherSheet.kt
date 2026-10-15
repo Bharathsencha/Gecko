@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -123,200 +122,85 @@ fun TabSwitcherSheet(
     ModalBottomSheet(
         onDismissRequest = onDismissRequest,
         sheetState = sheetState,
-        containerColor = SurfaceDark,
+        containerColor = DarkBg,
         contentColor = TextPrimary,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        tonalElevation = 0.dp,
+        dragHandle = { BrutalSheetHandle() },
+        shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .fillMaxHeight(0.88f)
                 .navigationBarsPadding()
-                .padding(horizontal = 16.dp, vertical = 8.dp)
                 .alpha(contentAlpha)
                 .scale(contentScale)
         ) {
-            // 1. Dual Mode Segment Selector [ Normal Tabs (N) ] | [ Private (N) ]
+            // Normal / private switch
             Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(SurfaceElevated)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-                    .padding(3.dp),
-                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(start = 16.dp, end = 19.dp, bottom = 14.dp)
             ) {
-                // Normal Tabs Segment
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(38.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(if (!isPrivateModeSelected) SurfaceCard else Color.Transparent)
-                        .clickable { isPrivateModeSelected = false },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = null,
-                            tint = if (!isPrivateModeSelected) AccentCyan else TextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Tabs (${normalTabs.size})",
-                            fontSize = 13.sp,
-                            fontWeight = if (!isPrivateModeSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (!isPrivateModeSelected) TextPrimary else TextSecondary
-                        )
-                    }
-                }
-
-                // Private Tabs Segment
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(38.dp)
-                        .clip(RoundedCornerShape(11.dp))
-                        .background(if (isPrivateModeSelected) Color(0xFF2E1065) else Color.Transparent)
-                        .clickable { isPrivateModeSelected = true },
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.VisibilityOff,
-                            contentDescription = null,
-                            tint = if (isPrivateModeSelected) Color(0xFFA855F7) else TextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Private (${privateTabs.size})",
-                            fontSize = 13.sp,
-                            fontWeight = if (isPrivateModeSelected) FontWeight.Bold else FontWeight.Medium,
-                            color = if (isPrivateModeSelected) Color.White else TextSecondary
-                        )
-                    }
-                }
+                ModeTab(
+                    label = "Tabs",
+                    count = normalTabs.size,
+                    selected = !isPrivateModeSelected,
+                    fill = AccentCyan,
+                    modifier = Modifier.weight(1f),
+                    onClick = { isPrivateModeSelected = false }
+                )
+                ModeTab(
+                    label = "Private",
+                    count = privateTabs.size,
+                    selected = isPrivateModeSelected,
+                    fill = PrivatePurple,
+                    modifier = Modifier.weight(1f),
+                    onClick = { isPrivateModeSelected = true }
+                )
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // 2. Action Bar: Close All + New Tab button
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 14.dp)
+                    .padding(start = 16.dp, end = 19.dp, bottom = 14.dp)
             ) {
-                Text(
-                    text = if (isPrivateModeSelected) "Private Tabs" else "Open Tabs",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (isPrivateModeSelected) Color(0xFFA855F7) else TextPrimary
+                if (currentDisplayList.isNotEmpty() && !isClosingAll && selectedIndexToOpen == null) {
+                    BrutalOutlineButton(
+                        text = "Close all",
+                        onClick = { isClosingAll = true }
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                BrutalButton(
+                    text = if (isPrivateModeSelected) "New private tab" else "New tab",
+                    icon = Icons.Default.Add,
+                    fill = if (isPrivateModeSelected) PrivatePurple else AccentCyan,
+                    contentColor = InkBlack,
+                    onClick = {
+                        if (!isClosingAll && selectedIndexToOpen == null && !isOpeningNewTab) isOpeningNewTab = true
+                    }
                 )
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    if (currentDisplayList.isNotEmpty() && !isClosingAll && selectedIndexToOpen == null) {
-                        TextButton(
-                            onClick = { isClosingAll = true },
-                            colors = ButtonDefaults.textButtonColors(contentColor = DangerRed)
-                        ) {
-                            Text(
-                                text = if (isPrivateModeSelected) "Close All Private" else "Close All",
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(8.dp))
-                    }
-
-                    Button(
-                        onClick = {
-                            if (!isClosingAll && selectedIndexToOpen == null && !isOpeningNewTab) {
-                                isOpeningNewTab = true
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isPrivateModeSelected) Color(0xFFA855F7) else AccentCyan,
-                            contentColor = if (isPrivateModeSelected) Color.White else DarkBg
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 6.dp),
-                        modifier = Modifier.height(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Add,
-                            contentDescription = "New Tab",
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = if (isPrivateModeSelected) "New Private Tab" else "New Tab",
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                }
             }
+            BrutalRule()
 
-            // 3. Grid of Tabs or Empty State
             if (currentDisplayList.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(32.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(64.dp)
-                                .clip(CircleShape)
-                                .background(if (isPrivateModeSelected) Color(0xFF2E1065) else SurfaceElevated),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = if (isPrivateModeSelected) Icons.Default.VisibilityOff else Icons.Default.LayersClear,
-                                contentDescription = null,
-                                tint = if (isPrivateModeSelected) Color(0xFFA855F7) else TextSecondary,
-                                modifier = Modifier.size(32.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Text(
-                            text = if (isPrivateModeSelected) "No Private Tabs Open" else "No Open Tabs",
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = TextPrimary
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = if (isPrivateModeSelected) {
-                                "Tap 'New Private Tab' above to browse in total isolation."
-                            } else {
-                                "Tap 'New Tab' above to start browsing."
-                            },
-                            fontSize = 12.sp,
-                            color = TextSecondary,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
-                        )
-                    }
-                }
+                BrutalEmptyState(
+                    title = if (isPrivateModeSelected) "No private tabs" else "No open tabs",
+                    message = if (isPrivateModeSelected) "Private tabs keep history, cookies and site data in memory and erase them when closed."
+                    else "Open a new tab to start browsing."
+                )
             } else {
                 LazyVerticalGrid(
                     columns = GridCells.Fixed(2),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp),
                     modifier = Modifier
                         .fillMaxWidth()
                         .weight(1f),
-                    contentPadding = PaddingValues(bottom = 20.dp)
+                    contentPadding = PaddingValues(start = 16.dp, end = 19.dp, top = 16.dp, bottom = 24.dp)
                 ) {
                     itemsIndexed(currentDisplayList, key = { _, tab -> tab.id }) { _, tab ->
                         val realIndex = tabs.indexOf(tab)
@@ -324,15 +208,12 @@ fun TabSwitcherSheet(
                             tab = tab,
                             isActive = realIndex == activeTabIndex,
                             onSelect = {
-                                if (!isClosingAll && selectedIndexToOpen == null) {
-                                    selectedIndexToOpen = realIndex
-                                }
+                                if (!isClosingAll && selectedIndexToOpen == null) selectedIndexToOpen = realIndex
                             },
                             onClose = {
-                                if (!isClosingAll && selectedIndexToOpen == null) {
-                                    onCloseTab(realIndex)
-                                }
-                            }
+                                if (!isClosingAll && selectedIndexToOpen == null) onCloseTab(realIndex)
+                            },
+                            modifier = Modifier.animateItem()
                         )
                     }
                 }
@@ -342,147 +223,112 @@ fun TabSwitcherSheet(
 }
 
 @Composable
-fun TabCard(
+private fun ModeTab(
+    label: String,
+    count: Int,
+    selected: Boolean,
+    fill: Color,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = modifier
+            .height(44.dp)
+            .brutalPressable(
+                fill = if (selected) fill else SurfaceDark,
+                border = BorderSubtle,
+                shadow = HardShadow,
+                shadowOffset = if (selected) 0.dp else 3.dp,
+                role = androidx.compose.ui.semantics.Role.Tab,
+                onClick = onClick
+            )
+    ) {
+        Text(label, color = if (selected) InkBlack else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(8.dp))
+        Text(count.toString(), color = if (selected) InkBlack else TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun TabCard(
     tab: TabModel,
     isActive: Boolean,
     onSelect: () -> Unit,
-    onClose: () -> Unit
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val host = remember(tab.url) {
-        try {
-            val uri = URI(tab.url)
-            val h = uri.host ?: ""
-            if (h.startsWith("www.")) h.substring(4) else h
-        } catch (e: Exception) {
-            tab.url
-        }
+        try { URI(tab.url).host?.removePrefix("www.") ?: "" } catch (e: Exception) { "" }
+    }
+    val isHome = tab.url == "about:home" || tab.url.isBlank()
+    val headerFill = when {
+        tab.isPrivate -> PrivatePurple
+        isActive -> AccentCyan
+        else -> SurfaceCard
     }
 
-    val faviconUrl = remember(tab.url) {
-        if (tab.url != "about:home" && tab.url.isNotBlank()) {
-            try {
-                val uri = URI(tab.url)
-                val h = uri.host ?: tab.url
-                "https://www.google.com/s2/favicons?domain_url=" + URLEncoder.encode(h, "UTF-8") + "&sz=128"
-            } catch (e: Exception) {
-                null
-            }
-        } else null
-    }
-
-    val activeBorderColor = if (tab.isPrivate) Color(0xFFA855F7) else AccentCyan
-    val inactiveBorderColor = if (tab.isPrivate) Color(0xFFA855F7).copy(alpha = 0.35f) else BorderSubtle
-
-    Box(
-        modifier = Modifier
+    Column(
+        modifier = modifier
             .fillMaxWidth()
-            .height(118.dp)
-            .clip(RoundedCornerShape(16.dp))
-            .background(
-                if (tab.isPrivate) {
-                    if (isActive) Color(0xFF2E1065) else Color(0xFF1E1035).copy(alpha = 0.8f)
-                } else {
-                    if (isActive) SurfaceCard else SurfaceElevated
-                }
+            .height(132.dp)
+            .brutalPressable(
+                fill = SurfaceDark,
+                border = BorderSubtle,
+                shadow = HardShadow,
+                shadowOffset = if (isActive) 5.dp else 3.dp,
+                onClick = onSelect
             )
-            .border(
-                width = if (isActive) 2.dp else 1.dp,
-                color = if (isActive) activeBorderColor else inactiveBorderColor,
-                shape = RoundedCornerShape(16.dp)
-            )
-            .clickable { onSelect() }
-            .padding(12.dp)
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp)
+                .background(headerFill, RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp))
+                .padding(start = 10.dp)
         ) {
-            // Top Row: Favicon / Globe / Mask + Close button
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                if (tab.isPrivate) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color(0xFFA855F7).copy(alpha = 0.25f))
-                            .padding(horizontal = 5.dp, vertical = 2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VisibilityOff,
-                            contentDescription = "Private",
-                            tint = Color(0xFFA855F7),
-                            modifier = Modifier.size(13.dp)
-                        )
-                        Spacer(modifier = Modifier.width(3.dp))
-                        Text(
-                            text = "Private",
-                            color = Color(0xFFA855F7),
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-                } else if (faviconUrl != null) {
-                    AsyncImage(
-                        model = faviconUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Fit,
-                        modifier = Modifier
-                            .size(20.dp)
-                            .clip(RoundedCornerShape(4.dp))
-                    )
-                } else {
-                    Icon(
-                        imageVector = Icons.Default.Public,
-                        contentDescription = null,
-                        tint = if (isActive) AccentCyan else TextSecondary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Box(
-                    modifier = Modifier
-                        .size(26.dp)
-                        .clip(CircleShape)
-                        .background(SurfaceDark)
-                        .border(1.dp, BorderSubtle, CircleShape)
-                        .clickable(onClick = onClose),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close Tab",
-                        tint = TextPrimary.copy(alpha = 0.85f),
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
+            if (tab.isPrivate) {
+                PrivateMask(maskColor = InkBlack, eyeColor = PrivatePurple, modifier = Modifier.size(width = 20.dp, height = 13.dp))
+            } else if (!isHome) {
+                SiteFavicon(tab.url, size = 22.dp)
+            } else {
+                Icon(Icons.Default.Public, contentDescription = null, tint = InkBlack, modifier = Modifier.size(18.dp))
             }
-
-            // Bottom Section: Title and Domain
-            Column {
-                Text(
-                    text = if (tab.title.isBlank() || tab.title == "Start Page") {
-                        if (tab.isPrivate) "Private Browsing" else "Start Page"
-                    } else tab.title,
-                    color = TextPrimary,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = if (host.isBlank() || host == "about:home") {
-                        if (tab.isPrivate) "Private Session" else "Start Page"
-                    } else host,
-                    color = if (tab.isPrivate) Color(0xFFA855F7).copy(alpha = 0.8f) else TextSecondary,
-                    fontSize = 11.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+            Spacer(Modifier.weight(1f))
+            BrutalIconButton(
+                icon = Icons.Default.Close,
+                contentDescription = "Close tab",
+                onClick = onClose,
+                tint = if (tab.isPrivate || isActive) InkBlack else TextPrimary,
+                iconSize = 18.dp,
+                modifier = Modifier.size(40.dp)
+            )
+        }
+        BrutalRule()
+        Column(
+            verticalArrangement = Arrangement.Bottom,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(10.dp)
+        ) {
+            Text(
+                text = when {
+                    isHome -> if (tab.isPrivate) "Private start page" else "Start page"
+                    tab.title.isBlank() -> host
+                    else -> tab.title
+                },
+                color = TextPrimary,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                lineHeight = 17.sp
+            )
+            if (!isHome && host.isNotBlank()) {
+                Spacer(Modifier.height(2.dp))
+                Text(host, color = TextSecondary, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
     }

@@ -9,6 +9,7 @@
 
 package com.browser.adfree.ui.components
 
+import com.browser.adfree.ui.theme.*
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -18,7 +19,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Download
@@ -45,6 +45,7 @@ import kotlin.math.roundToInt
 @Composable
 fun FloatingVideoDownloadButton(
     videoCount: Int,
+    summary: String?,
     onTap: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -66,45 +67,33 @@ fun FloatingVideoDownloadButton(
                 }
             }
     ) {
-        Surface(
-            onClick = onTap,
-            shape = RoundedCornerShape(20.dp),
-            color = Color(0xFF141923).copy(alpha = 0.94f),
-            shadowElevation = 6.dp,
-            tonalElevation = 4.dp,
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .height(38.dp)
-                .clip(RoundedCornerShape(20.dp))
-                .border(
-                    width = 1.dp,
-                    brush = Brush.horizontalGradient(
-                        listOf(
-                            AccentCyan.copy(alpha = 0.7f),
-                            Color(0xFF38BDF8).copy(alpha = 0.4f),
-                            AccentCyan.copy(alpha = 0.7f)
-                        )
-                    ),
-                    shape = RoundedCornerShape(20.dp)
+                .height(44.dp)
+                .brutalPressable(
+                    fill = AccentCyan,
+                    border = BorderSubtle,
+                    shadow = HardShadow,
+                    shadowOffset = 3.dp,
+                    onClick = onTap
                 )
+                .padding(horizontal = 14.dp)
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Download,
-                    contentDescription = "Download Video",
-                    tint = AccentCyan,
-                    modifier = Modifier.size(17.dp)
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = if (videoCount > 1) "Download ($videoCount)" else "Download",
-                    color = Color.White,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold
-                )
-            }
+            Icon(
+                imageVector = Icons.Default.Download,
+                contentDescription = null,
+                tint = OnAccent,
+                modifier = Modifier.size(18.dp)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = summary ?: "Download",
+                color = OnAccent,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1
+            )
         }
     }
 }

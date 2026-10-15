@@ -50,60 +50,6 @@ function injectCosmeticAdBlockStyle() {
     }
 }
 
-function injectScriptletSurrogates() {
-    try {
-        const script = document.createElement("script");
-        script.textContent = `(function() {
-            try {
-                // AdsByGoogle stub
-                window.adsbygoogle = window.adsbygoogle || [];
-                window.adsbygoogle.loaded = true;
-                window.adsbygoogle.push = function(a) {
-                    if (typeof a === 'function') {
-                        try { a(); } catch (e) {}
-                    }
-                };
-
-                // Google Publisher Tag (GPT) stub
-                window.googletag = window.googletag || { cmd: [] };
-                window.googletag.apiReady = true;
-                window.googletag.pubads = function() {
-                    return {
-                        addEventListener: function() {},
-                        enableSingleRequest: function() {},
-                        setTargeting: function() {},
-                        collapseEmptyDivs: function() {},
-                        clearTargeting: function() {},
-                        refresh: function() {},
-                        disableInitialLoad: function() {},
-                        getSlots: function() { return []; }
-                    };
-                };
-                window.googletag.enableServices = function() {};
-                window.googletag.display = function() {};
-                window.googletag.defineSlot = function() {
-                    return {
-                        addService: function() { return this; },
-                        setTargeting: function() { return this; },
-                        setCollapseEmptyDiv: function() { return this; }
-                    };
-                };
-
-                // Google Analytics / GTag stub
-                window.ga = window.ga || function() {};
-                window.gtag = window.gtag || function() {};
-                window.dataLayer = window.dataLayer || [];
-
-                // Facebook Pixel stub
-                window.fbq = window.fbq || function() {};
-                window._fbq = window._fbq || window.fbq;
-            } catch (e) {}
-        })();`;
-        (document.head || document.documentElement).appendChild(script);
-        script.remove();
-    } catch (e) {}
-}
-
 // Google AI Overview Blocker
 const AI_OVERVIEW_SELECTORS = [
     "#Odp5De",
@@ -146,7 +92,10 @@ function injectAiOverrideStyle() {
     }
 }
 
+let aiBlockingEnabled = true;
+
 function removeAiNodes(root) {
+    if (!aiBlockingEnabled) return;
     const host = (window.location.hostname || "").toLowerCase();
     if (!host.includes("google.")) return;
     try {
@@ -191,11 +140,12 @@ function initSpaScrollRestoration() {
         }
     }
 
-    // Capture scroll continuously
+    // Save the position at most every 300 ms; writing storage on every scroll
+    // event made scrolling stutter.
+    let saveTimer = 0;
     window.addEventListener('scroll', () => {
-        if (!isRestoring) {
-            saveCurrentPos();
-        }
+        if (isRestoring || saveTimer) return;
+        saveTimer = setTimeout(() => { saveTimer = 0; saveCurrentPos(); }, 300);
     }, { passive: true });
 
     // Capture on clicks (before SPA navigation begins)
@@ -380,48 +330,6 @@ function initClientDownloadInterceptor() {
             handleDownloadElement(link);
         }
     }, true);
-}
-
-// Web Share API Native Chooser Bridge
-function initWebShareBridge() {
-    try {
-        const script = document.createElement("script");
-        script.textContent = `(function() {
-            try {
-                const handler = async function(data) {
-                    window.postMessage({
-                        type: "__gecko_web_share__",
-                        title: (data && data.title) || document.title || "",
-                        text: (data && data.text) || "",
-                        url: (data && data.url) || window.location.href
-                    }, "*");
-                    return Promise.resolve();
-                };
-                if (navigator.share) {
-                    navigator.share = handler;
-                } else {
-                    Object.defineProperty(navigator, 'share', {
-                        value: handler,
-                        configurable: true,
-                        writable: true
-                    });
-                }
-            } catch (e) {}
-        })();`;
-        (document.head || document.documentElement).appendChild(script);
-        script.remove();
-
-        window.addEventListener("message", (event) => {
-            if (event.data && event.data.type === "__gecko_web_share__") {
-                browser.runtime.sendMessage({
-                    action: "share_payload",
-                    title: event.data.title,
-                    text: event.data.text,
-                    url: event.data.url
-                }).catch(() => {});
-            }
-        });
-    } catch (e) {}
 }
 
 // Universal Video & Media Sniffer Engine (Cat-Catch In-Browser Architecture)
@@ -713,7 +621,7 @@ function initUniversalMediaSniffer() {
 
     function safeScan() {
         const now = Date.now();
-        if (now - lastScanTime < 400) return;
+        if (now - lastScanTime < 1500) return;
         lastScanTime = now;
 
         const host = window.location.hostname.toLowerCase();
@@ -727,7 +635,8 @@ function initUniversalMediaSniffer() {
     }
 
     // Attach listeners on media playback events (Triggered when video actually plays)
-    ["play", "playing", "loadedmetadata", "loadeddata", "canplay", "timeupdate"].forEach(evt => {
+    // No timeupdate: it fires several times a second and each scan walks the DOM.
+    ["play", "playing", "loadedmetadata", "loadeddata", "canplay"].forEach(evt => {
         document.addEventListener(evt, (e) => {
             if (e.target && (e.target.tagName === "VIDEO" || e.target.tagName === "AUDIO")) {
                 safeScan();
@@ -749,28 +658,205 @@ function initUniversalMediaSniffer() {
 }
 
 
-// Init
-injectCosmeticAdBlockStyle();
-injectScriptletSurrogates();
+// YouTube ad fast-forward. uBO and the request blocker leave YouTube alone
+// (blocking trips its anti-adblock wall); ads still load but are muted, run
+// at 16x, jumped to their end and skipped the moment the button exists.
+function initYouTubeAdSkipper() {
+    if (window !== window.top) return;
+    if (!/(^|\.)youtube\.com$/.test(window.location.hostname)) return;
+
+    const SKIP_SELECTORS = [
+        ".ytp-ad-skip-button",
+        ".ytp-ad-skip-button-modern",
+        ".ytp-skip-ad-button",
+        ".ytp-ad-skip-button-container button",
+        "ytm-skip-ad-button button",
+        "button[id^='skip-button']",
+        "[class*='skip-ad'] button",
+        "button[class*='skip-button']"
+    ].join(", ");
+
+    const style = document.createElement("style");
+    style.textContent = `
+        ytd-ad-slot-renderer, ytd-in-feed-ad-layout-renderer, ytd-promoted-sparkles-web-renderer,
+        ytm-promoted-sparkles-web-renderer, ytm-companion-ad-renderer, ytd-player-legacy-desktop-watch-ads-renderer,
+        .ytp-ad-overlay-container, .ytp-ad-image-overlay, ytd-banner-promo-renderer, ytm-promoted-video-renderer,
+        ad-slot-renderer, ytm-ad-slot-renderer {
+            display: none !important;
+        }
+    `;
+    (document.head || document.documentElement).appendChild(style);
+
+    let saved = null;
+
+    function inAd(player) {
+        return player.classList.contains("ad-showing") || player.classList.contains("ad-interrupting");
+    }
+
+    function tick() {
+        const player = document.querySelector("#movie_player, .html5-video-player");
+        if (!player) return;
+        const video = player.querySelector("video");
+        if (!video) return;
+
+        if (inAd(player)) {
+            if (!saved) saved = { muted: video.muted, rate: video.playbackRate > 4 ? 1 : (video.playbackRate || 1) };
+            video.muted = true;
+            // 16x is the fastest Gecko plays; jumping to the end finishes the
+            // ad as soon as its length is known, then Skip is pressed if shown.
+            if (video.playbackRate !== 16) video.playbackRate = 16;
+            const d = video.duration;
+            if (isFinite(d) && d > 0.5 && video.currentTime < d - 0.3) {
+                try { video.currentTime = d - 0.1; } catch (e) {}
+            }
+            const skip = document.querySelector(SKIP_SELECTORS);
+            if (skip) skip.click();
+        } else if (saved) {
+            video.muted = saved.muted;
+            video.playbackRate = saved.rate;
+            saved = null;
+        }
+    }
+
+    // React the moment an ad's media loads instead of waiting for a timer.
+    ["loadedmetadata", "durationchange", "playing", "timeupdate", "ratechange"].forEach((evt) => {
+        document.addEventListener(evt, (e) => {
+            if (e.target && e.target.tagName === "VIDEO") tick();
+        }, true);
+    });
+    setInterval(tick, 100);
+    const observer = new MutationObserver(tick);
+    const attach = () => {
+        const player = document.querySelector("#movie_player, .html5-video-player");
+        if (player) observer.observe(player, { attributes: true, attributeFilter: ["class"], childList: true, subtree: true });
+        else setTimeout(attach, 300);
+    };
+    attach();
+    window.addEventListener("yt-navigate-finish", attach);
+}
+
+// Page commands from the app (zoom, night mode, reader), delivered over a
+// per-tab native port so the right tab gets them.
+const NIGHT_STYLE_ID = "aifree-night-mode";
+const NIGHT_CSS = "html { filter: invert(90%) hue-rotate(180deg) !important; background: #111 !important; } " +
+    "img, video, canvas, svg image, picture, iframe, [style*='background-image'] { filter: invert(100%) hue-rotate(180deg) !important; }";
+
+function setNightMode(enabled) {
+    let el = document.getElementById(NIGHT_STYLE_ID);
+    if (enabled && !el) {
+        el = document.createElement("style");
+        el.id = NIGHT_STYLE_ID;
+        el.textContent = NIGHT_CSS;
+        (document.head || document.documentElement).appendChild(el);
+    } else if (!enabled && el) {
+        el.remove();
+    }
+}
+
+function setPageZoom(percent) {
+    const factor = Math.max(0.3, Math.min(3, (percent || 100) / 100));
+    document.documentElement.style.zoom = factor === 1 ? "" : String(factor);
+}
+
+function initAppPort() {
+    if (window !== window.top) return;
+    if (!browser.runtime || !browser.runtime.connectNative) return;
+    let attempts = 0;
+
+    function connect() {
+        let port;
+        try {
+            port = browser.runtime.connectNative("browser_app");
+        } catch (e) {
+            return;
+        }
+        port.onMessage.addListener((msg) => {
+            if (!msg || !msg.cmd) return;
+            if (msg.cmd === "set_zoom") setPageZoom(msg.percent);
+            else if (msg.cmd === "set_dark") setNightMode(!!msg.enabled);
+            else if (msg.cmd === "extract_article") {
+                port.postMessage({ action: "article_result", url: window.location.href, article: extractArticleContent(document) });
+            }
+        });
+        port.onDisconnect.addListener(() => {
+            // The app attaches its per-tab delegate shortly after the session opens.
+            if (attempts++ < 5) setTimeout(connect, 1500);
+        });
+        port.postMessage({ action: "page_ready", url: window.location.href });
+    }
+    connect();
+}
+
+// Offer to save a login when a form with a filled password field is submitted.
+// The app drops the offer for private tabs and when saving is turned off.
+function initLoginCapture() {
+    let lastOffer = "";
+    function offerFrom(root) {
+        const pw = Array.from(root.querySelectorAll("input[type='password']")).find(i => i.value && i.value.length > 0);
+        if (!pw) return;
+        const fields = Array.from(root.querySelectorAll("input[type='email'], input[type='text'], input[autocomplete='username'], input:not([type])"));
+        const before = fields.filter(f => f.value && (f.compareDocumentPosition(pw) & Node.DOCUMENT_POSITION_FOLLOWING));
+        const user = (before.length ? before[before.length - 1] : fields.find(f => f.value)) || null;
+        const key = window.location.hostname + "|" + (user ? user.value : "") + "|" + pw.value.length;
+        if (key === lastOffer) return;
+        lastOffer = key;
+        browser.runtime.sendMessage({
+            action: "offer_save_password",
+            domain: window.location.hostname,
+            username: user ? user.value : "",
+            password: pw.value
+        }).catch(() => {});
+    }
+    document.addEventListener("submit", (e) => {
+        if (e.target && e.target.querySelector) offerFrom(e.target);
+    }, true);
+    // Many sites log in through a button handler instead of a real submit.
+    document.addEventListener("click", (e) => {
+        const btn = e.target && e.target.closest && e.target.closest("button, input[type='submit'], [role='button']");
+        if (!btn) return;
+        const form = btn.closest("form") || document;
+        setTimeout(() => offerFrom(form), 0);
+    }, true);
+}
+
+// Init: defaults apply immediately, stored flags correct them once read.
+const isYouTubeHost = /(^|\.)youtube\.com$/.test(window.location.hostname);
+// No script injection into pages: stubbed globals and patched APIs are
+// visible to fingerprinting scripts. uBO supplies its own surrogates.
+if (!isYouTubeHost) {
+    injectCosmeticAdBlockStyle();
+}
 watchForGoogleAiOverview();
 initSpaScrollRestoration();
-initBackgroundMediaPlayback();
+// Background playback needs the page to think it is visible; only YouTube needs it.
+if (isYouTubeHost) initBackgroundMediaPlayback();
 initClientDownloadInterceptor();
-initWebShareBridge();
 initUniversalMediaSniffer();
+initYouTubeAdSkipper();
+initAppPort();
+initLoginCapture();
+
+browser.storage.local.get("contentFlags").then((res) => {
+    const flags = (res && res.contentFlags) || {};
+    if (flags.cosmetic === false) {
+        const el = document.getElementById("aifree-cosmetic-ad-block");
+        if (el) el.remove();
+    }
+    if (flags.blockAi === false) {
+        aiBlockingEnabled = false;
+        const el = document.getElementById("aifree-ai-block");
+        if (el) el.remove();
+    }
+    if (flags.dark) setNightMode(true);
+}).catch(() => {});
 
 window.addEventListener("DOMContentLoaded", () => {
-    injectCosmeticAdBlockStyle();
+    if (!isYouTubeHost && document.getElementById("aifree-cosmetic-ad-block") === null) {
+        browser.storage.local.get("contentFlags").then((res) => {
+            const flags = (res && res.contentFlags) || {};
+            if (flags.cosmetic !== false) injectCosmeticAdBlockStyle();
+        }).catch(() => {});
+    }
     removeAiNodes(document);
 });
-
-// Listen for commands from native app
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.action === "extract_article") {
-        sendResponse(extractArticleContent(document));
-    }
-    return true;
-});
-
-
 

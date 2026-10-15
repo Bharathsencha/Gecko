@@ -21,26 +21,45 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
-import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -51,19 +70,66 @@ import com.browser.adfree.model.DetectedVideo
 import com.browser.adfree.model.VideoQualityOption
 import com.browser.adfree.ui.theme.*
 
-private enum class DownloadMediaType {
-    VIDEO,
-    AUDIO
-}
+private enum class MediaKind { VIDEO, AUDIO }
 
-/**
- * True when the extractor flagged the stream as carrying no usable audio.
- * Selecting one of these silently produces a file with no sound.
- */
+/** True when the extractor flagged the stream as having no audio track. */
 private fun looksSilent(option: VideoQualityOption): Boolean =
     option.label.contains("Video only", ignoreCase = true) ||
         option.label.contains("Audio unknown", ignoreCase = true) ||
         option.label.contains("no audio", ignoreCase = true)
+
+private fun heightOf(option: VideoQualityOption): Int? {
+    Regex("x(\\d{3,4})").find(option.resolution)?.groupValues?.get(1)?.toIntOrNull()?.let { return it }
+    return Regex("(\\d{3,4})p").find(option.resolution + " " + option.label)?.groupValues?.get(1)?.toIntOrNull()
+}
+
+private fun kbpsOf(option: VideoQualityOption): Int? =
+    Regex("(\\d{2,3})\\s?k").find(option.label)?.groupValues?.get(1)?.toIntOrNull()
+
+/**
+ * One row per resolution: among the streams for a height, prefer one that
+ * has sound, then the user's codec preference, then the widely playable MP4.
+ */
+private fun collapseVideo(list: List<VideoQualityOption>, preferAv1: Boolean): List<VideoQualityOption> {
+    val (sized, unsized) = list.partition { heightOf(it) != null }
+    val best = sized.groupBy { heightOf(it)!! }.map { (_, group) ->
+        group.sortedWith(
+            compareBy<VideoQualityOption>(
+                { looksSilent(it) },
+                { if (preferAv1) !it.isAv1 else it.isAv1 },
+                { it.isWebm },
+                { !it.isProgressive && it.audioUrl == null }
+            )
+        ).first()
+    }.sortedByDescending { heightOf(it) }
+    return best + unsized.distinctBy { it.label }
+}
+
+private fun titleFor(option: VideoQualityOption, kind: MediaKind): String = when (kind) {
+    MediaKind.VIDEO -> heightOf(option)?.let { h -> if (h >= 2160) "4K" else "${h}p" } ?: option.label.ifBlank { "Video" }
+    MediaKind.AUDIO -> kbpsOf(option)?.let { "$it kbps" } ?: option.label.ifBlank { "Audio" }
+}
+
+private fun detailFor(option: VideoQualityOption): String {
+    val format = when {
+        option.isAudioOnly && (option.codec?.contains("opus", true) == true || option.isWebm) -> "Opus"
+        option.isAudioOnly -> "M4A"
+        option.format.equals("M3U8", true) -> "Stream"
+        option.isWebm -> "WebM"
+        else -> "MP4"
+    }
+    val parts = mutableListOf(format)
+    if (option.isAv1) parts += "AV1"
+    if (option.estimatedSizeBytes > 0) parts += VideoQualityParser.formatFileSize(option.estimatedSizeBytes)
+    return parts.joinToString("  |  ")
+}
+
+private fun extensionFor(option: VideoQualityOption): String = when {
+    option.format == "M3U8" -> "mp4"
+    option.isAudioOnly -> if (option.format == "WEBM" || option.codec?.contains("opus", true) == true) "opus" else if (option.format == "MP3") "mp3" else "m4a"
+    option.format == "WEBM" -> "webm"
+    else -> "mp4"
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -76,647 +142,237 @@ fun VideoDownloadSheet(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-
-    val rawVideoQualities = remember(video) { video.videoQualities }
-    val videoQualities = remember(rawVideoQualities, showWebm) {
-        if (showWebm || rawVideoQualities.none { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }) {
-            rawVideoQualities
-        } else {
-            rawVideoQualities.filter { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }
-        }
+    val videoOptions = remember(video, preferAv1, showWebm) {
+        val pool = video.videoQualities.let { all -> if (showWebm || all.none { !it.isWebm }) all else all.filter { !it.isWebm } }
+        collapseVideo(pool, preferAv1)
     }
-    val rawAudioQualities = remember(video) { video.audioQualities }
-    val audioQualities = remember(rawAudioQualities, showWebm) {
-        if (showWebm || rawAudioQualities.none { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }) {
-            rawAudioQualities
-        } else {
-            rawAudioQualities.filter { !it.isWebm && !it.format.equals("WEBM", ignoreCase = true) }
-        }
+    val audioOptions = remember(video, showWebm) {
+        val pool = video.audioQualities.let { all -> if (showWebm || all.none { !it.isWebm }) all else all.filter { !it.isWebm } }
+        pool.sortedByDescending { kbpsOf(it) ?: 0 }.distinctBy { titleFor(it, MediaKind.AUDIO) + it.isWebm }
     }
-
-    var selectedTab by remember {
-        mutableStateOf(if (videoQualities.isNotEmpty()) DownloadMediaType.VIDEO else DownloadMediaType.AUDIO)
-    }
-
-    var selectedOption by remember(selectedTab, video, videoQualities, audioQualities, preferAv1) {
+    // Formats can arrive after the sheet opens; until the user picks a tab,
+    // follow whichever list has content, video first.
+    var chosenKind by remember { mutableStateOf<MediaKind?>(null) }
+    val kind = chosenKind ?: if (videoOptions.isNotEmpty() || audioOptions.isEmpty()) MediaKind.VIDEO else MediaKind.AUDIO
+    val options = if (kind == MediaKind.VIDEO) videoOptions else audioOptions
+    var selectedId by remember(kind, options) {
         mutableStateOf(
-            if (selectedTab == DownloadMediaType.VIDEO) {
-                // Prefer a progressive stream: it already contains both tracks, so it
-                // needs no muxing and cannot end up silent or split into two files.
-                (if (preferAv1) videoQualities.firstOrNull { it.isAv1 } else null)
-                    ?: videoQualities.firstOrNull { it.isProgressive }
-                    ?: videoQualities.firstOrNull { !looksSilent(it) }
-                    ?: videoQualities.firstOrNull()
-                    ?: video.qualities.firstOrNull()
-            } else {
-                audioQualities.firstOrNull() ?: video.qualities.firstOrNull()
-            }
+            (if (kind == MediaKind.VIDEO) options.firstOrNull { !looksSilent(it) && (heightOf(it) ?: 0) <= 1080 } else null)?.id
+                ?: options.firstOrNull()?.id
         )
     }
-
-    // AV1 confirmation dialog state
-    var showAv1ChoiceDialog by remember { mutableStateOf(false) }
-    var pendingDownloadOption by remember { mutableStateOf<VideoQualityOption?>(null) }
+    val selected = options.firstOrNull { it.id == selectedId }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = DarkBg,
-        dragHandle = {
-            Surface(
-                modifier = Modifier.padding(top = 10.dp, bottom = 6.dp),
-                color = TextSecondary.copy(alpha = 0.35f),
-                shape = RoundedCornerShape(2.dp)
-            ) {
-                Box(modifier = Modifier.size(width = 36.dp, height = 4.dp))
-            }
-        },
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        containerColor = SurfaceDark,
+        contentColor = TextPrimary,
+        tonalElevation = 0.dp,
+        dragHandle = { BrutalSheetHandle() },
+        shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp),
         modifier = modifier
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(horizontal = 18.dp)
-                .padding(bottom = 28.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 12.dp)
         ) {
-            // Header Row: Title + Close
+            // What is being downloaded
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.padding(start = 16.dp, end = 4.dp, bottom = 16.dp)
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.DownloadForOffline,
-                        contentDescription = null,
-                        tint = AccentCyan,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "Download Media",
-                        color = TextPrimary,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold
-                    )
-                }
-
-                IconButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Close,
-                        contentDescription = "Close",
-                        tint = TextSecondary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Video Preview Card
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(SurfaceElevated)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-                    .padding(10.dp)
-            ) {
-                // Thumbnail Box
                 Box(
                     modifier = Modifier
-                        .size(width = 84.dp, height = 56.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(Color(0xFF1E2430)),
-                    contentAlignment = Alignment.Center
+                        .size(width = 96.dp, height = 54.dp)
+                        .brutalBox(fill = SurfaceCard, border = BorderSubtle, shape = RoundedCornerShape(5.dp))
+                        .clip(RoundedCornerShape(5.dp)),
+                    contentAlignment = Alignment.BottomEnd
                 ) {
-                    if (!video.thumbnail.isNullOrBlank()) {
+                    if (video.thumbnail != null) {
                         AsyncImage(
                             model = video.thumbnail,
                             contentDescription = null,
                             contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        Icon(
-                            imageVector = if (selectedTab == DownloadMediaType.VIDEO) Icons.Default.PlayCircle else Icons.Default.Audiotrack,
-                            contentDescription = null,
-                            tint = TextSecondary,
-                            modifier = Modifier.size(28.dp)
+                            modifier = Modifier.matchParentSize()
                         )
                     }
-
                     if (video.durationSeconds > 0) {
-                        Box(
+                        Text(
+                            VideoQualityParser.formatDuration(video.durationSeconds),
+                            color = Color.White,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
                             modifier = Modifier
-                                .align(Alignment.BottomEnd)
                                 .padding(3.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color.Black.copy(alpha = 0.75f))
+                                .background(InkBlack, RoundedCornerShape(2.dp))
                                 .padding(horizontal = 4.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = VideoQualityParser.formatDuration(video.durationSeconds),
-                                color = Color.White,
-                                fontSize = 9.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        )
                     }
                 }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                // Title + Domain
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = video.title,
-                        color = TextPrimary,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(video.title, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 2, overflow = TextOverflow.Ellipsis, lineHeight = 19.sp)
                     if (video.sourceDomain.isNotBlank()) {
-                        Text(
-                            text = video.sourceDomain,
-                            color = AccentCyan,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Medium
-                        )
+                        Text(video.sourceDomain.removePrefix("www."), color = TextSecondary, fontSize = 12.sp, maxLines = 1)
                     }
                 }
+                BrutalIconButton(Icons.Default.Close, "Close", onDismiss)
             }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // Top Segmented Tabs: Video vs Audio
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(42.dp)
-                    .clip(RoundedCornerShape(21.dp))
-                    .background(SurfaceElevated)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(21.dp))
-                    .padding(3.dp)
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 19.dp, bottom = 14.dp)
             ) {
-                // Video Tab
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(if (selectedTab == DownloadMediaType.VIDEO) AccentCyan else Color.Transparent)
-                        .clickable {
-                            selectedTab = DownloadMediaType.VIDEO
-                            selectedOption = videoQualities.firstOrNull() ?: video.qualities.firstOrNull()
-                        }
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Movie,
-                            contentDescription = null,
-                            tint = if (selectedTab == DownloadMediaType.VIDEO) DarkBg else TextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Video (${videoQualities.size})",
-                            color = if (selectedTab == DownloadMediaType.VIDEO) DarkBg else TextSecondary,
-                            fontSize = 13.sp,
-                            fontWeight = if (selectedTab == DownloadMediaType.VIDEO) FontWeight.Bold else FontWeight.Medium
-                        )
-                    }
-                }
-
-                // Audio Tab
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(if (selectedTab == DownloadMediaType.AUDIO) AccentCyan else Color.Transparent)
-                        .clickable {
-                            selectedTab = DownloadMediaType.AUDIO
-                            selectedOption = audioQualities.firstOrNull() ?: video.qualities.firstOrNull()
-                        }
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.Audiotrack,
-                            contentDescription = null,
-                            tint = if (selectedTab == DownloadMediaType.AUDIO) DarkBg else TextSecondary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = "Audio (${audioQualities.size})",
-                            color = if (selectedTab == DownloadMediaType.AUDIO) DarkBg else TextSecondary,
-                            fontSize = 13.sp,
-                            fontWeight = if (selectedTab == DownloadMediaType.AUDIO) FontWeight.Bold else FontWeight.Medium
-                        )
-                    }
-                }
+                KindTab("Video", videoOptions.size, kind == MediaKind.VIDEO, Modifier.weight(1f)) { chosenKind = MediaKind.VIDEO }
+                KindTab("Audio", audioOptions.size, kind == MediaKind.AUDIO, Modifier.weight(1f)) { chosenKind = MediaKind.AUDIO }
             }
 
-            Spacer(modifier = Modifier.height(14.dp))
-
-            // Quality Options List
-            val currentList = if (selectedTab == DownloadMediaType.VIDEO) videoQualities else audioQualities
-
-            if (currentList.isEmpty()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(120.dp),
-                    contentAlignment = Alignment.Center
-                ) {
+            BrutalRule()
+            if (options.isEmpty()) {
+                Column(Modifier.padding(16.dp)) {
                     Text(
-                        text = if (selectedTab == DownloadMediaType.VIDEO) "No direct video streams found" else "No audio-only streams available",
-                        color = TextSecondary,
-                        fontSize = 13.sp
+                        if (kind == MediaKind.VIDEO) "Finding video formats" else "Finding audio formats",
+                        color = TextPrimary,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.SemiBold
                     )
+                    Spacer(Modifier.height(10.dp))
+                    BrutalProgressLine(progress = null)
+                    Spacer(Modifier.height(8.dp))
+                    Text("This can take a few seconds the first time.", color = TextSecondary, fontSize = 12.5.sp)
                 }
             } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 220.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(currentList, key = { it.id }) { option ->
-                        val isSelected = selectedOption?.id == option.id
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) AccentCyan.copy(alpha = 0.12f) else SurfaceElevated)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) AccentCyan else BorderSubtle,
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .clickable { selectedOption = option }
-                                .padding(horizontal = 14.dp, vertical = 11.dp)
-                        ) {
-                            // Left: Radio + Label + Codec
-                            Row(
-                                modifier = Modifier.weight(1f),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                RadioButton(
-                                    selected = isSelected,
-                                    onClick = { selectedOption = option },
-                                    colors = RadioButtonDefaults.colors(
-                                        selectedColor = AccentCyan,
-                                        unselectedColor = TextSecondary.copy(alpha = 0.6f)
-                                    ),
-                                    modifier = Modifier.size(20.dp)
-                                )
-
-                                Spacer(modifier = Modifier.width(10.dp))
-
-                                Column {
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(
-                                            text = option.label,
-                                            color = TextPrimary,
-                                            fontSize = 14.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                        )
-
-                                        if (option.isAv1) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(Color(0xFF8B5CF6).copy(alpha = 0.25f))
-                                                    .border(0.5.dp, Color(0xFF8B5CF6), RoundedCornerShape(4.dp))
-                                                    .padding(horizontal = 5.dp, vertical = 1.dp)
-                                            ) {
-                                                Text(
-                                                    text = "AV1",
-                                                    color = Color(0xFFA78BFA),
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Bold
-                                                )
-                                            }
-                                        } else if (option.codec != null) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(4.dp))
-                                                    .background(SurfaceElevated)
-                                                    .border(0.5.dp, BorderSubtle, RoundedCornerShape(4.dp))
-                                                    .padding(horizontal = 4.dp, vertical = 1.dp)
-                                            ) {
-                                                Text(
-                                                    text = option.codec,
-                                                    color = TextSecondary,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.Medium
-                                                )
-                                            }
-                                        }
-                                    }
-
-                                    if (option.resolution.isNotBlank()) {
-                                        Text(
-                                            text = option.resolution,
-                                            color = TextSecondary,
-                                            fontSize = 11.sp
-                                        )
-                                    }
-
-                                    val hostPath = remember(option.url) {
-                                        val withoutQuery = option.url.substringBefore("?")
-                                        val host = try { java.net.URI(withoutQuery).host ?: "" } catch (e: Exception) { "" }
-                                        val path = try { java.net.URI(withoutQuery).path ?: "" } catch (e: Exception) { "" }
-                                        val tail = path.substringAfterLast("/")
-                                        if (tail.length >= 18) "$host/…/$tail" else if (path.length > 1) "$host$path" else host
-                                    }
-                                    if (hostPath.isNotBlank()) {
-                                        Text(
-                                            text = hostPath,
-                                            color = TextSecondary.copy(alpha = 0.75f),
-                                            fontSize = 10.sp,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                }
-                            }
-
-                            // Right: Format badge & Estimated Size
-                            Column(horizontalAlignment = Alignment.End) {
-                                Text(
-                                    text = option.format,
-                                    color = AccentCyan,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                if (option.estimatedSizeBytes > 0) {
-                                    Text(
-                                        text = VideoQualityParser.formatFileSize(option.estimatedSizeBytes),
-                                        color = TextSecondary,
-                                        fontSize = 11.sp
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Exactly what will be downloaded: the page the stream was found on
-            // and the URL the current selection points at.
-            if (video.pageUrl.isNotBlank() || !selectedOption?.url.isNullOrBlank()) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(SurfaceElevated)
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(10.dp))
-                        .padding(horizontal = 12.dp, vertical = 8.dp)
-                ) {
-                    if (video.pageUrl.isNotBlank()) {
-                        Text(
-                            text = "Page: ${video.pageUrl}",
-                            color = TextSecondary,
-                            fontSize = 10.sp,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
+                LazyColumn(Modifier.fillMaxWidth().heightIn(max = 300.dp)) {
+                    items(options, key = { it.id }) { option ->
+                        OptionRow(
+                            title = titleFor(option, kind),
+                            detail = detailFor(option),
+                            warning = if (kind == MediaKind.VIDEO && looksSilent(option)) "No sound" else null,
+                            selected = option.id == selectedId,
+                            audio = kind == MediaKind.AUDIO,
+                            onClick = { selectedId = option.id }
                         )
-                    }
-                    selectedOption?.url?.let { streamUrl ->
-                        if (streamUrl.isNotBlank()) {
-                            Spacer(modifier = Modifier.height(3.dp))
-                            Text(
-                                text = "Stream: $streamUrl",
-                                color = AccentCyan,
-                                fontSize = 10.sp,
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
+                        BrutalHairline()
                     }
                 }
             }
 
-            // Adaptive YouTube formats answer 403 after the first ~minute without a
-            // PO token, so say so up front rather than after a truncated download.
-            selectedOption?.let { sel ->
-                if (sel.url.contains("googlevideo.com") && !sel.isProgressive && !sel.isAudioOnly) {
-                    val combined = videoQualities.firstOrNull {
-                        it.isProgressive && !it.isAudioOnly && !it.isWebm && it.id != sel.id
-                    }
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = if (combined != null) {
-                            "High quality streams here are PO-token gated and stop after ~1 min. " +
-                                "Download will use the ${combined.resolution} stream with audio instead."
-                        } else {
-                            "High quality streams here are PO-token gated and may stop after ~1 min."
-                        },
-                        color = WarningAmber,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp
-                    )
-                }
-            }
-
-            // A stream with no audio track downloads fine and plays back in silence,
-            // which reads as a broken player; say it before the tap instead.
-            selectedOption?.let { sel ->
-                if (looksSilent(sel) && !sel.isAudioOnly) {
-                    Spacer(modifier = Modifier.height(8.dp))
-                    Text(
-                        text = "This stream was detected without an audio track, so the file will play silently. Pick a \"Video + Audio\" or \"With Audio\" option instead.",
-                        color = WarningAmber,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Action Buttons: Download + Copy Link
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.padding(start = 16.dp, end = 8.dp, top = 16.dp)
             ) {
-                // Copy Link Button
-                OutlinedButton(
+                BrutalButton(
+                    text = selected?.let { "Download ${titleFor(it, kind)}" } ?: "Download",
+                    icon = Icons.Default.FileDownload,
+                    enabled = selected != null,
                     onClick = {
-                        selectedOption?.let { opt ->
-                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                            clipboard.setPrimaryClip(ClipData.newPlainText("Media URL", opt.url))
-                            Toast.makeText(context, "Link copied to clipboard", Toast.LENGTH_SHORT).show()
-                        }
+                        val option = selected ?: return@BrutalButton
+                        val name = VideoQualityParser.sanitizeFileName(video.title, titleFor(option, kind), extensionFor(option))
+                        onDownload(option, name)
+                        onDismiss()
                     },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.outlinedButtonColors(contentColor = TextPrimary),
-                    border = ButtonDefaults.outlinedButtonBorder.copy(brush = Brush.horizontalGradient(listOf(BorderSubtle, BorderSubtle))),
-                    modifier = Modifier
-                        .height(48.dp)
-                        .weight(0.35f)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ContentCopy,
-                        contentDescription = "Copy Link",
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                // Primary Download Button
-                Button(
+                    modifier = Modifier.weight(1f)
+                )
+                Spacer(Modifier.width(4.dp))
+                BrutalIconButton(
+                    icon = Icons.Default.ContentCopy,
+                    contentDescription = "Copy stream link",
+                    enabled = selected != null,
                     onClick = {
-                        selectedOption?.let { opt ->
-                            // Adaptive YouTube formats are PO-token gated: they serve about
-                            // a minute and then answer 403, which lands as a truncated file.
-                            // Swap to the combined progressive stream, which always completes
-                            // with its audio.
-                            val combined = if (opt.url.contains("googlevideo.com") &&
-                                !opt.isProgressive && !opt.isAudioOnly
-                            ) {
-                                videoQualities.firstOrNull {
-                                    it.isProgressive && !it.isAudioOnly &&
-                                        !it.isWebm && it.id != opt.id
-                                }
-                            } else null
-                            if (combined != null) {
-                                selectedOption = combined
-                                Toast.makeText(
-                                    context,
-                                    "Higher qualities need a PO token here — downloading the ${combined.resolution} combined stream instead",
-                                    Toast.LENGTH_LONG
-                                ).show()
-                            }
-                            val chosen = combined ?: opt
-
-                            // Check if an AV1 variant exists and user hasn't chosen
-                            val matchingAv1 = if (combined != null) null
-                            else videoQualities.firstOrNull { it.resolution == chosen.resolution && it.isAv1 && it.id != chosen.id }
-                            if (!preferAv1 && matchingAv1 != null && !chosen.isAv1) {
-                                pendingDownloadOption = chosen
-                                showAv1ChoiceDialog = true
-                            } else {
-                                val ext = if (chosen.format == "M3U8") {
-                                    "m3u8"
-                                } else if (chosen.isAudioOnly) {
-                                    if (chosen.format == "WEBM" || chosen.codec?.contains("opus", ignoreCase = true) == true) "webm"
-                                    else if (chosen.format == "MP3") "mp3"
-                                    else "m4a"
-                                } else if (chosen.format == "WEBM") {
-                                    "webm"
-                                } else {
-                                    "mp4"
-                                }
-                                val cleanLabel = chosen.label.replace("•", "-").replace(Regex("\\s+"), " ")
-                                val filename = VideoQualityParser.sanitizeFileName(video.title, cleanLabel, ext)
-                                onDownload(chosen, filename)
-                                onDismiss()
-                            }
+                        selected?.let {
+                            (context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                                .setPrimaryClip(ClipData.newPlainText("Media link", it.url))
+                            Toast.makeText(context, "Link copied", Toast.LENGTH_SHORT).show()
                         }
-                    },
-                    enabled = selectedOption != null,
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = AccentCyan,
-                        contentColor = DarkBg,
-                        disabledContainerColor = SurfaceElevated,
-                        disabledContentColor = TextSecondary.copy(alpha = 0.4f)
-                    ),
-                    modifier = Modifier
-                        .height(48.dp)
-                        .weight(0.65f)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.FileDownload,
-                        contentDescription = null,
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = if (selectedOption != null) "Download" else "Select Quality",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp
-                    )
-                }
+                    }
+                )
             }
         }
     }
+}
 
-    // AV1 Selection Dialog (when standard resolution is picked but AV1 is available)
-    if (showAv1ChoiceDialog && pendingDownloadOption != null) {
-        val standardOpt = pendingDownloadOption!!
-        val av1Opt = videoQualities.firstOrNull { it.resolution == standardOpt.resolution && it.isAv1 }
+@Composable
+private fun KindTab(label: String, count: Int, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+        modifier = modifier
+            .height(44.dp)
+            .brutalPressable(
+                fill = if (selected) AccentCyan else SurfaceDark,
+                border = BorderSubtle,
+                shadow = HardShadow,
+                shadowOffset = if (selected) 0.dp else 3.dp,
+                role = Role.Tab,
+                onClick = onClick
+            )
+    ) {
+        Text(label, color = if (selected) OnAccent else TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.width(8.dp))
+        Text(count.toString(), color = if (selected) OnAccent else TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+    }
+}
 
-        AlertDialog(
-            onDismissRequest = { showAv1ChoiceDialog = false },
-            containerColor = DarkBg,
-            shape = RoundedCornerShape(20.dp),
-            title = {
-                Text(
-                    text = "AV1 High Efficiency Available",
-                    color = TextPrimary,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 17.sp
-                )
-            },
-            text = {
-                Text(
-                    text = "An AV1 encoded stream is available for this resolution (${standardOpt.resolution}). AV1 provides higher video quality with smaller file sizes on supported devices.",
-                    color = TextSecondary,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        val target = av1Opt ?: standardOpt
-                        val ext = if (target.format == "WEBM") "webm" else "mp4"
-                        val cleanLabel = target.label.replace("•", "-").replace(Regex("\\s+"), " ")
-                        val filename = VideoQualityParser.sanitizeFileName(video.title, "${cleanLabel}_AV1", ext)
-                        onDownload(target, filename)
-                        showAv1ChoiceDialog = false
-                        onDismiss()
-                    },
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = AccentCyan, contentColor = DarkBg)
-                ) {
-                    Text("Download AV1", fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = {
-                        val ext = if (standardOpt.format == "WEBM") "webm" else "mp4"
-                        val cleanLabel = standardOpt.label.replace("•", "-").replace(Regex("\\s+"), " ")
-                        val filename = VideoQualityParser.sanitizeFileName(video.title, cleanLabel, ext)
-                        onDownload(standardOpt, filename)
-                        showAv1ChoiceDialog = false
-                        onDismiss()
-                    }
-                ) {
-                    Text("Standard MP4", color = TextPrimary)
+@Composable
+private fun OptionRow(
+    title: String,
+    detail: String,
+    warning: String?,
+    selected: Boolean,
+    audio: Boolean,
+    onClick: () -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 58.dp)
+            .background(if (selected) AccentCyan.copy(alpha = 0.18f) else Color.Transparent)
+            .brutalTap(role = Role.RadioButton, shape = androidx.compose.ui.graphics.RectangleShape, pressScale = 1f, onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
+    ) {
+        if (audio) {
+            BrutalIconTile(Icons.Default.MusicNote)
+            Spacer(Modifier.width(14.dp))
+        }
+        Column(Modifier.weight(1f)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(title, color = TextPrimary, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                if (warning != null) {
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        warning,
+                        color = InkBlack,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .background(WarningAmber, RoundedCornerShape(3.dp))
+                            .padding(horizontal = 5.dp, vertical = 1.dp)
+                    )
                 }
             }
-        )
+            Text(detail, color = TextSecondary, fontSize = 12.5.sp)
+        }
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .brutalBox(fill = if (selected) AccentCyan else SurfaceDark, border = BorderSubtle, shape = RoundedCornerShape(4.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (selected) Icon(Icons.Default.Check, contentDescription = null, tint = OnAccent, modifier = Modifier.size(17.dp))
+        }
     }
+}
+
+/** Short label for the floating button: what the sheet would pick first, e.g. "1080p | MP4 | 45 MB". */
+fun downloadSummary(video: DetectedVideo, preferAv1: Boolean, showWebm: Boolean): String? {
+    val pool = video.videoQualities.let { all -> if (showWebm || all.none { !it.isWebm }) all else all.filter { !it.isWebm } }
+    val best = collapseVideo(pool, preferAv1).firstOrNull { !looksSilent(it) && (heightOf(it) ?: 0) <= 1080 }
+        ?: collapseVideo(pool, preferAv1).firstOrNull()
+    if (best != null) return titleFor(best, MediaKind.VIDEO) + "  |  " + detailFor(best)
+    val audio = video.audioQualities.maxByOrNull { kbpsOf(it) ?: 0 } ?: return null
+    return "Audio  |  " + detailFor(audio)
 }

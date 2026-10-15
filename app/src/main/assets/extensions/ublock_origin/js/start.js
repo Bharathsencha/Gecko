@@ -203,6 +203,19 @@ const onNetWhitelistReady = (netWhitelistRaw, adminExtra) => {
         }
     }
 
+    // Gecko AdFree: YouTube walls the player when its ad requests are blocked,
+    // so the browser never filters it here and fast-forwards ads instead
+    // (aifree content script). Re-applied on every start so stored settings
+    // from older builds pick it up too.
+    for ( const directive of [ 'youtube.com', 'youtube-nocookie.com' ] ) {
+        if ( µb.netWhitelistDefault.includes(directive) === false ) {
+            µb.netWhitelistDefault.push(directive);
+        }
+        if ( netWhitelistRaw.includes(directive) === false ) {
+            netWhitelistRaw.push(directive);
+        }
+    }
+
     µb.netWhitelist = µb.whitelistFromArray(netWhitelistRaw);
     µb.netWhitelistModifyTime = Date.now();
 };

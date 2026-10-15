@@ -21,7 +21,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardActions
@@ -121,75 +120,53 @@ fun TopAddressBar(
 
     val showSuggestions = isFocused && textFieldValue.text.isNotEmpty() && historySuggestions.isNotEmpty()
 
-    // Main bar row (layout unchanged — no Column wrapper that would push WebView)
+    val privateFill = PrivatePurple
+    val chipGreen = Color(0xFF7FDCA4)
+    // Private mode: solid purple field with ink text, readable in both themes.
+    val fieldInk = if (isPrivate) InkBlack else TextPrimary
+    val fieldInkDim = if (isPrivate) InkBlack.copy(alpha = 0.65f) else TextSecondary
+
     Box(modifier = modifier
         .fillMaxWidth()
+        .background(SurfaceDark)
         .onGloballyPositioned { coords ->
             barHeightPx = coords.size.height
             barWidthPx  = coords.size.width
         }
     ) {
+        Column(Modifier.fillMaxWidth()) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(horizontal = 10.dp, vertical = 6.dp)
+                .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 8.dp)
         ) {
-            // Burn Logo Button on left side beside URL bar
-            IconButton(
+            BrutalIconButton(
+                icon = Icons.Default.LocalFireDepartment,
+                contentDescription = "Clear browsing data",
                 onClick = {
                     keyboardController?.hide()
                     focusManager.clearFocus()
                     onOpenClearData()
                 },
-                modifier = Modifier
-                    .size(42.dp)
-                    .clip(CircleShape)
-                    .background(SurfaceElevated)
-                    .border(
-                        1.dp,
-                        Brush.horizontalGradient(listOf(FlameOrange.copy(alpha = 0.5f), BorderSubtle)),
-                        CircleShape
-                    )
-            ) {
-                Icon(
-                    imageVector = Icons.Default.LocalFireDepartment,
-                    contentDescription = "Clear Data",
-                    tint = FlameOrange,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
+                boxed = true,
+                fill = FlameOrange,
+                tint = InkBlack
+            )
 
-            Spacer(modifier = Modifier.width(8.dp))
+            Spacer(modifier = Modifier.width(4.dp))
 
-            // Main Omnibox Capsule
+            // Omnibox
             Box(
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(SurfaceElevated)
-                    .border(
-                        1.dp,
-                        if (isPrivate) {
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    Color(0xFFA855F7),
-                                    Color(0xFF7C3AED).copy(alpha = 0.5f),
-                                    Color(0xFFA855F7).copy(alpha = 0.3f)
-                                )
-                            )
-                        } else {
-                            Brush.horizontalGradient(
-                                colors = listOf(
-                                    if (isReaderMode) AccentCyan else BorderSubtle,
-                                    AccentCyan.copy(alpha = 0.35f),
-                                    BorderSubtle
-                                )
-                            )
-                        },
-                        RoundedCornerShape(22.dp)
+                    .brutalBox(
+                        fill = if (isPrivate) privateFill else SurfaceElevated,
+                        border = BorderSubtle,
+                        shadow = if (isFocused) HardShadow else null,
+                        shadowOffset = 3.dp
                     )
                     .padding(horizontal = 10.dp),
                 contentAlignment = Alignment.CenterStart
@@ -198,82 +175,47 @@ fun TopAddressBar(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-
-                    // Private Badge or Shield / Lock / Search icon
                     if (isPrivate) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(Color(0xFFA855F7).copy(alpha = 0.2f))
+                                .brutalBox(fill = InkBlack, border = InkBlack, borderWidth = 1.5.dp, shape = RoundedCornerShape(3.dp))
                                 .padding(horizontal = 5.dp, vertical = 2.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.VisibilityOff,
-                                contentDescription = "Private Mode",
-                                tint = Color(0xFFA855F7),
-                                modifier = Modifier.size(13.dp)
-                            )
+                            PrivateMask(maskColor = privateFill, eyeColor = InkBlack, modifier = Modifier.size(width = 16.dp, height = 10.dp))
                             Spacer(modifier = Modifier.width(3.dp))
-                            Text(
-                                text = "Private",
-                                color = Color(0xFFA855F7),
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Text("PRIVATE", color = privateFill, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                     } else if (adBlockCount > 0) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(ShieldGreen.copy(alpha = 0.15f))
+                                .brutalBox(fill = chipGreen, border = BorderSubtle, borderWidth = 1.5.dp, shape = RoundedCornerShape(3.dp))
                                 .clickable { onOpenShields() }
-                                .padding(horizontal = 4.dp, vertical = 2.dp)
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Shield,
-                                contentDescription = "Shield",
-                                tint = ShieldGreen,
-                                modifier = Modifier.size(13.dp)
-                            )
-                            Spacer(modifier = Modifier.width(2.dp))
-                            Text(
-                                text = adBlockCount.toString(),
-                                color = ShieldGreen,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.Bold
-                            )
+                            Icon(Icons.Default.Shield, contentDescription = "Blocked on this page", tint = InkBlack, modifier = Modifier.size(12.dp))
+                            Spacer(modifier = Modifier.width(3.dp))
+                            Text(adBlockCount.toString(), color = InkBlack, fontSize = 10.sp, fontWeight = FontWeight.Bold)
                         }
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                     } else if (!isStartPage && urlInput.startsWith("https://")) {
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { onOpenShields() }
-                                .padding(2.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Lock,
-                                contentDescription = "Secure",
-                                tint = AccentCyan.copy(alpha = 0.7f),
-                                modifier = Modifier.size(14.dp)
-                            )
-                        }
-                        Spacer(modifier = Modifier.width(6.dp))
-                    } else if (isStartPage) {
                         Icon(
-                            imageVector = Icons.Default.Search,
-                            contentDescription = "Search",
-                            tint = TextSecondary,
-                            modifier = Modifier.size(16.dp)
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = "Secure connection, open shields",
+                            tint = fieldInk,
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clickable { onOpenShields() }
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                    } else if (isStartPage) {
+                        Icon(Icons.Default.Search, contentDescription = null, tint = fieldInkDim, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
                     }
 
-                    // 3. Omnibox — incognito keyboard (no autocorrect / suggestions)
+                    // Incognito keyboard: no autocorrect or suggestions
                     BasicTextField(
                         value = textFieldValue,
                         onValueChange = { newValue ->
@@ -281,8 +223,8 @@ fun TopAddressBar(
                             onUrlChange(newValue.text)
                         },
                         singleLine = true,
-                        textStyle = TextStyle(color = TextPrimary, fontSize = 14.sp),
-                        cursorBrush = androidx.compose.ui.graphics.SolidColor(Color.White),
+                        textStyle = TextStyle(fontFamily = SpaceGrotesk, color = fieldInk, fontSize = 14.sp, fontWeight = FontWeight.Medium),
+                        cursorBrush = androidx.compose.ui.graphics.SolidColor(fieldInk),
                         keyboardOptions = KeyboardOptions(
                             keyboardType = KeyboardType.Uri,
                             imeAction = ImeAction.Search,
@@ -311,9 +253,9 @@ fun TopAddressBar(
                         decorationBox = { innerTextField ->
                             if (textFieldValue.text.isEmpty()) {
                                 Text(
-                                    text = if (isPrivate) "Search privately or type URL" else "Search or type URL",
-                                    color = if (isPrivate) Color(0xFFA855F7).copy(alpha = 0.7f) else TextSecondary.copy(alpha = 0.7f),
-                                    fontSize = 13.sp,
+                                    text = if (isPrivate) "Search privately or type a URL" else "Search or type a URL",
+                                    color = fieldInkDim,
+                                    fontSize = 14.sp,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
@@ -322,124 +264,86 @@ fun TopAddressBar(
                         }
                     )
 
-                    // 4. Clear + Reload
-                    if (textFieldValue.text.isNotEmpty() && urlInput != "about:home") {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Clear",
-                            tint = TextSecondary,
+                    if (!isFocused && !isStartPage) {
+                        Box(
                             modifier = Modifier
-                                .size(16.dp)
-                                .clickable {
-                                    textFieldValue = TextFieldValue("", selection = TextRange.Zero)
-                                    onUrlChange("")
-                                }
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Reload",
-                            tint = TextSecondary,
-                            modifier = Modifier
-                                .size(17.dp)
-                                .clickable { onReload() }
-                        )
+                                .size(36.dp)
+                                .clickable { onToggleBookmark() },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                                contentDescription = if (isBookmarked) "Remove bookmark" else "Bookmark this page",
+                                tint = fieldInk,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
                     }
-                }
-            }
-
-            Spacer(modifier = Modifier.width(10.dp))
-
-            // Action Capsule: Bookmark + History + Settings
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .height(44.dp)
-                    .clip(RoundedCornerShape(22.dp))
-                    .background(SurfaceElevated)
-                    .border(
-                        1.dp,
-                        Brush.horizontalGradient(
-                            listOf(BorderSubtle, AccentCyan.copy(alpha = 0.2f), BorderSubtle)
-                        ),
-                        RoundedCornerShape(22.dp)
-                    )
-                    .padding(horizontal = 2.dp)
-            ) {
-                IconButton(
-                    onClick = {
-                        onToggleBookmark()
-                    },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isBookmarked) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                        contentDescription = if (isBookmarked) "Bookmarked" else "Bookmark this page",
-                        tint = if (isBookmarked) AccentCyan else TextPrimary,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(18.dp)
-                        .background(BorderSubtle)
-                )
-                IconButton(
-                    onClick = {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        onOpenHistory()
-                    },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.History,
-                        contentDescription = "History",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .width(1.dp)
-                        .height(18.dp)
-                        .background(BorderSubtle)
-                )
-                IconButton(
-                    onClick = {
-                        keyboardController?.hide()
-                        focusManager.clearFocus()
-                        onOpenTabs()
-                    },
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.Default.Layers,
-                            contentDescription = "Tabs",
-                            tint = TextPrimary,
-                            modifier = Modifier.size(19.dp)
-                        )
-                        if (tabCount > 1) {
-                            Box(
-                                modifier = Modifier
-                                    .offset(x = 6.dp, y = (-6).dp)
-                                    .size(14.dp)
-                                    .background(AccentCyan, CircleShape),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = tabCount.toString(),
-                                    color = DarkBg,
-                                    fontSize = 8.5.sp,
-                                    fontWeight = FontWeight.Bold
-                                )
-                            }
+                    if (textFieldValue.text.isNotEmpty() && urlInput != "about:home") {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clickable {
+                                    if (isFocused) {
+                                        textFieldValue = TextFieldValue("", selection = TextRange.Zero)
+                                        onUrlChange("")
+                                    } else {
+                                        onReload()
+                                    }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = if (isFocused) Icons.Default.Close else Icons.Default.Refresh,
+                                contentDescription = if (isFocused) "Clear" else "Reload",
+                                tint = fieldInk,
+                                modifier = Modifier.size(18.dp)
+                            )
                         }
                     }
                 }
             }
+
+            BrutalIconButton(
+                icon = Icons.Default.History,
+                contentDescription = "History",
+                onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    onOpenHistory()
+                }
+            )
+            // Tab count tile
+            Box(
+                modifier = Modifier
+                    .size(48.dp)
+                    .clickable {
+                        keyboardController?.hide()
+                        focusManager.clearFocus()
+                        onOpenTabs()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(24.dp)
+                        .brutalBox(
+                            fill = if (isPrivate) privateFill else SurfaceDark,
+                            border = BorderSubtle,
+                            shape = RoundedCornerShape(4.dp)
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (tabCount > 99) "99+" else tabCount.toString(),
+                        color = if (isPrivate) InkBlack else TextPrimary,
+                        fontSize = if (tabCount > 9) 10.sp else 12.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
+        }
+        BrutalRule()
         }
 
         // Autocomplete Popup — floats OVER the WebView, zero layout impact
@@ -455,10 +359,7 @@ fun TopAddressBar(
                 Column(
                     modifier = Modifier
                         .width(with(density) { (barWidthPx - 24.dp.roundToPx()).toDp() })
-                        .shadow(12.dp, RoundedCornerShape(12.dp))
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(SurfaceElevated)
-                        .border(1.dp, BorderSubtle, RoundedCornerShape(12.dp))
+                        .brutalBox(fill = SurfaceElevated, border = BorderSubtle, shadow = HardShadow)
                 ) {
                     historySuggestions.forEachIndexed { index, item ->
                         Row(
@@ -505,9 +406,8 @@ fun TopAddressBar(
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(0.5.dp)
-                                    .padding(horizontal = 14.dp)
-                                    .background(BorderSubtle)
+                                    .height(1.dp)
+                                    .background(BorderSubtle.copy(alpha = 0.2f))
                             )
                         }
                     }

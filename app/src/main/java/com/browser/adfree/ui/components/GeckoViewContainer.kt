@@ -18,6 +18,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import org.mozilla.geckoview.GeckoSession
@@ -31,6 +32,8 @@ fun GeckoViewContainer(
     modifier: Modifier = Modifier
 ) {
     var scrollY by remember(session) { mutableIntStateOf(0) }
+    val spinnerInk = com.browser.adfree.ui.theme.BorderSubtle.toArgb()
+    val spinnerFill = com.browser.adfree.ui.theme.AccentCyan.toArgb()
 
     DisposableEffect(session) {
         val scrollDelegate = object : GeckoSession.ScrollDelegate {
@@ -48,13 +51,13 @@ fun GeckoViewContainer(
 
     AndroidView(
         factory = { context ->
-            val geckoView = GeckoView(context).apply {
+            val geckoView = com.browser.adfree.ui.IncognitoGeckoView(context).apply {
                 setSession(session)
             }
 
             SwipeRefreshLayout(context).apply {
-                setColorSchemeColors(android.graphics.Color.parseColor("#00F0FF"))
-                setProgressBackgroundColorSchemeColor(android.graphics.Color.parseColor("#141416"))
+                setColorSchemeColors(spinnerInk)
+                setProgressBackgroundColorSchemeColor(spinnerFill)
                 
                 addView(
                     geckoView,

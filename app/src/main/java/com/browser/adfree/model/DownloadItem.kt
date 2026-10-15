@@ -33,7 +33,7 @@ enum class DownloadStatus {
 
 class DownloadItem(
     val id: Long,
-    val fileName: String,
+    fileName: String,
     val url: String,
     mimeType: String,
     destinationPath: String,
@@ -44,11 +44,15 @@ class DownloadItem(
     val userAgent: String? = null,
     val referer: String? = null,
     val extraHeaders: Map<String, String> = emptyMap(),
+    /** Page the media came from; lets YouTube streams fall back to yt-dlp. */
+    val sourcePageUrl: String? = null,
     /** True when the id is a real android.app.DownloadManager id. */
     val isSystemDownload: Boolean = false,
     /** Which internal pipeline owns this item, so pause/resume re-enters correctly. */
     val pipeline: DownloadPipeline = DownloadPipeline.STREAM
 ) {
+    /** Can change once, when an audio download is remuxed into its real format. */
+    var fileName by mutableStateOf(fileName)
     var mimeType by mutableStateOf(mimeType)
     var destinationPath by mutableStateOf(destinationPath)
 

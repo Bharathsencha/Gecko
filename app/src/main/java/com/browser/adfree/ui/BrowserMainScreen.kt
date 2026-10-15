@@ -34,6 +34,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +43,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.ui.unit.dp
 import com.browser.adfree.download.BrowserDownloadManager
 import com.browser.adfree.download.VideoQualityParser
@@ -53,7 +55,8 @@ import com.browser.adfree.storage.HistoryRepository
 import com.browser.adfree.storage.SecurePasswordRepository
 import com.browser.adfree.tabs.TabManager
 import com.browser.adfree.ui.components.*
-import com.browser.adfree.vpn.FreeVpnManager
+import com.browser.adfree.ui.theme.blockTouchesBelow
+import com.browser.adfree.vpn.VpnManager
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.StorageController
 
@@ -67,23 +70,37 @@ fun BrowserMainScreen(
     historyRepo: HistoryRepository,
     favoritesRepo: FavoritesRepository,
     shieldsRepo: com.browser.adfree.shields.ShieldsRepository,
-    vpnManager: FreeVpnManager,
+    vpnManager: VpnManager,
+    onExtensionConfigChanged: () -> Unit = {},
     pendingSaveLogin: PendingSaveLogin? = null,
     onSaveLogin: () -> Unit = {},
     onDismissSaveLogin: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var showTabSwitcher by remember { mutableStateOf(false) }
-    var showDownloadsSheet by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showPasswordsSheet by remember { mutableStateOf(false) }
+    val vaultLock = remember { com.browser.adfree.storage.VaultLock(context) }
+    var pinMode by remember { mutableStateOf<PinMode?>(null) }
+    // Passwords need fingerprint, screen lock or the app PIN every time they are opened.
+    val openVault: () -> Unit = {
+        val activity = context as? androidx.fragment.app.FragmentActivity
+        when {
+            vaultLock.method == com.browser.adfree.storage.VaultLock.Method.SYSTEM && vaultLock.systemAvailable && activity != null ->
+                vaultLock.promptSystem(activity, onSuccess = { showPasswordsSheet = true }, onFail = { msg ->
+                    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
+                })
+            vaultLock.hasPin -> pinMode = PinMode.VERIFY
+            else -> pinMode = PinMode.CREATE
+        }
+    }
     var showHistoryPage by remember { mutableStateOf(false) }
     var showBookmarksPage by remember { mutableStateOf(false) }
     var showDownloadsPage by remember { mutableStateOf(false) }
     var showShieldsSheet by remember { mutableStateOf(false) }
     var showClearDataSheet by remember { mutableStateOf(false) }
     var showVideoDownloadSheet by remember { mutableStateOf(false) }
-    var showFireAnimation by remember { mutableStateOf(false) }
+    var pendingWipe by remember { mutableStateOf<(() -> Unit)?>(null) }
     var showDefaultPrompt by remember { mutableStateOf(!isAppDefaultBrowser(context) && !preferencesRepo.defaultBrowserPromptDismissed) }
 
     val defaultBrowserLauncher = androidx.activity.compose.rememberLauncherForActivityResult(
@@ -122,8 +139,35 @@ fun BrowserMainScreen(
         }
     }
 
+    // Leaving the app closes the vault.
+    val lifecycleOwner = androidx.compose.ui.platform.LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_STOP) showPasswordsSheet = false
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
+    // Full YouTube extraction runs only once the user asks to download.
+    LaunchedEffect(showVideoDownloadSheet) {
+        if (showVideoDownloadSheet) activeTab?.let { tabManager.checkForVideos(it, it.url, onDemand = true) }
+    }
+
+    // Private tabs: no screenshots, screen recording or recent-apps preview.
+    val isPrivateActive = activeTab?.isPrivate == true
+    DisposableEffect(isPrivateActive) {
+        val window = (context as? android.app.Activity)?.window
+        if (isPrivateActive) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        else window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        onDispose { }
+    }
+
     // Set up insecure HTTP warning prompt listener
     LaunchedEffect(tabManager) {
+        tabManager.onReaderUnavailable = {
+            android.widget.Toast.makeText(context, "No readable article on this page", android.widget.Toast.LENGTH_SHORT).show()
+        }
         tabManager.preferencesRepository = preferencesRepo
         tabManager.onInsecureHttpPrompt = { url, proceedCallback ->
             pendingInsecureHttpUrl = url
@@ -141,11 +185,26 @@ fun BrowserMainScreen(
     BackHandler(enabled = showDownloadsPage) {
         showDownloadsPage = false
     }
+    BackHandler(enabled = showPasswordsSheet) {
+        showPasswordsSheet = false
+    }
     BackHandler(enabled = showVideoDownloadSheet) {
         showVideoDownloadSheet = false
     }
 
-    val hasModalOpen = showSettingsSheet || showHistoryPage || showBookmarksPage || showDownloadsPage || showTabSwitcher || showDownloadsSheet || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showVideoDownloadSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
+    val hasModalOpen = showSettingsSheet || showHistoryPage || showBookmarksPage || showDownloadsPage || showTabSwitcher || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showVideoDownloadSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
+    // Opening any page or sheet dismisses the keyboard, including one a web page opened.
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
+    val rootView = androidx.compose.ui.platform.LocalView.current
+    LaunchedEffect(hasModalOpen) {
+        if (hasModalOpen) {
+            focusManager.clearFocus(force = true)
+            keyboard?.hide()
+            (context.getSystemService(Context.INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager)
+                ?.hideSoftInputFromWindow(rootView.windowToken, 0)
+        }
+    }
     BackHandler(enabled = !hasModalOpen && activeTab != null && (activeTab.canGoBack || activeTab.url != "about:home")) {
         if (activeTab != null && activeTab.canGoBack) {
             activeTab.session.goBack()
@@ -266,15 +325,13 @@ fun BrowserMainScreen(
                 addressBarComposable()
             }
 
-            // 3. Bottom Bar with Page Progress, Quick Tools & Navigation
-            val detectedVideosCount = if (preferencesRepo.videoDownloaderEnabled) (activeTab?.detectedVideos?.size ?: 0) else 0
+            // 3. Docked toolbar
             BottomBar(
                 progress = activeTab?.progress ?: 0,
                 isLoading = activeTab?.isLoading ?: false,
                 canGoBack = activeTab?.canGoBack ?: false,
                 canGoForward = activeTab?.canGoForward ?: false,
                 activeDownloadsCount = activeDownloadsCount,
-                detectedVideosCount = detectedVideosCount,
                 onBack = {
                     if (activeTab != null && activeTab.canGoBack) {
                         activeTab.session.goBack()
@@ -289,17 +346,20 @@ fun BrowserMainScreen(
                     }
                 },
                 onOpenBookmarks = { showBookmarksPage = true },
-                onOpenDownloads = { showDownloadsSheet = true },
-                onOpenVideoDownloader = { showVideoDownloadSheet = true },
+                onOpenDownloads = { showDownloadsPage = true },
                 onOpenSettings = { showSettingsSheet = true },
-                onOpenTabs = { showTabSwitcher = true },
                 onSwipeLeft = { tabManager.nextTab() },
                 onSwipeRight = { tabManager.previousTab() }
             )
         }
 
         // Dedicated Full Screen History Page
-        if (showHistoryPage) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showHistoryPage,
+            enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(260)) { it / 3 } + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
+            exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(220)) { it / 3 } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(180))
+        ) {
+            Box(Modifier.fillMaxSize().blockTouchesBelow()) {
             HistoryPage(
                 historyRepository = historyRepo,
                 tabManager = tabManager,
@@ -313,8 +373,14 @@ fun BrowserMainScreen(
                 onClose = { showHistoryPage = false },
                 modifier = Modifier.fillMaxSize()
             )
-        }        // Dedicated Full Screen Bookmarks Page
-        if (showBookmarksPage) {
+                    }
+}        // Dedicated Full Screen Bookmarks Page
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showBookmarksPage,
+            enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(260)) { it / 3 } + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
+            exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(220)) { it / 3 } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(180))
+        ) {
+            Box(Modifier.fillMaxSize().blockTouchesBelow()) {
             BookmarksPage(
                 favorites = favoritesRepo.favorites,
                 onNavigate = { targetUrl ->
@@ -329,20 +395,32 @@ fun BrowserMainScreen(
                 onBack = { showBookmarksPage = false },
                 modifier = Modifier.fillMaxSize()
             )
-        }
+                    }
+}
 
         // Dedicated Full Screen Downloads Page
-        if (showDownloadsPage) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showDownloadsPage,
+            enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(260)) { it / 3 } + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
+            exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(220)) { it / 3 } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(180))
+        ) {
+            Box(Modifier.fillMaxSize().blockTouchesBelow()) {
             DownloadsPage(
                 downloadManager = downloadManager,
                 onClose = { showDownloadsPage = false },
                 modifier = Modifier.fillMaxSize()
             )
-        }
+                    }
+}
 
-        // Browser Settings Sheet (Includes Active Web Page Tools)
-        if (showSettingsSheet) {
-            BrowserSettingsSheet(
+        // Settings: full page above the browser
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showSettingsSheet,
+            enter = androidx.compose.animation.slideInHorizontally { it },
+            exit = androidx.compose.animation.slideOutHorizontally { it }
+        ) {
+            Box(Modifier.fillMaxSize().blockTouchesBelow()) {
+            SettingsPage(
                 preferencesRepo = preferencesRepo,
                 passwordRepo = passwordRepo,
                 historyRepo = historyRepo,
@@ -350,29 +428,17 @@ fun BrowserMainScreen(
                 vpnManager = vpnManager,
                 runtime = runtime,
                 activeTab = activeTab,
-                onZoomChange = { newZoom ->
-                    activeTab?.let { tabManager.setZoom(it, newZoom) }
-                },
-                onToggleDarkWeb = {
-                    activeTab?.let { tabManager.toggleDarkWeb(it) }
-                },
-                onToggleReader = {
-                    activeTab?.let { triggerReaderModeExtraction(it) }
-                },
-                onToggleDesktop = {
-                    activeTab?.let { tabManager.toggleDesktopMode(it) }
-                },
-                onOpenPasswords = {
-                    showSettingsSheet = false
-                    showPasswordsSheet = true
-                },
-                onOpenHistory = {
-                    showSettingsSheet = false
-                    showHistoryPage = true
-                },
-                onDismissRequest = { showSettingsSheet = false }
+                onExtensionConfigChanged = onExtensionConfigChanged,
+                onOpenPasswords = openVault,
+                vaultLock = vaultLock,
+                onChangePin = { pinMode = if (vaultLock.hasPin) PinMode.CHANGE else PinMode.CREATE },
+                onOpenClearData = { showClearDataSheet = true },
+                onOpenUrl = { url -> tabManager.createNewTab(runtime, url) },
+                onClose = { showSettingsSheet = false },
+                backEnabled = !showPasswordsSheet
             )
-        }
+                    }
+}
 
         // Granular Clear Browsing Data Sheet
         if (showClearDataSheet) {
@@ -380,7 +446,7 @@ fun BrowserMainScreen(
                 historyRepository = historyRepo,
                 tabManager = tabManager,
                 runtime = runtime,
-                onTriggerFireAnimation = { showFireAnimation = true },
+                onBurn = { wipe -> pendingWipe = wipe },
                 onDismissRequest = {
                     showClearDataSheet = false
                     urlText = tabManager.activeTab?.url ?: "about:home"
@@ -410,13 +476,34 @@ fun BrowserMainScreen(
             )
         }
 
-        // Saved Passwords Sheet (AES-256)
-        if (showPasswordsSheet) {
-            SavedPasswordsSheet(
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showPasswordsSheet,
+            enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(260)) { it / 3 } + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
+            exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(220)) { it / 3 } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(180))
+        ) {
+            Box(Modifier.fillMaxSize().blockTouchesBelow()) {
+            PasswordsPage(
                 passwordRepository = passwordRepo,
-                onDismissRequest = { showPasswordsSheet = false }
+                onClose = { showPasswordsSheet = false }
             )
-        }
+                    }
+}
+
+        pinMode?.let { mode -> androidx.compose.runtime.key(mode) {
+            PinDialog(
+                mode = mode,
+                vaultLock = vaultLock,
+                onUnlocked = {
+                    if (mode == PinMode.CHANGE) {
+                        pinMode = PinMode.CREATE
+                    } else {
+                        pinMode = null
+                        showPasswordsSheet = true
+                    }
+                },
+                onDismiss = { pinMode = null }
+            )
+        } }
 
         // Startup Default Browser Setup Prompt
         if (showDefaultPrompt) {
@@ -442,14 +529,21 @@ fun BrowserMainScreen(
         }
 
         // Reader View Full Screen Overlay
-        if (activeTab != null && activeTab.isReaderMode && activeTab.articleData != null) {
+        androidx.compose.animation.AnimatedVisibility(
+            visible = activeTab != null && activeTab.isReaderMode && activeTab.articleData != null,
+            enter = androidx.compose.animation.slideInVertically(androidx.compose.animation.core.tween(280)) { it / 4 } + androidx.compose.animation.fadeIn(),
+            exit = androidx.compose.animation.slideOutVertically(androidx.compose.animation.core.tween(220)) { it / 4 } + androidx.compose.animation.fadeOut()
+        ) {
+            Box(Modifier.fillMaxSize().blockTouchesBelow()) {
+            val article = activeTab?.articleData ?: return@AnimatedVisibility
             SafariReaderView(
-                article = activeTab.articleData!!,
+                article = article,
                 onCloseReader = {
-                    activeTab.isReaderMode = false
+                    activeTab?.isReaderMode = false
                 }
             )
-        }
+                    }
+}
 
         // Tab Switcher Sheet
         if (showTabSwitcher) {
@@ -479,22 +573,6 @@ fun BrowserMainScreen(
             )
         }
 
-        // Downloads Manager Modal
-        if (showDownloadsSheet) {
-            DownloadsSheet(
-                downloads = downloadManager.downloadsList,
-                onOpenFile = { item -> downloadManager.openDownloadedFile(item) },
-                onRemove = { item -> downloadManager.deleteDownload(item) },
-                onClearCompleted = { downloadManager.clearCompleted() },
-                onDismissRequest = { showDownloadsSheet = false },
-                onOpenFullScreen = { showDownloadsPage = true },
-                onPause = { item -> downloadManager.pauseDownload(item.id) },
-                onResume = { item -> downloadManager.resumeDownload(item.id) },
-                onCancel = { item -> downloadManager.cancelDownload(item.id) },
-                onShare = { item -> downloadManager.shareDownload(context, item) }
-            )
-        }
-
         // Universal Video Downloader Sheet
         if (showVideoDownloadSheet && activeTab != null && activeTab.detectedVideos.isNotEmpty()) {
             // Entries from other pages can still be in the list; show the one the
@@ -521,7 +599,8 @@ fun BrowserMainScreen(
                         referer = if (isGooglevideo) null else activeTab.url,
                         extraHeaders = extraHeaders,
                         audioUrl = option.audioUrl,
-                        format = option.format
+                        format = option.format,
+                        pageUrl = primaryVideo.pageUrl.ifBlank { activeTab.url }
                     )
                 },
                 onDismiss = { showVideoDownloadSheet = false }
@@ -536,7 +615,7 @@ fun BrowserMainScreen(
                 shieldsRepo = shieldsRepo,
                 onToggleShieldsForSite = { enabled ->
                     shieldsRepo.setShieldsForUrl(activeTab.url, shieldsEnabled = enabled)
-                    activeTab.session.settings.useTrackingProtection = enabled
+                    activeTab.session.settings.useTrackingProtection = enabled && !TabManager.isYouTube(activeTab.url)
                 },
                 onToggleBackgroundMedia = { enabled ->
                     shieldsRepo.setShieldsForUrl(activeTab.url, backgroundMediaEnabled = enabled)
@@ -559,40 +638,29 @@ fun BrowserMainScreen(
         // Floating draggable video download pill
         val detectedVideosCountForFloat = if (preferencesRepo.videoDownloaderEnabled) (activeTab?.detectedVideos?.size ?: 0) else 0
         if (!showVideoDownloadSheet) {
+            val pillVideo = activeTab?.detectedVideos?.let { list ->
+                list.firstOrNull { VideoQualityParser.samePage(it.pageUrl, activeTab.url) } ?: list.firstOrNull()
+            }
             FloatingVideoDownloadButton(
                 videoCount = detectedVideosCountForFloat,
+                summary = pillVideo?.let { downloadSummary(it, preferencesRepo.preferAv1Codec, preferencesRepo.showWebmFormats) },
                 onTap = { showVideoDownloadSheet = true },
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
-                    .padding(bottom = 90.dp, end = 16.dp)
+                    .navigationBarsPadding()
+                    .padding(bottom = 72.dp, end = 16.dp)
             )
         }
 
-        // Full Screen DuckDuckGo Fire Wipe Animation
-        FireWipeOverlay(
-            isPlaying = showFireAnimation,
-            onAnimationFinished = {
-                showFireAnimation = false
-                urlText = "about:home"
-                android.widget.Toast.makeText(context, "Data and tabs cleared", android.widget.Toast.LENGTH_SHORT).show()
-            }
+        FireBurnOverlay(
+            playing = pendingWipe != null,
+            onCovered = {
+                pendingWipe?.invoke()
+                urlText = tabManager.activeTab?.url ?: "about:home"
+            },
+            onFinished = { pendingWipe = null }
         )
     }
-}
-
-private fun triggerReaderModeExtraction(tab: com.browser.adfree.model.TabModel) {
-    if (tab.isReaderMode) {
-        tab.isReaderMode = false
-        return
-    }
-
-    tab.articleData = ArticleData(
-        title = if (tab.title.isBlank() || tab.title == "Start Page") "Web Article" else tab.title,
-        byline = null,
-        contentHtml = "<p>Reading mode active for: <b>" + tab.url + "</b></p>",
-        isArticle = true
-    )
-    tab.isReaderMode = true
 }
 
 private fun shareUrl(context: Context, title: String, url: String) {

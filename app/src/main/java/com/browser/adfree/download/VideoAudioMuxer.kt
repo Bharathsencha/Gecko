@@ -56,10 +56,6 @@ object VideoAudioMuxer {
         MP4("mp4", "video/mp4"),
         WEBM("webm", "video/webm");
 
-        companion object {
-            fun forExtension(ext: String): Container =
-                if (ext.lowercase().removePrefix(".") == "webm") WEBM else MP4
-        }
     }
 
     sealed class Result {
@@ -398,6 +394,92 @@ object VideoAudioMuxer {
         } finally {
             runCatching { extractor.release() }
         }
+    }
+
+    /** A finished audio-only file and the media type it should be registered with. */
+    data class AudioOutput(val file: File, val mimeType: String)
+
+    /**
+     * Writes the audio track of [sourceFile] into a file music apps recognise:
+     * AAC becomes a non-fragmented .m4a, Opus becomes .opus (Ogg, API 29+),
+     * MP3 is kept as is. DASH audio from YouTube is fragmented MP4 or WebM,
+     * which galleries file as video and players cannot seek, hence the remux.
+     *
+     * [outputBase] is the target path without extension; a free name is picked.
+     */
+    fun remuxAudio(sourceFile: File, outputBase: File): AudioOutput? {
+        if (!sourceFile.exists() || sourceFile.length() <= 0) return null
+        val extractor = MediaExtractor()
+        try {
+            extractor.setDataSource(sourceFile.absolutePath)
+            val track = extractor.findTrack { it.mime().startsWith("audio/") } ?: return null
+            val format = extractor.getTrackFormat(track)
+            val mime = format.mime().lowercase()
+
+            val (extension, outMime, outputFormat) = when {
+                mime == "audio/mp4a-latm" -> Triple("m4a", "audio/mp4", MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+                mime == "audio/opus" && Build.VERSION.SDK_INT >= 29 ->
+                    Triple("opus", "audio/ogg", MediaMuxer.OutputFormat.MUXER_OUTPUT_OGG)
+                mime == "audio/opus" || mime == "audio/vorbis" ->
+                    Triple("webm", "audio/webm", MediaMuxer.OutputFormat.MUXER_OUTPUT_WEBM)
+                mime == "audio/mpeg" -> {
+                    val target = freeFile(outputBase, "mp3")
+                    sourceFile.copyTo(target, overwrite = true)
+                    return AudioOutput(target, "audio/mpeg")
+                }
+                else -> return null
+            }
+
+            val target = freeFile(outputBase, extension)
+            extractor.selectTrack(track)
+            val muxer = MediaMuxer(target.absolutePath, outputFormat)
+            var samples = 0
+            try {
+                val muxTrack = muxer.addTrack(format)
+                muxer.start()
+                val buffer = ByteBuffer.allocateDirect(maxOf(maxInputSize(format), 1024 * 1024))
+                val info = MediaCodec.BufferInfo()
+                var lastPts = -1L
+                while (true) {
+                    info.offset = 0
+                    info.size = extractor.readSampleData(buffer, 0)
+                    if (info.size < 0) break
+                    val pts = extractor.sampleTime
+                    info.presentationTimeUs = if (pts <= lastPts) lastPts + PTS_STEP_US else pts
+                    lastPts = info.presentationTimeUs
+                    info.flags = extractor.sampleFlags
+                    muxer.writeSampleData(muxTrack, buffer, info)
+                    extractor.advance()
+                    samples++
+                }
+                muxer.stop()
+            } finally {
+                runCatching { muxer.release() }
+            }
+            if (samples == 0 || target.length() <= 0) {
+                target.delete()
+                return null
+            }
+            Log.i(TAG, "Audio remuxed $mime into ${target.name}")
+            return AudioOutput(target, outMime)
+        } catch (e: Exception) {
+            Log.w(TAG, "Audio remux failed for ${sourceFile.name}: ${e.message}")
+            return null
+        } finally {
+            runCatching { extractor.release() }
+        }
+    }
+
+    private fun freeFile(base: File, extension: String): File {
+        val parent = base.parentFile ?: File(".")
+        parent.mkdirs()
+        var candidate = File(parent, "${base.name}.$extension")
+        var counter = 1
+        while (candidate.exists()) {
+            candidate = File(parent, "${base.name} ($counter).$extension")
+            counter++
+        }
+        return candidate
     }
 
     private const val PTS_STEP_US = 500L

@@ -39,7 +39,11 @@ class TabModel(
     var isLoading by mutableStateOf(false)
     var canGoBack by mutableStateOf(false)
     var canGoForward by mutableStateOf(false)
-    var adBlockCount by mutableIntStateOf(0)
+    /** Requests Gecko's tracking protection blocked on the current page. */
+    var trackerBlockCount by mutableIntStateOf(0)
+    /** Requests the bridge extension blocked on the current page. */
+    var extensionBlockCount by mutableIntStateOf(0)
+    val adBlockCount: Int get() = trackerBlockCount + extensionBlockCount
     var isDesktopMode by mutableStateOf(false)
 
     // Safari Presentation features
@@ -47,8 +51,11 @@ class TabModel(
     var isDarkWeb by mutableStateOf(false)
     var isReaderMode by mutableStateOf(false)
     var articleData by mutableStateOf<ArticleData?>(null)
+    var isExtractingArticle by mutableStateOf(false)
+
+    /** Native port to this tab's content script (zoom, night mode, reader). */
+    var pagePort: org.mozilla.geckoview.WebExtension.Port? = null
 
     // Media & Video Downloader detection
     val detectedVideos = androidx.compose.runtime.mutableStateListOf<DetectedVideo>()
-    val hasDetectedVideos: Boolean get() = detectedVideos.isNotEmpty()
 }

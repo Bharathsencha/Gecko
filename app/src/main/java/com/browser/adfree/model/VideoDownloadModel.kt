@@ -13,7 +13,6 @@ import java.util.UUID
 
 data class DetectedVideo(
     val id: String = UUID.randomUUID().toString(),
-    val tabId: Int = -1,
     val pageUrl: String,
     val title: String,
     val thumbnail: String? = null,
@@ -39,7 +38,6 @@ data class VideoQualityOption(
     val audioUrl: String? = null,       // Paired high-bitrate audio stream for adaptive video muxing
     val mimeType: String? = null,
     val headers: Map<String, String> = emptyMap(),
-    val alternativeAv1Option: VideoQualityOption? = null,
     /** For HLS master variants: the EXT-X-MEDIA audio group this variant plays with. */
     val audioGroupId: String? = null
 ) {

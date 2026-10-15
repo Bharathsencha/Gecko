@@ -17,13 +17,14 @@
 
 package com.browser.adfree.ui.components
 
+import androidx.compose.foundation.layout.imePadding
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -70,247 +71,82 @@ fun BookmarksPage(
         modifier = modifier
             .fillMaxSize()
             .background(DarkBg)
-            .statusBarsPadding()
-            .navigationBarsPadding()
+            .imePadding()
     ) {
-        // Top Navigation Header
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                IconButton(
-                    onClick = onBack,
-                    modifier = Modifier
-                        .size(38.dp)
-                        .clip(CircleShape)
-                        .background(SurfaceElevated)
-                        .border(1.dp, BorderSubtle, CircleShape)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.ArrowBackIosNew,
-                        contentDescription = "Back",
-                        tint = TextPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(14.dp))
-
+        BrutalPageBar(title = "Bookmarks", onBack = onBack) {
+            if (favorites.isNotEmpty()) {
                 Text(
-                    text = "Bookmarks",
-                    fontSize = 22.sp,
+                    "${favorites.size}",
+                    color = TextSecondary,
+                    fontSize = 14.sp,
                     fontWeight = FontWeight.Bold,
-                    color = TextPrimary
+                    modifier = Modifier.padding(end = 16.dp)
                 )
             }
-
-            Text(
-                text = "${favorites.size} saved",
-                fontSize = 13.sp,
-                fontWeight = FontWeight.Medium,
-                color = TextSecondary
-            )
         }
-
-        // Search Bar
-        Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
-            OutlinedTextField(
+        if (favorites.isNotEmpty()) {
+            BrutalSearchField(
                 value = searchQuery,
                 onValueChange = { searchQuery = it },
-                placeholder = {
-                    Text(
-                        text = "Search bookmarks...",
-                        color = TextSecondary.copy(alpha = 0.6f),
-                        fontSize = 14.sp
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = null,
-                        tint = TextSecondary,
-                        modifier = Modifier.size(20.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotBlank()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(
-                                imageVector = Icons.Default.Close,
-                                contentDescription = "Clear search",
-                                tint = TextSecondary,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-                },
-                singleLine = true,
-                keyboardOptions = androidx.compose.foundation.text.KeyboardOptions(
-                    keyboardType = androidx.compose.ui.text.input.KeyboardType.Text,
-                    imeAction = androidx.compose.ui.text.input.ImeAction.Search,
-                    autoCorrect = false
-                ),
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = TextPrimary,
-                    unfocusedTextColor = TextPrimary,
-                    focusedBorderColor = AccentCyan,
-                    unfocusedBorderColor = BorderSubtle,
-                    cursorColor = Color.White,
-                    focusedContainerColor = SurfaceElevated,
-                    unfocusedContainerColor = SurfaceElevated
-                ),
-                modifier = Modifier.fillMaxWidth()
+                placeholder = "Search bookmarks",
+                modifier = Modifier.padding(start = 16.dp, end = 19.dp, top = 12.dp, bottom = 16.dp)
             )
         }
 
-        // Bookmarks Content
         if (filteredList.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth(),
-                contentAlignment = Alignment.Center
-            ) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(32.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(72.dp)
-                            .clip(CircleShape)
-                            .background(SurfaceElevated),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.BookmarkBorder,
-                            contentDescription = null,
-                            tint = AccentCyan.copy(alpha = 0.6f),
-                            modifier = Modifier.size(36.dp)
-                        )
-                    }
-                    Spacer(modifier = Modifier.height(16.dp))
-                    Text(
-                        text = if (searchQuery.isBlank()) "No Bookmarks Yet" else "No matching bookmarks",
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = if (searchQuery.isBlank()) "Tap the bookmark icon in the address bar to save pages." else "Try a different search query.",
-                        fontSize = 13.sp,
-                        color = TextSecondary
-                    )
-                }
-            }
+            BrutalEmptyState(
+                title = if (searchQuery.isBlank()) "No bookmarks yet" else "Nothing matches",
+                message = if (searchQuery.isBlank()) "Tap the bookmark icon in the address bar to save the page you are on."
+                else "No bookmark title or address contains \"$searchQuery\".",
+                actionLabel = if (searchQuery.isBlank()) null else "Clear search",
+                onAction = { searchQuery = "" }
+            )
         } else {
+            BrutalRule()
             LazyColumn(
-                modifier = Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp),
-                contentPadding = PaddingValues(top = 8.dp, bottom = 24.dp)
+                modifier = Modifier.weight(1f).fillMaxWidth(),
+                contentPadding = PaddingValues(bottom = 24.dp)
             ) {
                 items(filteredList, key = { it.id }) { item ->
-                    BookmarkCard(
+                    BookmarkRow(
                         item = item,
                         onClick = {
                             onNavigate(item.url)
                             onBack()
                         },
-                        onDelete = {
-                            onRemove(item)
-                        }
+                        onDelete = { onRemove(item) },
+                        modifier = Modifier.animateItem()
                     )
-                    Spacer(modifier = Modifier.height(8.dp))
+                    BrutalHairline(startIndent = 62.dp)
                 }
             }
         }
+        Spacer(Modifier.navigationBarsPadding())
     }
 }
 
 @Composable
-fun BookmarkCard(
+private fun BookmarkRow(
     item: FavoriteItem,
     onClick: () -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
-    val faviconUrl = remember(item.url) {
-        try {
-            val uri = URI(item.url)
-            val host = uri.host ?: item.url
-            "https://www.google.com/s2/favicons?domain_url=" + URLEncoder.encode(host, "UTF-8") + "&sz=128"
-        } catch (e: Exception) {
-            "https://www.google.com/s2/favicons?domain_url=" + URLEncoder.encode(item.url, "UTF-8") + "&sz=128"
-        }
-    }
-
+    val host = remember(item.url) { try { URI(item.url).host?.removePrefix("www.") ?: item.url } catch (e: Exception) { item.url } }
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(SurfaceElevated)
-            .border(1.dp, BorderSubtle, RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 12.dp)
+            .background(SurfaceDark)
+            .brutalTap(shape = androidx.compose.ui.graphics.RectangleShape, haptic = false, pressScale = 1f, onClick = onClick)
+            .padding(start = 16.dp, top = 8.dp, bottom = 8.dp, end = 4.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-        ) {
-            AsyncImage(
-                model = faviconUrl,
-                contentDescription = null,
-                contentScale = ContentScale.Fit,
-                modifier = Modifier
-                    .size(32.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(SurfaceCard)
-                    .padding(3.dp)
-            )
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = item.title,
-                    color = TextPrimary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = item.url,
-                    color = TextSecondary,
-                    fontSize = 12.sp,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
+        SiteFavicon(item.url)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(item.title.ifBlank { host }, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(host, color = TextSecondary, fontSize = 12.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-
-        IconButton(
-            onClick = onDelete,
-            modifier = Modifier
-                .size(32.dp)
-                .clip(CircleShape)
-        ) {
-            Icon(
-                imageVector = Icons.Default.DeleteOutline,
-                contentDescription = "Delete bookmark",
-                tint = DangerRed.copy(alpha = 0.7f),
-                modifier = Modifier.size(18.dp)
-            )
-        }
+        BrutalIconButton(Icons.Default.DeleteOutline, "Delete bookmark ${item.title}", onDelete, tint = TextSecondary, iconSize = 20.dp)
     }
 }

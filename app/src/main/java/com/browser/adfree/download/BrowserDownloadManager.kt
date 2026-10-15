@@ -49,6 +49,7 @@ class BrowserDownloadManager(private val context: Context) {
 
     companion object {
         private const val TAG = "BrowserDownloadManager"
+        private val AUDIO_EXTENSIONS = setOf("m4a", "mp3", "aac", "ogg", "opus", "weba", "flac", "wav")
         private val MEDIA_EXTENSIONS = setOf("mp4", "webm", "mkv", "m4a", "mp3", "aac", "ogg", "opus", "ts", "3gp", "m4v", "flv")
 
         /** First Range window for hosts that refuse an unbounded request. */
@@ -91,6 +92,7 @@ class BrowserDownloadManager(private val context: Context) {
     private val cookieCache = ConcurrentHashMap<String, String>()
 
     private val okHttpClient = OkHttpClient.Builder()
+        .proxySelector(com.browser.adfree.vpn.NetworkRoute)
         .followRedirects(true)
         .followSslRedirects(true)
         .connectTimeout(30, TimeUnit.SECONDS)
@@ -282,7 +284,8 @@ class BrowserDownloadManager(private val context: Context) {
         customFileName: String? = null,
         extraHeaders: Map<String, String>? = null,
         audioUrl: String? = null,
-        format: String? = null
+        format: String? = null,
+        pageUrl: String? = null
     ): Long {
         if (url.startsWith("data:")) {
             val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
@@ -314,7 +317,8 @@ class BrowserDownloadManager(private val context: Context) {
                 mimeType = mimeType,
                 userAgent = userAgent,
                 referer = referer,
-                extraHeaders = extraHeaders
+                extraHeaders = extraHeaders,
+                pageUrl = pageUrl
             )
         }
 
@@ -338,11 +342,24 @@ class BrowserDownloadManager(private val context: Context) {
                 mimeType = effectiveMime,
                 userAgent = userAgent,
                 referer = referer,
-                extraHeaders = extraHeaders
+                extraHeaders = extraHeaders,
+                pageUrl = pageUrl
             )
         }
 
-        // 4. Everything else -> system DownloadManager
+        // 4. Everything else -> system DownloadManager, unless the VPN is on: the
+        //    system service would fetch from the real address, so stay in-app.
+        if (com.browser.adfree.vpn.NetworkRoute.socks != null) {
+            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
+            return startInternalStreamDownload(
+                url = url,
+                fileName = fileName,
+                mimeType = effectiveMime,
+                userAgent = userAgent,
+                referer = referer,
+                extraHeaders = extraHeaders
+            )
+        }
         return enqueueSystemDownload(url, contentDisposition, mimeType, userAgent, referer, extraHeaders, customFileName)
     }
 
@@ -747,7 +764,8 @@ class BrowserDownloadManager(private val context: Context) {
         mimeType: String = "video/mp4",
         userAgent: String? = null,
         referer: String? = null,
-        extraHeaders: Map<String, String>? = null
+        extraHeaders: Map<String, String>? = null,
+        pageUrl: String? = null
     ): Long {
         val downloadId = nextDownloadId()
         val container = containerFor(mimeType, null, mimeType.startsWith("audio/"))
@@ -764,7 +782,8 @@ class BrowserDownloadManager(private val context: Context) {
             userAgent = userAgent,
             referer = referer,
             extraHeaders = extraHeaders.orEmpty(),
-            pipeline = DownloadPipeline.STREAM
+            pipeline = DownloadPipeline.STREAM,
+            sourcePageUrl = pageUrl
         )
 
         mainHandler.post {
@@ -786,7 +805,8 @@ class BrowserDownloadManager(private val context: Context) {
             try {
                 mainHandler.post { notifyForegroundService() }
                 val tempFile = File(context.cacheDir, "stream_${item.id}.tmp")
-                val outcome = downloadStream(
+                val outcome = fetchMedia(
+                    pageUrl = item.sourcePageUrl,
                     url = item.url,
                     targetFile = tempFile,
                     userAgent = item.userAgent,
@@ -813,6 +833,19 @@ class BrowserDownloadManager(private val context: Context) {
                 }
 
                 val destFile = File(item.destinationPath)
+                if (isAudioOnlyItem(item)) {
+                    val audio = VideoAudioMuxer.remuxAudio(tempFile, File(destFile.parentFile, destFile.nameWithoutExtension))
+                    if (audio != null) {
+                        runCatching { tempFile.delete() }
+                        mainHandler.post {
+                            item.fileName = audio.file.name
+                            item.destinationPath = audio.file.absolutePath
+                        }
+                        completeWith(item, audio.file, audio.mimeType)
+                        return@launch
+                    }
+                    // Unknown audio codec: keep the original bytes rather than fail.
+                }
                 tempFile.copyTo(destFile, overwrite = true)
                 runCatching { tempFile.delete() }
 
@@ -841,7 +874,8 @@ class BrowserDownloadManager(private val context: Context) {
         mimeType: String? = null,
         userAgent: String? = null,
         referer: String? = null,
-        extraHeaders: Map<String, String>? = null
+        extraHeaders: Map<String, String>? = null,
+        pageUrl: String? = null
     ): Long {
         val downloadId = nextDownloadId()
         // Container is decided by the muxer from the real codecs; start from the
@@ -861,7 +895,8 @@ class BrowserDownloadManager(private val context: Context) {
             userAgent = userAgent,
             referer = referer,
             extraHeaders = extraHeaders.orEmpty(),
-            pipeline = DownloadPipeline.MUXED
+            pipeline = DownloadPipeline.MUXED,
+            sourcePageUrl = pageUrl
         )
 
         mainHandler.post {
@@ -890,7 +925,8 @@ class BrowserDownloadManager(private val context: Context) {
 
                 // Video and audio are fetched concurrently, then combined.
                 val videoDeferred = async {
-                    downloadStream(
+                    fetchMedia(
+                        pageUrl = item.sourcePageUrl,
                         url = item.url,
                         targetFile = videoTmp,
                         userAgent = item.userAgent,
@@ -909,7 +945,8 @@ class BrowserDownloadManager(private val context: Context) {
                     )
                 }
                 val audioDeferred = async {
-                    downloadStream(
+                    fetchMedia(
+                        pageUrl = item.sourcePageUrl,
                         url = item.audioUrl.orEmpty(),
                         targetFile = audioTmp,
                         userAgent = item.userAgent,
@@ -999,6 +1036,41 @@ class BrowserDownloadManager(private val context: Context) {
         val httpCode: Int = 0,
         val reason: String? = null
     )
+
+    /**
+     * Direct transfer first. When YouTube cuts a stream off (HTTP 403 after
+     * the first megabyte, which happens to Android-client URLs without a
+     * PO token), the same format is fetched again through yt-dlp.
+     */
+    private fun fetchMedia(
+        pageUrl: String?,
+        url: String,
+        targetFile: File,
+        userAgent: String?,
+        referer: String?,
+        extraHeaders: Map<String, String>? = null,
+        cookieHeader: String? = null,
+        isActive: () -> Boolean,
+        onProgress: (current: Long, total: Long) -> Unit
+    ): StreamOutcome {
+        val direct = downloadStream(url, targetFile, userAgent, referer, extraHeaders, cookieHeader, isActive, onProgress)
+        if (direct.success || !isActive()) return direct
+        val itag = YtDlpDownloader.itagOf(url)
+        if (!url.contains("googlevideo.com") || itag == null || pageUrl == null ||
+            !com.browser.adfree.tabs.TabManager.isYouTube(pageUrl)
+        ) return direct
+
+        Log.i(TAG, "Direct fetch stopped (${direct.reason}); fetching itag $itag with yt-dlp")
+        val total = Regex("[?&]clen=(\\d+)").find(url)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
+        val error = YtDlpDownloader.download(pageUrl, itag, targetFile, isActive) { percent ->
+            if (total > 0) onProgress(total * percent / 100, total)
+        }
+        return if (error == null) {
+            StreamOutcome(success = true)
+        } else {
+            StreamOutcome(success = false, httpCode = direct.httpCode, reason = "YouTube cut the stream off and yt-dlp could not finish it: $error")
+        }
+    }
 
     private fun downloadStream(
         url: String,
@@ -1330,6 +1402,12 @@ class BrowserDownloadManager(private val context: Context) {
         }
     }
 
+    fun clearCompleted() {
+        downloadsList.filter {
+            it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.FAILED || it.status == DownloadStatus.CANCELLED
+        }.forEach { downloadsList.remove(it) }
+    }
+
     fun deleteDownload(item: DownloadItem) {
         activeJobs.remove(item.id)?.cancel()
         if (item.isSystemDownload) {
@@ -1434,8 +1512,15 @@ class BrowserDownloadManager(private val context: Context) {
         }
     }
 
-    private fun registerCompletedDownload(file: File, mimeType: String) {
+    private fun isAudioOnlyItem(item: DownloadItem): Boolean =
+        item.mimeType.startsWith("audio/", ignoreCase = true) ||
+            item.fileName.substringAfterLast(".", "").lowercase() in AUDIO_EXTENSIONS
+
+    private fun registerCompletedDownload(file: File, rawMimeType: String) {
         if (!file.exists()) return
+        // "audio/mp4; codecs=..." is not a type MediaStore understands, which is
+        // how audio files ended up unlisted or filed as video.
+        val mimeType = rawMimeType.substringBefore(";").trim().ifBlank { "application/octet-stream" }
         try {
             systemDownloadManager.addCompletedDownload(
                 file.name, "Downloaded media", true, mimeType,
@@ -1527,14 +1612,6 @@ class BrowserDownloadManager(private val context: Context) {
         } catch (e: Exception) {
             toast("Cannot open file: ${e.message}")
         }
-    }
-
-    fun removeDownload(item: DownloadItem) = deleteDownload(item)
-
-    fun clearCompleted() {
-        downloadsList.filter {
-            it.status == DownloadStatus.COMPLETED || it.status == DownloadStatus.FAILED || it.status == DownloadStatus.CANCELLED
-        }.forEach { downloadsList.remove(it) }
     }
 
     fun cancelAll() {

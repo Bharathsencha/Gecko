@@ -1,6 +1,6 @@
 /**
- * AI Free & Hybrid Ad/Tracker Content Shield Engine
- * Combines high-speed in-engine WebRequest filtering with uBlock Origin & Dark Reader bridges.
+ * App bridge: native request filter, proxy routing for the VPN, media
+ * detection and the messaging link to the app.
  */
 
 let blockedRules = new Set();
@@ -66,7 +66,6 @@ const coreBlocklist = [
     "an.yandex.ru", "yandex.ru/metrika",
     "live.chartboost.com", "init.supersonicads.com", "api.fyber.com", "inmobi.com", "config.inmobi.com",
     "ironsource.mobi", "outcome-ssp.supersonicads.com", "chartboost.com", "ironsrc.com", "supersonicads.com", "fyber.com",
-    "ads.youtube.com",
     "adsrvr.org", "insights.adsrvr.org", "match.adsrvr.org", "smartyads.com", "ad.gt", "contextweb.com",
     "sharethrough.com", "stackadapt.com", "stickyadstv.com", "ads.stickyadstv.com", "eb2.3lift.com",
     "tlx.3lift.com", "apex.go.sonobi.com", "c.gumgum.com", "a.teads.tv", "cdn.teads.tv", "cdn.kargo.com",
@@ -312,10 +311,29 @@ function shouldBlockOrRedirectUrl(urlStr, type) {
     return null;
 }
 
+// YouTube detects request blocking and walls the player, so its pages get no
+// network filtering. content.js fast-forwards the ads there instead.
+const YOUTUBE_HOST_REGEX = /(^|\.)(youtube\.com|youtube-nocookie\.com|youtu\.be)$/i;
+
+function hostOf(urlStr) {
+    try { return new URL(urlStr).hostname; } catch (e) { return ""; }
+}
+
+function isYouTubeDocument(details) {
+    let top = details.documentUrl || details.originUrl || "";
+    if (details.frameAncestors && details.frameAncestors.length) {
+        top = details.frameAncestors[details.frameAncestors.length - 1].url;
+    } else if (details.type === "main_frame") {
+        top = details.url;
+    }
+    return YOUTUBE_HOST_REGEX.test(hostOf(top));
+}
+
 // Intercept WebRequests Before They Hit the Network
 if (browser.webRequest && browser.webRequest.onBeforeRequest) {
     browser.webRequest.onBeforeRequest.addListener(
         (details) => {
+            if (isYouTubeDocument(details)) return {};
             const result = shouldBlockOrRedirectUrl(details.url, details.type);
             if (result) {
                 totalBlocked++;
@@ -410,6 +428,8 @@ if (browser.webRequest && browser.webRequest.onBeforeRequest) {
                 if (!details || !details.url) return;
                 const url = details.url;
                 if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:")) return;
+                // YouTube streams come from the player response instead; the app ignores these.
+                if (url.includes("googlevideo.com/")) return;
                 if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) return;
                 const isM3u8 = url.includes(".m3u8");
                 const isAudio = url.includes("mime=audio") || url.includes(".m4a") || url.includes(".mp3") || url.includes(".aac");
@@ -430,7 +450,9 @@ if (browser.webRequest && browser.webRequest.onBeforeRequest) {
             return {};
         },
         { urls: ["<all_urls>"] },
-        ["blocking"]
+        // Observe only: a blocking listener holds every media request until
+        // this script answers, which stalled YouTube's segment fetches.
+        []
     );
 }
 
@@ -442,6 +464,8 @@ if (browser.webRequest && browser.webRequest.onHeadersReceived) {
                 if (!details || !details.url) return;
                 const url = details.url;
                 if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:")) return;
+                // YouTube streams come from the player response instead; the app ignores these.
+                if (url.includes("googlevideo.com/")) return;
                 if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) return;
 
                 let contentType = "";
@@ -489,7 +513,7 @@ if (browser.webRequest && browser.webRequest.onHeadersReceived) {
             return {};
         },
         { urls: ["<all_urls>"] },
-        ["responseHeaders", "blocking"]
+        ["responseHeaders"]
     );
 }
 
@@ -509,6 +533,37 @@ if (browser.webNavigation && browser.webNavigation.onHistoryStateUpdated) {
     });
 }
 
+// Proxy routing for the in-app VPN (Tor or a verified SOCKS5 relay).
+// Fails closed: with the proxy enabled there is no direct fallback, so a dead
+// relay shows an error page instead of leaking the real address.
+let proxyConfig = { enabled: false, type: "socks", host: "", port: 0 };
+
+function isLoopback(urlStr) {
+    const h = hostOf(urlStr);
+    return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
+}
+
+if (browser.proxy && browser.proxy.onRequest) {
+    browser.proxy.onRequest.addListener((info) => {
+        if (!proxyConfig.enabled || isLoopback(info.url)) {
+            return { type: "direct" };
+        }
+        return {
+            type: proxyConfig.type,
+            host: proxyConfig.host,
+            port: proxyConfig.port,
+            proxyDNS: proxyConfig.type === "socks",
+            failoverTimeout: 15
+        };
+    }, { urls: ["<all_urls>"] });
+
+    if (browser.proxy.onError) {
+        browser.proxy.onError.addListener((err) => {
+            notifyNative({ action: "vpn_error", message: String((err && err.message) || err) });
+        });
+    }
+}
+
 // Native Messaging Bridge for GeckoView Android
 function notifyNative(msg) {
     if (!msg) return;
@@ -522,24 +577,28 @@ function notifyNative(msg) {
 function handleConfigUpdate(msg) {
     if (!msg) return;
 
-    // Dark Reader toggle — forward to Dark Reader extension
-    if (msg.action === "set_dark_mode") {
-        browser.runtime.sendMessage(
-            "addon@darkreader.org",
-            {
-                type: "change-settings",
-                settings: { enabled: !!msg.enabled }
-            }
-        ).catch(() => {});
+    if (msg.action === "set_vpn_config") {
+        proxyConfig = {
+            enabled: !!msg.enabled && !!msg.host && msg.port > 0,
+            type: msg.type === "http" ? "http" : "socks",
+            host: msg.host || "",
+            port: msg.port | 0
+        };
+        notifyNative({ action: "vpn_applied", enabled: proxyConfig.enabled });
     }
 
-    // Ad blocking toggle
     if (msg.action === "set_ad_blocking") {
         adBlockingActive = !!msg.enabled;
-        browser.runtime.sendMessage(
-            "uBlock0@raymondhill.net",
-            { what: adBlockingActive ? "restoreAll" : "suspendAll" }
-        ).catch(() => {});
+    }
+
+    // Flags read by content.js at document_start
+    if (msg.action === "set_content_flags") {
+        const flags = {
+            blockAi: msg.blockAi !== false,
+            cosmetic: msg.cosmetic !== false,
+            dark: !!msg.dark
+        };
+        browser.storage.local.set({ contentFlags: flags }).catch(() => {});
     }
 }
 
@@ -585,6 +644,8 @@ function connectToNativeBridge() {
                         });
                     } catch (e) {}
                 });
+            } else {
+                handleConfigUpdate(msg);
             }
         });
         nativePort.onDisconnect.addListener(function () {

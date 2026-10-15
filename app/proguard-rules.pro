@@ -50,3 +50,14 @@
     public static int v(...);
     public static int d(...);
 }
+
+# Embedded Tor: TorService is started by class name and talks to the native
+# daemon through JNI and the jtorctl control library.
+-keep class org.torproject.jni.** { *; }
+-keep class net.freehaven.tor.control.** { *; }
+
+# GeckoView reads assets/gecko/geckoview-config.yaml (the anti-fingerprinting
+# prefs) through SnakeYAML, which fills DebugConfig's fields by reflection.
+-keep class org.mozilla.gecko.util.DebugConfig { *; }
+-keep class org.yaml.snakeyaml.** { *; }
+-dontwarn org.yaml.snakeyaml.**

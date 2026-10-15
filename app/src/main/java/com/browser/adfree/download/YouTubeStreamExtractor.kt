@@ -79,6 +79,7 @@ object YouTubeStreamExtractor {
 
     private val httpClient by lazy {
         OkHttpClient.Builder()
+            .proxySelector(com.browser.adfree.vpn.NetworkRoute)
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(12, TimeUnit.SECONDS)
             .build()

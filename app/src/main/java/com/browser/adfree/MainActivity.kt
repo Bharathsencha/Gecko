@@ -20,7 +20,7 @@ package com.browser.adfree
 import android.content.Intent
 import android.os.Bundle
 import android.util.Log
-import androidx.activity.ComponentActivity
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -36,7 +36,7 @@ import com.browser.adfree.tabs.TabManager
 import com.browser.adfree.ui.BrowserMainScreen
 import com.browser.adfree.ui.components.PendingSaveLogin
 import com.browser.adfree.ui.theme.BrowserTheme
-import com.browser.adfree.vpn.FreeVpnManager
+import com.browser.adfree.vpn.VpnManager
 import android.os.Build
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
@@ -44,7 +44,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.mozilla.geckoview.*
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private lateinit var runtime: GeckoRuntime
     private lateinit var tabManager: TabManager
@@ -53,12 +53,11 @@ class MainActivity : ComponentActivity() {
     private lateinit var passwordRepo: SecurePasswordRepository
     private lateinit var historyRepo: HistoryRepository
     private lateinit var favoritesRepo: FavoritesRepository
-    private lateinit var vpnManager: FreeVpnManager
+    private lateinit var vpnManager: VpnManager
     private lateinit var shieldsRepo: com.browser.adfree.shields.ShieldsRepository
 
     private var extensionPort: WebExtension.Port? = null
-    private var uBlockExtension: WebExtension? = null
-    private var darkReaderExtension: WebExtension? = null
+    private var appBridgeExtension: WebExtension? = null
     private var pendingSaveLogin by mutableStateOf<PendingSaveLogin?>(null)
 
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -95,55 +94,6 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    /** Enable or disable uBlock Origin blocking globally */
-    fun setUBlockEnabled(enabled: Boolean) {
-        try {
-            val msg = JSONObject().apply {
-                put("what", if (enabled) "restoreAll" else "suspendAll")
-            }
-            runtime.webExtensionController.list().accept { extensions ->
-                extensions?.find { it.id == "uBlock0@raymondhill.net" }?.let {
-                    // Send via tab messaging — uBlock background script listens
-                    Log.i("AdFreeBrowser", "uBlock toggle: enabled=$enabled")
-                }
-            }
-        } catch (e: Exception) {
-            Log.e("AdFreeBrowser", "Failed to toggle uBlock", e)
-        }
-    }
-
-    /** Enable or disable Dark Reader dynamically */
-    fun setDarkReaderEnabled(enabled: Boolean) {
-        try {
-            val tabs = tabManager.tabs
-            tabs.forEach { tab ->
-                tab.session.let { session ->
-                    val js = if (enabled) {
-                        """
-                        (function() {
-                          if (window.__darkReaderEnabled) return;
-                          window.__darkReaderEnabled = true;
-                          document.dispatchEvent(new CustomEvent('__darkreader__enable'));
-                        })();
-                        """.trimIndent()
-                    } else {
-                        """
-                        (function() {
-                          window.__darkReaderEnabled = false;
-                          document.dispatchEvent(new CustomEvent('__darkreader__disable'));
-                        })();
-                        """.trimIndent()
-                    }
-                    // Dark Reader is already injected as a content script — it handles its own events
-                    // The extension's background page manages enabled state via storage
-                }
-            }
-            Log.i("AdFreeBrowser", "Dark Reader toggle: enabled=$enabled")
-        } catch (e: Exception) {
-            Log.e("AdFreeBrowser", "Failed to toggle Dark Reader", e)
-        }
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -170,7 +120,7 @@ class MainActivity : ComponentActivity() {
         historyRepo = HistoryRepository(this)
         favoritesRepo = FavoritesRepository(this)
         downloadManager = BrowserDownloadManager(this)
-        vpnManager = FreeVpnManager(this, preferencesRepo)
+        vpnManager = VpnManager(this, preferencesRepo)
 
         tabManager = TabManager(this).apply {
             this.historyRepository = historyRepo
@@ -185,76 +135,36 @@ class MainActivity : ComponentActivity() {
             com.browser.adfree.download.UniversalVideoExtractor.init(applicationContext)
         }
 
-        // Wire real-time VPN config bridge to WebExtension
-        vpnManager.onConfigChanged = { enabled, host, port, type ->
-            try {
-                val payload = JSONObject().apply {
-                    put("action", "set_vpn_config")
-                    put("enabled", enabled)
-                    put("host", host)
-                    put("port", port)
-                    put("type", type)
-                    put("countryCode", vpnManager.selectedCountry.code)
-                }
-                extensionPort?.postMessage(payload)
-            } catch (e: Exception) {}
+        // VPN route -> extension proxy.onRequest
+        vpnManager.onProxyChanged = { enabled, host, port ->
+            postToExtension(JSONObject().apply {
+                put("action", "set_vpn_config")
+                put("enabled", enabled)
+                put("host", host)
+                put("port", port)
+                put("type", "socks")
+            })
         }
 
-        // 2. Configure GeckoRuntime with Strict Native Tracking Protection & Cookie Shield
-        // Enable Gecko's built-in fingerprinting protection (RFP engine) via about:config prefs
-        val geckoPrefs = Bundle().apply {
-            // Hardware Video Decoding & GPU WebRender Acceleration on Android
-            putBoolean("media.hardware-video-decoding.enabled", true)
-            putBoolean("media.hardware-video-decoding.failed", false)
-            putBoolean("media.android-media-codec.enabled", true)
-            putBoolean("media.android-media-codec.preferred", true)
-            putBoolean("media.webm.enabled", true)
-            putBoolean("media.mp4.enabled", true)
-            putBoolean("media.mediasource.enabled", true)
-            putBoolean("media.mediasource.mp4.enabled", true)
-            putBoolean("media.mediasource.webm.enabled", true)
-            putBoolean("media.mediasource.vp9.enabled", true)
-            putInt("media.benchmark.vp9.fps", 120)
-            putInt("media.benchmark.frames", 1000)
-            putInt("media.cache_size", 65536)
-            putInt("media.memory_cache_max_size", 65536)
-            putInt("media.autoplay.default", 0)
-            putInt("media.autoplay.blocking_policy", 0)
-            putInt("layout.frame_rate", 0)
-            putBoolean("gfx.webrender.all", true)
-            putBoolean("layers.acceleration.force-enabled", true)
-            putBoolean("layers.offmainthreadcomposition.enabled", true)
-            putBoolean("layers.offmainthreadcomposition.async-animations", true)
-
-            // Tracking Protection (Standard without timer throttling)
-            putBoolean("privacy.trackingprotection.fingerprinting.enabled", true)
-            putBoolean("privacy.trackingprotection.enabled", true)
-            putBoolean("toolkit.telemetry.enabled", false)
-            putBoolean("datareporting.healthreport.uploadEnabled", false)
-        }
-
-        // Copy user.js prefs to filesDir so GeckoView can load them
-        val userJsFile = java.io.File(filesDir, "user.js")
+        // 2. Gecko prefs. GeckoView only reads arbitrary prefs from a YAML config
+        //    file; Bundle extras and user.js are ignored by it.
+        val configFile = java.io.File(filesDir, "geckoview-config.yaml")
         try {
-            assets.open("gecko/user.js").use { input ->
-                userJsFile.outputStream().use { output -> input.copyTo(output) }
+            assets.open("gecko/geckoview-config.yaml").use { input ->
+                configFile.outputStream().use { output -> input.copyTo(output) }
             }
         } catch (e: Exception) {
-            Log.w("AdFreeBrowser", "Failed to copy user.js: ${e.message}")
+            Log.w("AdFreeBrowser", "Failed to copy Gecko config: ${e.message}")
         }
 
         val runtimeSettings = GeckoRuntimeSettings.Builder()
-            .extras(geckoPrefs)
-            .configFilePath(userJsFile.absolutePath)
+            .configFilePath(configFile.absolutePath)
             .globalPrivacyControlEnabled(true)
             .contentBlocking(
                 ContentBlocking.Settings.Builder()
                     .enhancedTrackingProtectionLevel(ContentBlocking.EtpLevel.STRICT)
                     .antiTracking(ContentBlocking.AntiTracking.STRICT)
                     .cookieBehavior(preferencesRepo.cookiePolicy.geckoValue)
-                    .cookieBannerHandlingMode(ContentBlocking.CookieBannerMode.COOKIE_BANNER_MODE_REJECT_OR_ACCEPT)
-                    .cookieBannerGlobalRulesEnabled(true)
-                    .cookieBannerGlobalRulesSubFramesEnabled(true)
                     .queryParameterStrippingEnabled(true)
                     .strictSocialTrackingProtection(true)
                     .build()
@@ -270,60 +180,42 @@ class MainActivity : ComponentActivity() {
 
         // Auto-grant permissions for built-in extensions (webRequest, webRequestBlocking, storage, etc.)
         runtime.webExtensionController.promptDelegate = object : WebExtensionController.PromptDelegate {
-            override fun onInstallPrompt(extension: WebExtension): GeckoResult<AllowOrDeny>? {
-                return GeckoResult.fromValue(AllowOrDeny.ALLOW)
-            }
             override fun onOptionalPrompt(
                 extension: WebExtension,
                 permissions: Array<String>,
-                origins: Array<String>
+                origins: Array<String>,
+                dataCollectionPermissions: Array<String>
             ): GeckoResult<AllowOrDeny>? {
                 return GeckoResult.fromValue(AllowOrDeny.ALLOW)
             }
         }
 
-        // 3a. Load real uBlock Origin 1.75.0 — silent, no popup, blocks everything
+        // 3a. uBlock Origin 1.75.0 (YouTube is exempt, see its js/start.js)
         runtime.webExtensionController.ensureBuiltIn(
             "resource://android/assets/extensions/ublock_origin/",
             "uBlock0@raymondhill.net"
         ).accept(
             { ext ->
                 if (ext != null) {
-                    Log.i("AdFreeBrowser", "uBlock Origin loaded successfully")
-                    uBlockExtension = ext
+                    Log.i("AdFreeBrowser", "uBlock Origin loaded")
+                    allowInPrivateTabs(ext)
                 }
             },
             { error -> Log.e("AdFreeBrowser", "uBlock Origin failed to load", error) }
         )
 
-        // 3b. Load real Dark Reader 4.9.133 — silent, controlled via app toggle
-        runtime.webExtensionController.ensureBuiltIn(
-            "resource://android/assets/extensions/darkreader/",
-            "addon@darkreader.org"
-        ).accept(
-            { ext ->
-                if (ext != null) {
-                    Log.i("AdFreeBrowser", "Dark Reader loaded successfully")
-                    darkReaderExtension = ext
-                    // Apply saved dark mode preference on startup
-                    if (preferencesRepo.darkWebDefault) {
-                        setDarkReaderEnabled(true)
-                    }
-                }
-            },
-            { error -> Log.e("AdFreeBrowser", "Dark Reader failed to load", error) }
-        )
-
-        // 3c. Load custom AI Overview + Reader bridge
+        // 3b. App bridge: proxy routing, AI Overview removal, page commands, media detection
         runtime.webExtensionController.ensureBuiltIn(
             "resource://android/assets/extensions/aifree/",
             "aifree-embedded@browser.adfree"
         ).accept(
             { extension ->
                 if (extension != null) {
-                    Log.i("AdFreeBrowser", "AI Overview blocker loaded")
+                    Log.i("AdFreeBrowser", "App bridge extension loaded")
+                    appBridgeExtension = extension
+                    allowInPrivateTabs(extension)
+                    tabManager.attachPageBridge(extension)
 
-                    // Set up Two-Way Native Port Messaging Bridge
                     extension.setMessageDelegate(object : WebExtension.MessageDelegate {
                         override fun onConnect(port: WebExtension.Port) {
                             extensionPort = port
@@ -351,9 +243,8 @@ class MainActivity : ComponentActivity() {
                     }, "browser_app")
                 }
             },
-            { error -> Log.e("AdFreeBrowser", "AI blocker failed to load", error) }
+            { error -> Log.e("AdFreeBrowser", "App bridge extension failed to load", error) }
         )
-
 
         // 4. Restore Session / Create Initial Tab according to Startup Behavior
         tabManager.restoreSession(runtime, preferencesRepo.startupBehavior)
@@ -380,7 +271,6 @@ class MainActivity : ComponentActivity() {
                 } else if (tabManager.tabs.size > 1) {
                     tabManager.closeTab(tabManager.activeTabIndex.intValue, runtime)
                 } else {
-                    vpnManager.forceDisconnectOnExit(tabManager.tabs)
                     if (preferencesRepo.wipeOnExit) {
                         performWipeOnExit()
                     }
@@ -391,6 +281,18 @@ class MainActivity : ComponentActivity() {
 
         // 6. Set Compose UI
         setContent {
+            // Pages follow the app's theme choice, not only the system setting.
+            val darkTheme = when (preferencesRepo.themeMode) {
+                com.browser.adfree.storage.AppThemeMode.LIGHT -> false
+                com.browser.adfree.storage.AppThemeMode.DARK -> true
+                com.browser.adfree.storage.AppThemeMode.SYSTEM -> androidx.compose.foundation.isSystemInDarkTheme()
+            }
+            androidx.compose.runtime.LaunchedEffect(darkTheme) {
+                runtime.settings.preferredColorScheme =
+                    if (darkTheme) GeckoRuntimeSettings.COLOR_SCHEME_DARK else GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
+            }
+            com.browser.adfree.ui.IncognitoGeckoView.enabled = preferencesRepo.incognitoKeyboard
+            com.browser.adfree.ui.IncognitoKeyboard(enabled = preferencesRepo.incognitoKeyboard || tabManager.activeTab?.isPrivate == true) {
             BrowserTheme(
                 themeMode = preferencesRepo.themeMode,
                 accentColor = preferencesRepo.accentColor
@@ -405,6 +307,7 @@ class MainActivity : ComponentActivity() {
                     favoritesRepo = favoritesRepo,
                     shieldsRepo = shieldsRepo,
                     vpnManager = vpnManager,
+                    onExtensionConfigChanged = { syncExtensionConfig() },
                     pendingSaveLogin = pendingSaveLogin,
                     onSaveLogin = {
                         pendingSaveLogin?.let { login ->
@@ -417,6 +320,7 @@ class MainActivity : ComponentActivity() {
                         pendingSaveLogin = null
                     }
                 )
+            }
             }
         }
     }
@@ -434,30 +338,35 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun syncExtensionConfig() {
+    private fun postToExtension(payload: JSONObject) {
         try {
-            val vpnPayload = JSONObject().apply {
-                put("action", "set_vpn_config")
-                put("enabled", vpnManager.isEnabled)
-                put("host", if (vpnManager.isEnabled) vpnManager.selectedCountry.host else "")
-                put("port", if (vpnManager.isEnabled) vpnManager.selectedCountry.port else 0)
-                put("type", vpnManager.selectedCountry.type)
-                put("countryCode", vpnManager.selectedCountry.code)
-            }
-            extensionPort?.postMessage(vpnPayload)
+            extensionPort?.postMessage(payload)
+        } catch (e: Exception) {
+            Log.w("AdFreeBrowser", "Extension message failed: ${e.message}")
+        }
+    }
 
-            val adPayload = JSONObject().apply {
-                put("action", "set_ad_blocking")
-                put("enabled", preferencesRepo.adBlockingEnabled)
-            }
-            extensionPort?.postMessage(adPayload)
+    /** Pushes every app setting the extension enforces; runs on (re)connect and on change. */
+    fun syncExtensionConfig() {
+        vpnManager.resendRoute()
+        postToExtension(JSONObject().apply {
+            put("action", "set_ad_blocking")
+            put("enabled", preferencesRepo.adBlockingEnabled)
+        })
+        postToExtension(JSONObject().apply {
+            put("action", "set_content_flags")
+            put("blockAi", preferencesRepo.blockAiOverviews)
+            put("cosmetic", preferencesRepo.cosmeticBlockingEnabled)
+            put("dark", preferencesRepo.darkWebDefault)
+        })
+    }
 
-            val aiPayload = JSONObject().apply {
-                put("action", "set_block_ai_overviews")
-                put("enabled", preferencesRepo.blockAiOverviews)
-            }
-            extensionPort?.postMessage(aiPayload)
-        } catch (e: Exception) {}
+    private fun allowInPrivateTabs(extension: WebExtension) {
+        if (extension.metaData.allowedInPrivateBrowsing) return
+        runtime.webExtensionController.setAllowedInPrivateBrowsing(extension, true).accept(
+            { Log.i("AdFreeBrowser", "${extension.id} allowed in private tabs") },
+            { error -> Log.w("AdFreeBrowser", "Could not allow ${extension.id} in private tabs", error) }
+        )
     }
 
     /**
@@ -532,7 +441,9 @@ class MainActivity : ComponentActivity() {
             val json = parseToJsonObject(message)
             val action = json.optString("action")
 
-            if (action == "clear_detected_media") {
+            if (action == "vpn_error") {
+                runOnUiThread { vpnManager.reportRouteError(json.optString("message")) }
+            } else if (action == "clear_detected_media") {
                 runOnUiThread {
                     tabManager.activeTab?.detectedVideos?.clear()
                 }
@@ -542,16 +453,12 @@ class MainActivity : ComponentActivity() {
                 if (url.isNotBlank() && cookieHeader.isNotBlank()) {
                     downloadManager.cacheCookies(url, cookieHeader)
                 }
-            } else if (action == "ad_blocked" || action == "blocked_count") {
-                val count = json.optInt("count", json.optInt("tabBlockedCount", 1))
+            } else if (action == "blocked_count") {
+                // Counted per page by the extension; a navigation resets it to 0.
+                // Gecko's own tracker blocks are added on top in TabManager.
+                val count = json.optInt("count", 0)
                 runOnUiThread {
-                    tabManager.activeTab?.let { tab ->
-                        if (count > tab.adBlockCount) {
-                            tab.adBlockCount = count
-                        } else {
-                            tab.adBlockCount++
-                        }
-                    }
+                    tabManager.activeTab?.let { tab -> tab.extensionBlockCount = count }
                 }
             } else if (action == "download_blob") {
                 val filename = json.optString("filename")
@@ -559,24 +466,6 @@ class MainActivity : ComponentActivity() {
                 val mimeType = json.optString("mimeType")
                 if (dataUrl.isNotBlank()) {
                     downloadManager.saveBase64Download(filename, dataUrl, mimeType.ifBlank { null })
-                }
-            } else if (action == "share_payload") {
-                val title = json.optString("title")
-                val text = json.optString("text")
-                val url = json.optString("url")
-                val shareBody = if (text.isNotBlank() && url.isNotBlank()) "$text\n$url" else (text.ifBlank { url })
-                runOnUiThread {
-                    try {
-                        val sendIntent = Intent().apply {
-                            this.action = Intent.ACTION_SEND
-                            putExtra(Intent.EXTRA_TEXT, shareBody)
-                            if (title.isNotBlank()) putExtra(Intent.EXTRA_TITLE, title)
-                            type = "text/plain"
-                        }
-                        startActivity(Intent.createChooser(sendIntent, title.ifBlank { "Share" }))
-                    } catch (e: Exception) {
-                        e.printStackTrace()
-                    }
                 }
             } else if (action == "offer_save_password") {
                 val domain = json.optString("domain")
@@ -818,7 +707,7 @@ class MainActivity : ComponentActivity() {
 
                                     kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
                                         try {
-                                             val resp = okhttp3.OkHttpClient().newCall(req).execute()
+                                             val resp = okhttp3.OkHttpClient.Builder().proxySelector(com.browser.adfree.vpn.NetworkRoute).build().newCall(req).execute()
                                             if (resp.isSuccessful) {
                                                 val text = resp.body?.string() ?: ""
                                                 if (com.browser.adfree.download.VideoQualityParser.isMasterPlaylist(text)) {
@@ -861,10 +750,10 @@ class MainActivity : ComponentActivity() {
         return com.browser.adfree.download.VideoQualityParser.sortQualities(list)
     }
 
-    override fun onNewIntent(intent: Intent?) {
+    override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val url = intent?.dataString
+        val url = intent.dataString
         if (!url.isNullOrBlank()) {
             val activeTab = tabManager.activeTab
             if (activeTab != null && activeTab.url == TabManager.HOME_URL) {
@@ -887,7 +776,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onStop() {
         super.onStop()
-        vpnManager.forceDisconnectOnExit(tabManager.tabs)
         if (preferencesRepo.wipeOnExit) {
             performWipeOnExit()
         } else {
@@ -896,7 +784,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
-        vpnManager.forceDisconnectOnExit(tabManager.tabs)
+        vpnManager.shutdown()
         if (preferencesRepo.wipeOnExit) {
             performWipeOnExit()
         }

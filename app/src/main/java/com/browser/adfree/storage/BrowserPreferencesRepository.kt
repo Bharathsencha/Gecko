@@ -64,9 +64,6 @@ class BrowserPreferencesRepository(context: Context) {
     var savePasswordsEnabled by mutableStateOf(prefs.getBoolean("save_passwords", true))
         private set
 
-    var autofillEnabled by mutableStateOf(prefs.getBoolean("autofill_enabled", true))
-        private set
-
     var cookiePolicy by mutableStateOf(
         try {
             CookiePolicy.valueOf(prefs.getString("cookie_policy", CookiePolicy.ACCEPT_NON_TRACKERS.name) ?: CookiePolicy.ACCEPT_NON_TRACKERS.name)
@@ -82,10 +79,25 @@ class BrowserPreferencesRepository(context: Context) {
     var httpsOnlyMode by mutableStateOf(prefs.getBoolean("https_only_mode", true))
         private set
 
-    var vpnEnabled by mutableStateOf(prefs.getBoolean("vpn_enabled", false))
+    /** Ask keyboards not to learn or store typing (always on in private tabs). */
+    var incognitoKeyboard by mutableStateOf(prefs.getBoolean("incognito_keyboard", true))
         private set
 
+    fun setIncognitoKeyboardPreference(enabled: Boolean) {
+        incognitoKeyboard = enabled
+        prefs.edit().putBoolean("incognito_keyboard", enabled).apply()
+    }
+
+    /** Last used VPN mode ("TOR" or "PROXY"); the connection itself is never auto-restored. */
+    var vpnMode by mutableStateOf(prefs.getString("vpn_mode", "TOR") ?: "TOR")
+        private set
+
+    /** Country for free-proxy mode. */
     var vpnCountryCode by mutableStateOf(prefs.getString("vpn_country_code", "US") ?: "US")
+        private set
+
+    /** Tor exit country, blank for any. */
+    var vpnTorExitCountry by mutableStateOf(prefs.getString("vpn_tor_exit", "") ?: "")
         private set
 
     var videoDownloaderEnabled by mutableStateOf(prefs.getBoolean("video_downloader_enabled", true))
@@ -100,27 +112,32 @@ class BrowserPreferencesRepository(context: Context) {
     // Customization & Appearance
     var themeMode by mutableStateOf(
         try {
-            AppThemeMode.valueOf(prefs.getString("theme_mode", AppThemeMode.DARK_OLED.name) ?: AppThemeMode.DARK_OLED.name)
+            when (val stored = prefs.getString("theme_mode", AppThemeMode.SYSTEM.name)) {
+                // Older builds had several dark variants; they all map to the one dark theme.
+                "DARK_OLED", "DARK_MIDNIGHT", "DARK_CHARCOAL" -> AppThemeMode.DARK
+                null -> AppThemeMode.SYSTEM
+                else -> AppThemeMode.valueOf(stored)
+            }
         } catch (e: Exception) {
-            AppThemeMode.DARK_OLED
+            AppThemeMode.SYSTEM
         }
     )
         private set
 
     var accentColor by mutableStateOf(
         try {
-            AppAccentColor.valueOf(prefs.getString("accent_color", AppAccentColor.CYAN.name) ?: AppAccentColor.CYAN.name)
+            AppAccentColor.valueOf(prefs.getString("accent_color", AppAccentColor.YELLOW.name) ?: AppAccentColor.YELLOW.name)
         } catch (e: Exception) {
-            AppAccentColor.CYAN
+            AppAccentColor.YELLOW
         }
     )
         private set
 
     var homepageWallpaper by mutableStateOf(
         try {
-            HomepageWallpaper.valueOf(prefs.getString("homepage_wallpaper", HomepageWallpaper.DEFAULT.name) ?: HomepageWallpaper.DEFAULT.name)
+            HomepageWallpaper.valueOf(prefs.getString("homepage_wallpaper", HomepageWallpaper.BLOCKS.name) ?: HomepageWallpaper.BLOCKS.name)
         } catch (e: Exception) {
-            HomepageWallpaper.DEFAULT
+            HomepageWallpaper.BLOCKS
         }
     )
         private set
@@ -128,22 +145,66 @@ class BrowserPreferencesRepository(context: Context) {
     var customWallpaperUri by mutableStateOf(prefs.getString("custom_wallpaper_uri", "") ?: "")
         private set
 
+    /** Start-page designs the user made and named in the designer. */
+    var customDesigns by mutableStateOf(loadDesigns())
+        private set
+
+    /** Which saved design is shown when the background is DESIGN. */
+    var selectedDesignId by mutableStateOf(prefs.getString("selected_design_id", "") ?: "")
+        private set
+
+    val activeDesign: com.browser.adfree.model.WallDesign?
+        get() = customDesigns.firstOrNull { it.id == selectedDesignId }?.design ?: customDesigns.firstOrNull()?.design
+
+    private fun loadDesigns(): List<com.browser.adfree.model.SavedDesign> {
+        val list = com.browser.adfree.model.SavedDesign.listFromJson(prefs.getString("custom_designs", null))
+        if (list.isNotEmpty()) return list
+        // One unnamed design from an earlier build becomes the first saved one.
+        val legacy = com.browser.adfree.model.WallDesign.fromJson(prefs.getString("custom_design", null)) ?: return emptyList()
+        return listOf(com.browser.adfree.model.SavedDesign(java.util.UUID.randomUUID().toString(), "My design", legacy))
+    }
+
+    private fun persistDesigns() {
+        prefs.edit()
+            .putString("custom_designs", com.browser.adfree.model.SavedDesign.listToJson(customDesigns))
+            .putString("selected_design_id", selectedDesignId)
+            .remove("custom_design")
+            .apply()
+    }
+
+    /** Creates ([id] null) or replaces a design, selects it and makes it the background. */
+    fun saveDesign(id: String?, name: String, design: com.browser.adfree.model.WallDesign) {
+        val designId = id ?: java.util.UUID.randomUUID().toString()
+        val entry = com.browser.adfree.model.SavedDesign(designId, name, design)
+        customDesigns = if (customDesigns.any { it.id == designId }) customDesigns.map { if (it.id == designId) entry else it } else customDesigns + entry
+        selectDesign(designId)
+    }
+
+    fun selectDesign(id: String) {
+        selectedDesignId = id
+        persistDesigns()
+        setHomepageWallpaperPreference(HomepageWallpaper.DESIGN)
+    }
+
+    fun deleteDesign(id: String) {
+        customDesigns = customDesigns.filterNot { it.id == id }
+        if (selectedDesignId == id) {
+            selectedDesignId = ""
+            if (homepageWallpaper == HomepageWallpaper.DESIGN) setHomepageWallpaperPreference(HomepageWallpaper.BLOCKS)
+        }
+        persistDesigns()
+    }
+
     var wallpaperBlur by mutableStateOf(prefs.getFloat("wallpaper_blur", 0f))
         private set
 
     var wallpaperDim by mutableStateOf(prefs.getFloat("wallpaper_dim", 0.3f))
         private set
 
-    var showPrivacyStatsWidget by mutableStateOf(prefs.getBoolean("show_privacy_stats", true))
-        private set
-
     var showFavoritesGrid by mutableStateOf(prefs.getBoolean("show_favorites_grid", true))
         private set
 
     var favoritesGridColumns by mutableStateOf(prefs.getInt("favorites_grid_columns", 4))
-        private set
-
-    var showGreetingHeader by mutableStateOf(prefs.getBoolean("show_greeting_header", true))
         private set
 
     var bottomAddressBar by mutableStateOf(prefs.getBoolean("bottom_address_bar", false))
@@ -186,11 +247,6 @@ class BrowserPreferencesRepository(context: Context) {
         prefs.edit().putFloat("wallpaper_dim", dim).apply()
     }
 
-    fun setShowPrivacyStatsPreference(show: Boolean) {
-        showPrivacyStatsWidget = show
-        prefs.edit().putBoolean("show_privacy_stats", show).apply()
-    }
-
     fun setShowFavoritesGridPreference(show: Boolean) {
         showFavoritesGrid = show
         prefs.edit().putBoolean("show_favorites_grid", show).apply()
@@ -199,11 +255,6 @@ class BrowserPreferencesRepository(context: Context) {
     fun setFavoritesGridColumnsPreference(columns: Int) {
         favoritesGridColumns = columns
         prefs.edit().putInt("favorites_grid_columns", columns).apply()
-    }
-
-    fun setShowGreetingHeaderPreference(show: Boolean) {
-        showGreetingHeader = show
-        prefs.edit().putBoolean("show_greeting_header", show).apply()
     }
 
     fun setBottomAddressBarPreference(bottom: Boolean) {
@@ -241,16 +292,6 @@ class BrowserPreferencesRepository(context: Context) {
         prefs.edit().putBoolean("wipe_on_exit", enabled).apply()
     }
 
-    fun setSavePasswordsPreference(enabled: Boolean) {
-        savePasswordsEnabled = enabled
-        prefs.edit().putBoolean("save_passwords", enabled).apply()
-    }
-
-    fun setAutofillPreference(enabled: Boolean) {
-        autofillEnabled = enabled
-        prefs.edit().putBoolean("autofill_enabled", enabled).apply()
-    }
-
     fun setCookiePolicyPreference(policy: CookiePolicy) {
         cookiePolicy = policy
         prefs.edit().putString("cookie_policy", policy.name).apply()
@@ -266,12 +307,14 @@ class BrowserPreferencesRepository(context: Context) {
         prefs.edit().putBoolean("https_only_mode", enabled).apply()
     }
 
-    fun setVpnPreference(enabled: Boolean, countryCode: String) {
-        vpnEnabled = enabled
-        vpnCountryCode = countryCode
+    fun setVpnPreference(mode: String, proxyCountry: String, torExitCountry: String) {
+        vpnMode = mode
+        vpnCountryCode = proxyCountry
+        vpnTorExitCountry = torExitCountry
         prefs.edit()
-            .putBoolean("vpn_enabled", enabled)
-            .putString("vpn_country_code", countryCode)
+            .putString("vpn_mode", mode)
+            .putString("vpn_country_code", proxyCountry)
+            .putString("vpn_tor_exit", torExitCountry)
             .apply()
     }
 
@@ -293,29 +336,40 @@ class BrowserPreferencesRepository(context: Context) {
 
 enum class AppThemeMode(val displayName: String) {
     LIGHT("Light"),
-    DARK_OLED("OLED Black"),
-    DARK_MIDNIGHT("Midnight Navy"),
-    DARK_CHARCOAL("Charcoal"),
+    DARK("Dark"),
     SYSTEM("System")
 }
 
+/** Solid fill used for primary actions and active states. Text on top is always ink. */
 enum class AppAccentColor(val displayName: String, val hex: Long) {
-    CYAN("Neon Cyan", 0xFF00D8F6),
-    PURPLE("Electric Purple", 0xFFA855F7),
-    GREEN("Emerald Green", 0xFF10B981),
-    RED("Ruby Crimson", 0xFFF43F5E),
-    ORANGE("Sunset Amber", 0xFFF97316),
-    YELLOW("Cyber Gold", 0xFFFACC15),
-    MONOCHROME("Monochrome", 0xFFE2E8F0)
+    YELLOW("Yellow", 0xFFFFD84D),
+    ORANGE("Orange", 0xFFFFB067),
+    PURPLE("Purple", 0xFFB49CFF),
+    TEAL("Teal", 0xFF7FD8C8),
+    PINK("Pink", 0xFFFF9EC7),
+    BLUE("Blue", 0xFF8EC5FF)
 }
 
 enum class HomepageWallpaper(val displayName: String) {
-    DEFAULT("Glass Dark"),
-    AURORA("Deep Aurora"),
-    NEBULA("Cosmic Nebula"),
-    CYBER("Cyber Grid"),
+    BLOCKS("Blocks"),
+    STACK("Stack"),
+    SHAPES("Shapes"),
+    MONDRIAN("Mondrian"),
+    DESIGN("My design"),
+    DOTS("Dot grid"),
+    GRID("Graph"),
+    STRIPES("Stripes"),
+    CHECKER("Checker"),
+    BUTTER("Butter"),
+    PEACH("Peach"),
+    MINT("Mint"),
+    LAVENDER("Lavender"),
+    DEFAULT("Plain"),
+    AURORA("Aurora"),
+    NEBULA("Nebula"),
+    CYBER("Cyber"),
     OLED("Pitch Black"),
-    FOREST("Mystic Forest"),
-    SUNSET("Warm Sunset"),
-    CUSTOM("Custom Photo")
+    FOREST("Forest"),
+    SUNSET("Sunset"),
+    CUSTOM("Photo")
 }

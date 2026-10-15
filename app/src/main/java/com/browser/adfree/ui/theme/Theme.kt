@@ -19,9 +19,12 @@ package com.browser.adfree.ui.theme
 
 import android.app.Activity
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Shapes
+import androidx.compose.material3.Typography
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
@@ -29,120 +32,143 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.SideEffect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.text.ExperimentalTextApi
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontVariation
+import com.browser.adfree.R
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.view.WindowCompat
 import com.browser.adfree.storage.AppAccentColor
 import com.browser.adfree.storage.AppThemeMode
 
+private val BrutalShapes = Shapes(
+    extraSmall = RoundedCornerShape(4.dp),
+    small = RoundedCornerShape(6.dp),
+    medium = RoundedCornerShape(6.dp),
+    large = RoundedCornerShape(8.dp),
+    extraLarge = RoundedCornerShape(8.dp)
+)
+
+/**
+ * Space Grotesk (SIL OFL 1.1, assets/licenses): a geometric grotesque with
+ * squared terminals that suits the flat, ink-outlined look. One variable font
+ * file covers every weight.
+ */
+@OptIn(ExperimentalTextApi::class)
+val SpaceGrotesk = FontFamily(
+    listOf(FontWeight.Light, FontWeight.Normal, FontWeight.Medium, FontWeight.SemiBold, FontWeight.Bold).map { w ->
+        Font(
+            resId = R.font.space_grotesk,
+            weight = w,
+            variationSettings = FontVariation.Settings(FontVariation.weight(w.weight))
+        )
+    }
+)
+
+private val BrutalTypography = Typography().run {
+    fun TextStyle.sg() = copy(fontFamily = SpaceGrotesk)
+    copy(
+        displayLarge = displayLarge.sg(),
+        displayMedium = displayMedium.sg(),
+        displaySmall = displaySmall.sg(),
+        headlineLarge = headlineLarge.sg(),
+        headlineMedium = headlineMedium.sg(),
+        headlineSmall = headlineSmall.sg().copy(fontSize = 22.sp, fontWeight = FontWeight.Bold),
+        titleLarge = titleLarge.sg().copy(fontSize = 20.sp, fontWeight = FontWeight.Bold),
+        titleMedium = titleMedium.sg().copy(fontSize = 16.sp, fontWeight = FontWeight.SemiBold),
+        titleSmall = titleSmall.sg(),
+        bodyLarge = bodyLarge.sg().copy(fontSize = 15.sp),
+        bodyMedium = bodyMedium.sg().copy(fontSize = 14.sp),
+        bodySmall = bodySmall.sg(),
+        labelLarge = labelLarge.sg().copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
+        labelMedium = labelMedium.sg().copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+        labelSmall = TextStyle(fontFamily = SpaceGrotesk, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, letterSpacing = 0.6.sp)
+    )
+}
+
 @Composable
 fun BrowserTheme(
-    themeMode: AppThemeMode = AppThemeMode.DARK_OLED,
-    accentColor: AppAccentColor = AppAccentColor.CYAN,
+    themeMode: AppThemeMode = AppThemeMode.SYSTEM,
+    accentColor: AppAccentColor = AppAccentColor.YELLOW,
     content: @Composable () -> Unit
 ) {
-    val isSystemDark = isSystemInDarkTheme()
-    val isEffectiveDark = when (themeMode) {
+    val isDark = when (themeMode) {
         AppThemeMode.LIGHT -> false
-        AppThemeMode.SYSTEM -> isSystemDark
-        else -> true
+        AppThemeMode.DARK -> true
+        AppThemeMode.SYSTEM -> isSystemInDarkTheme()
     }
 
-    val primaryAccent = Color(accentColor.hex)
+    val accent = Color(accentColor.hex)
+    val base = if (isDark) DarkBrowserColors else LightBrowserColors
+    val browserColors = base.copy(accent = accent)
 
-    val browserColors = when {
-        !isEffectiveDark -> BrowserColors(
-            background = Color(0xFFF2F2F7),
-            surface = Color(0xFFFFFFFF),
-            surfaceElevated = Color(0xFFFFFFFF),
-            surfaceCard = Color(0xFFE5E5EA),
-            border = Color(0xFFD1D1D6),
-            textPrimary = Color(0xFF000000),
-            textSecondary = Color(0xFF6C6C70),
-            accent = primaryAccent,
-            isDark = false
-        )
-        themeMode == AppThemeMode.DARK_MIDNIGHT -> BrowserColors(
-            background = Color(0xFF070B14),
-            surface = Color(0xFF0D1527),
-            surfaceElevated = Color(0xFF131F38),
-            surfaceCard = Color(0xFF1A2A4C),
-            border = Color(0xFF24375F),
-            textPrimary = Color(0xFFFFFFFF),
-            textSecondary = Color(0xFF94A3B8),
-            accent = primaryAccent,
-            isDark = true
-        )
-        themeMode == AppThemeMode.DARK_CHARCOAL -> BrowserColors(
-            background = Color(0xFF121214),
-            surface = Color(0xFF18181B),
-            surfaceElevated = Color(0xFF222226),
-            surfaceCard = Color(0xFF27272A),
-            border = Color(0xFF3F3F46),
-            textPrimary = Color(0xFFFFFFFF),
-            textSecondary = Color(0xFFA1A1AA),
-            accent = primaryAccent,
-            isDark = true
-        )
-        else -> BrowserColors(
-            background = Color(0xFF000000),
-            surface = Color(0xFF0C0C0E),
-            surfaceElevated = Color(0xFF161618),
-            surfaceCard = Color(0xFF1E1E22),
-            border = Color(0xFF2C2C30),
-            textPrimary = Color(0xFFFFFFFF),
-            textSecondary = Color(0xFF8E8E93),
-            accent = primaryAccent,
-            isDark = true
-        )
-    }
-
-    val colorScheme = if (!isEffectiveDark) {
-        lightColorScheme(
-            primary = primaryAccent,
-            secondary = primaryAccent,
+    val colorScheme = if (isDark) {
+        darkColorScheme(
+            primary = accent,
+            onPrimary = browserColors.onAccent,
+            primaryContainer = accent,
+            onPrimaryContainer = browserColors.onAccent,
+            secondary = accent,
+            onSecondary = browserColors.onAccent,
             background = browserColors.background,
-            surface = browserColors.surface,
-            surfaceVariant = browserColors.surfaceElevated,
-            onPrimary = Color.White,
             onBackground = browserColors.textPrimary,
-            onSurface = browserColors.textPrimary
+            surface = browserColors.surface,
+            onSurface = browserColors.textPrimary,
+            surfaceVariant = browserColors.surfaceCard,
+            onSurfaceVariant = browserColors.textSecondary,
+            outline = browserColors.border,
+            outlineVariant = browserColors.border.copy(alpha = 0.25f),
+            error = DangerRed
         )
     } else {
-        darkColorScheme(
-            primary = primaryAccent,
-            secondary = primaryAccent,
+        lightColorScheme(
+            primary = accent,
+            onPrimary = browserColors.onAccent,
+            primaryContainer = accent,
+            onPrimaryContainer = browserColors.onAccent,
+            secondary = accent,
+            onSecondary = browserColors.onAccent,
             background = browserColors.background,
-            surface = browserColors.surface,
-            surfaceVariant = browserColors.surfaceElevated,
-            onPrimary = Color.White,
             onBackground = browserColors.textPrimary,
-            onSurface = browserColors.textPrimary
+            surface = browserColors.surface,
+            onSurface = browserColors.textPrimary,
+            surfaceVariant = browserColors.surfaceCard,
+            onSurfaceVariant = browserColors.textSecondary,
+            outline = browserColors.border,
+            outlineVariant = browserColors.border.copy(alpha = 0.2f),
+            error = DangerRed
         )
     }
 
-    // Invert system status bar & navigation bar icons according to dark/light theme
     val view = LocalView.current
     if (!view.isInEditMode) {
         SideEffect {
             val window = (view.context as? Activity)?.window
             if (window != null) {
                 val insetsController = WindowCompat.getInsetsController(window, view)
-                insetsController.isAppearanceLightStatusBars = !isEffectiveDark
-                insetsController.isAppearanceLightNavigationBars = !isEffectiveDark
+                insetsController.isAppearanceLightStatusBars = !isDark
+                insetsController.isAppearanceLightNavigationBars = !isDark
             }
         }
     }
 
-    val customTextSelectionColors = TextSelectionColors(
-        handleColor = primaryAccent,
-        backgroundColor = primaryAccent.copy(alpha = 0.35f)
+    val selectionColors = TextSelectionColors(
+        handleColor = browserColors.border,
+        backgroundColor = accent.copy(alpha = 0.6f)
     )
 
     CompositionLocalProvider(
         LocalBrowserColors provides browserColors,
-        LocalTextSelectionColors provides customTextSelectionColors
+        LocalTextSelectionColors provides selectionColors
     ) {
         MaterialTheme(
             colorScheme = colorScheme,
+            shapes = BrutalShapes,
+            typography = BrutalTypography,
             content = content
         )
     }

@@ -17,6 +17,24 @@
 
 package com.browser.adfree.ui.components
 
+import androidx.compose.runtime.getValue
+
+import androidx.compose.material.icons.filled.LocalFireDepartment
+
+import androidx.compose.material.icons.filled.History
+
+import androidx.compose.material.icons.filled.Tab
+
+import androidx.compose.material.icons.filled.Storage
+
+import androidx.compose.material.icons.filled.Cookie
+
+import androidx.compose.material.icons.filled.Check
+
+import androidx.compose.foundation.layout.heightIn
+
+import androidx.compose.foundation.selection.toggleable
+
 import android.content.Context
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -25,7 +43,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -48,13 +65,14 @@ import com.browser.adfree.ui.theme.*
 import org.mozilla.geckoview.GeckoRuntime
 import org.mozilla.geckoview.StorageController
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 @Composable
 fun ClearBrowsingDataSheet(
     historyRepository: HistoryRepository,
     tabManager: TabManager,
     runtime: GeckoRuntime,
-    onTriggerFireAnimation: (() -> Unit)? = null,
+    /** Receives the wipe so the caller can run it while the fire covers the screen. */
+    onBurn: ((wipe: () -> Unit) -> Unit)? = null,
     onDismissRequest: () -> Unit
 ) {
     val context = LocalContext.current
@@ -72,309 +90,160 @@ fun ClearBrowsingDataSheet(
         sheetState = sheetState,
         containerColor = SurfaceDark,
         contentColor = TextPrimary,
-        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp)
+        tonalElevation = 0.dp,
+        dragHandle = { BrutalSheetHandle() },
+        shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp)
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
                 .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp, vertical = 8.dp)
         ) {
-            // Header
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 18.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(42.dp)
-                        .clip(CircleShape)
-                        .background(DangerRed.copy(alpha = 0.15f)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.DeleteSweep,
-                        contentDescription = null,
-                        tint = DangerRed,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                Spacer(modifier = Modifier.width(12.dp))
-
-                Column {
-                    Text(
-                        text = "Clear Browsing Data",
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = TextPrimary
-                    )
-                    Text(
-                        text = "Select data and time range to remove",
-                        fontSize = 12.sp,
-                        color = TextSecondary
-                    )
-                }
-            }
-
-            // Time Range Section Header
             Text(
-                text = "TIME RANGE",
-                fontSize = 11.sp,
+                "Clear browsing data",
+                fontSize = 20.sp,
                 fontWeight = FontWeight.Bold,
-                color = AccentCyan,
-                modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
+                color = TextPrimary,
+                modifier = Modifier.padding(horizontal = 16.dp)
             )
 
-            // 2-Row Visible Grid of Time Options (3 columns per row)
-            val timeframes = TimeframeWipe.values().toList()
-            val row1 = timeframes.take(3)
-            val row2 = timeframes.drop(3)
-
-            Column(
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(bottom = 20.dp)
+            BrutalSectionLabel("Time range")
+            androidx.compose.foundation.layout.FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.padding(start = 16.dp, end = 19.dp)
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    row1.forEach { option ->
-                        val isSelected = selectedTimeframe == option
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) AccentCyan else SurfaceElevated)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) AccentCyan else BorderSubtle,
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .clickable { selectedTimeframe = option },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = option.title,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) DarkBg else TextPrimary,
-                                maxLines = 1
+                TimeframeWipe.values().forEach { option ->
+                    val selected = selectedTimeframe == option
+                    Box(
+                        modifier = Modifier
+                            .brutalPressable(
+                                fill = if (selected) AccentCyan else SurfaceDark,
+                                border = BorderSubtle,
+                                shadow = HardShadow,
+                                shadowOffset = if (selected) 0.dp else 2.dp,
+                                role = androidx.compose.ui.semantics.Role.RadioButton,
+                                onClick = { selectedTimeframe = option }
                             )
-                        }
-                    }
-                }
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    row2.forEach { option ->
-                        val isSelected = selectedTimeframe == option
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(if (isSelected) AccentCyan else SurfaceElevated)
-                                .border(
-                                    1.dp,
-                                    if (isSelected) AccentCyan else BorderSubtle,
-                                    RoundedCornerShape(12.dp)
-                                )
-                                .clickable { selectedTimeframe = option },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = option.title,
-                                fontSize = 12.sp,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) DarkBg else TextPrimary,
-                                maxLines = 1
-                            )
-                        }
+                            .padding(horizontal = 12.dp, vertical = 9.dp)
+                    ) {
+                        Text(option.title, fontSize = 13.sp, fontWeight = FontWeight.Bold, color = if (selected) OnAccent else TextPrimary)
                     }
                 }
             }
 
-            // Data Types Section Header
-            Text(
-                text = "DATA TO CLEAR",
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = AccentCyan,
-                modifier = Modifier.padding(start = 4.dp, bottom = 10.dp)
+            BrutalSectionLabel("What to clear")
+            BrutalRule()
+            ClearDataCheckboxRow(
+                title = "History",
+                subtitle = "${historyRepository.history.size} visits" + if (selectedTimeframe != TimeframeWipe.ALL_TIME) ", only ${selectedTimeframe.title.lowercase()}" else "",
+                icon = Icons.Default.History,
+                checked = clearHistoryChecked,
+                onCheckedChange = { clearHistoryChecked = it }
             )
+            BrutalHairline(startIndent = 64.dp)
+            ClearDataCheckboxRow(
+                title = "Cookies and site data",
+                subtitle = "Signs you out of most sites. Always clears all time",
+                icon = Icons.Default.Cookie,
+                checked = clearCookiesChecked,
+                onCheckedChange = { clearCookiesChecked = it }
+            )
+            BrutalHairline(startIndent = 64.dp)
+            ClearDataCheckboxRow(
+                title = "Cached images and files",
+                subtitle = "Frees storage. Always clears all time",
+                icon = Icons.Default.Storage,
+                checked = clearCacheChecked,
+                onCheckedChange = { clearCacheChecked = it }
+            )
+            BrutalHairline(startIndent = 64.dp)
+            ClearDataCheckboxRow(
+                title = "Close tabs",
+                subtitle = "${tabManager.tabs.size} open",
+                icon = Icons.Default.Tab,
+                checked = closeTabsChecked,
+                onCheckedChange = { closeTabsChecked = it }
+            )
+            BrutalRule()
 
-            // Data Types Selection Card
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(16.dp))
-                    .background(SurfaceElevated)
-                    .border(1.dp, BorderSubtle, RoundedCornerShape(16.dp))
-            ) {
-                ClearDataCheckboxRow(
-                    title = "Browsing History",
-                    subtitle = "${historyRepository.history.size} site visits recorded",
-                    icon = Icons.Default.History,
-                    checked = clearHistoryChecked,
-                    onCheckedChange = { clearHistoryChecked = it }
-                )
-
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
-
-                ClearDataCheckboxRow(
-                    title = "Cookies & Site Data",
-                    subtitle = "Signs you out of most websites",
-                    icon = Icons.Default.Cookie,
-                    checked = clearCookiesChecked,
-                    onCheckedChange = { clearCookiesChecked = it }
-                )
-
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
-
-                ClearDataCheckboxRow(
-                    title = "Cached Images & Files",
-                    subtitle = "Frees up device storage & temporary cache",
-                    icon = Icons.Default.Cached,
-                    checked = clearCacheChecked,
-                    onCheckedChange = { clearCacheChecked = it }
-                )
-
-                Divider(color = BorderSubtle, thickness = 0.5.dp)
-
-                ClearDataCheckboxRow(
-                    title = "Close Open Tabs",
-                    subtitle = "${tabManager.tabs.size} open tabs will be closed",
-                    icon = Icons.Default.Tab,
-                    checked = closeTabsChecked,
-                    onCheckedChange = { closeTabsChecked = it }
-                )
-            }
-
-            Spacer(modifier = Modifier.height(28.dp))
-
-            // Action Buttons
-            Button(
+            val anything = clearHistoryChecked || clearCookiesChecked || clearCacheChecked || closeTabsChecked
+            BrutalButton(
+                text = "Burn it",
+                icon = Icons.Default.LocalFireDepartment,
+                fill = Color(0xFFFF6B4A),
+                contentColor = InkBlack,
+                enabled = anything,
                 onClick = {
-                    executeClearData(
-                        context = context,
-                        historyRepository = historyRepository,
-                        tabManager = tabManager,
-                        runtime = runtime,
-                        timeframe = selectedTimeframe,
-                        clearHistory = clearHistoryChecked,
-                        clearCookies = clearCookiesChecked,
-                        clearCache = clearCacheChecked,
-                        closeTabs = closeTabsChecked
-                    )
+                    val timeframe = selectedTimeframe
+                    val history = clearHistoryChecked
+                    val cookies = clearCookiesChecked
+                    val cache = clearCacheChecked
+                    val tabs = closeTabsChecked
+                    val wipe = {
+                        executeClearData(
+                            context = context,
+                            historyRepository = historyRepository,
+                            tabManager = tabManager,
+                            runtime = runtime,
+                            timeframe = timeframe,
+                            clearHistory = history,
+                            clearCookies = cookies,
+                            clearCache = cache,
+                            closeTabs = tabs
+                        )
+                    }
                     onDismissRequest()
-                    onTriggerFireAnimation?.invoke()
+                    if (onBurn != null) onBurn(wipe) else wipe()
                 },
-                enabled = clearHistoryChecked || clearCookiesChecked || clearCacheChecked || closeTabsChecked,
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = DangerRed,
-                    contentColor = TextPrimary,
-                    disabledContainerColor = SurfaceCard,
-                    disabledContentColor = TextSecondary
-                ),
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
-            ) {
-                Icon(
-                    imageVector = Icons.Default.DeleteForever,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "Clear Data (${selectedTimeframe.title})",
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
-
-            Spacer(modifier = Modifier.height(10.dp))
-
-            TextButton(
-                onClick = onDismissRequest,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(44.dp)
-            ) {
-                Text(
-                    text = "Cancel",
-                    color = TextSecondary,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Medium
-                )
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
+                    .padding(start = 16.dp, end = 19.dp, top = 20.dp, bottom = 16.dp)
+            )
         }
     }
 }
 
 @Composable
-fun ClearDataCheckboxRow(
+private fun ClearDataCheckboxRow(
     title: String,
     subtitle: String,
     icon: ImageVector,
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit
 ) {
+    val view = androidx.compose.ui.platform.LocalView.current
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.SpaceBetween,
         modifier = Modifier
             .fillMaxWidth()
-            .clickable { onCheckedChange(!checked) }
-            .padding(horizontal = 16.dp, vertical = 14.dp)
+            .heightIn(min = 60.dp)
+            .toggleable(
+                value = checked,
+                role = androidx.compose.ui.semantics.Role.Checkbox,
+                onValueChange = {
+                    view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
+                    onCheckedChange(it)
+                }
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp)
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.weight(1f)
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                tint = if (checked) AccentCyan else TextSecondary,
-                modifier = Modifier.size(22.dp)
-            )
-            Spacer(modifier = Modifier.width(14.dp))
-            Column {
-                Text(
-                    text = title,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary
-                )
-                Text(
-                    text = subtitle,
-                    fontSize = 12.sp,
-                    color = TextSecondary
-                )
-            }
+        BrutalIconTile(icon)
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, color = TextPrimary)
+            Text(subtitle, fontSize = 12.5.sp, color = TextSecondary)
         }
-
-        Checkbox(
-            checked = checked,
-            onCheckedChange = onCheckedChange,
-            colors = CheckboxDefaults.colors(
-                checkedColor = AccentCyan,
-                checkmarkColor = DarkBg,
-                uncheckedColor = TextSecondary
-            )
-        )
+        val fill by androidx.compose.animation.animateColorAsState(if (checked) AccentCyan else SurfaceDark, label = "checkFill")
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .brutalBox(fill = fill, border = BorderSubtle, shape = RoundedCornerShape(4.dp)),
+            contentAlignment = Alignment.Center
+        ) {
+            if (checked) Icon(Icons.Default.Check, contentDescription = null, tint = OnAccent, modifier = Modifier.size(17.dp))
+        }
     }
 }
 
@@ -398,21 +267,17 @@ fun executeClearData(
             }
         }
 
+        // Only what was ticked. Gecko cannot scope cookies or cache to a time
+        // range, so those always clear everything (the UI says so).
         var flags = 0L
-        if (timeframe == TimeframeWipe.ALL_TIME && (clearCookies || clearCache)) {
-            flags = StorageController.ClearFlags.ALL
-        } else {
-            if (clearCookies) {
-                flags = flags or StorageController.ClearFlags.COOKIES or 
-                        StorageController.ClearFlags.DOM_STORAGES or 
-                        StorageController.ClearFlags.AUTH_SESSIONS or
-                        StorageController.ClearFlags.SITE_DATA
-            }
-            if (clearCache) {
-                flags = flags or StorageController.ClearFlags.NETWORK_CACHE or 
-                        StorageController.ClearFlags.IMAGE_CACHE or
-                        StorageController.ClearFlags.ALL_CACHES
-            }
+        if (clearCookies) {
+            flags = flags or StorageController.ClearFlags.COOKIES or
+                    StorageController.ClearFlags.DOM_STORAGES or
+                    StorageController.ClearFlags.AUTH_SESSIONS or
+                    StorageController.ClearFlags.SITE_DATA
+        }
+        if (clearCache) {
+            flags = flags or StorageController.ClearFlags.ALL_CACHES
         }
 
         if (flags != 0L) {
