@@ -78,6 +78,7 @@ fun TopAddressBar(
     onToggleBookmark: () -> Unit = {},
     historySuggestions: List<HistoryItem> = emptyList(),
     clearStyle: com.browser.adfree.storage.ClearStyle = com.browser.adfree.storage.ClearStyle.FIRE,
+    container: com.browser.adfree.model.TabContainer? = null,
     modifier: Modifier = Modifier
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -176,6 +177,18 @@ fun TopAddressBar(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
                 ) {
+                    if (!isPrivate && container != null) {
+                        Text(
+                            container.displayName,
+                            color = InkBlack,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier
+                                .brutalBox(fill = Color(container.color), border = BorderSubtle, borderWidth = 1.5.dp, shape = RoundedCornerShape(3.dp))
+                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                    }
                     if (isPrivate) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,

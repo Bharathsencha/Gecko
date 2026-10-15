@@ -58,6 +58,7 @@ class TabManager(private val context: Context) {
     var historyRepository: HistoryRepository? = null
     var preferencesRepository: BrowserPreferencesRepository? = null
     var shieldsRepository: com.browser.adfree.shields.ShieldsRepository? = null
+    var trackerStats: com.browser.adfree.storage.TrackerStatsRepository? = null
     var downloadManager: BrowserDownloadManager? = null
     /** Invoked on the main thread once a page finishes loading. */
     var onCookiesRequested: ((String) -> Unit)? = null
@@ -187,6 +188,7 @@ class TabManager(private val context: Context) {
     private fun buildSession(tab: TabModel): GeckoSession {
         val settings = GeckoSessionSettings.Builder()
             .usePrivateMode(tab.isPrivate)
+            .apply { if (!tab.isPrivate && tab.container != null) contextId(tab.container) }
             .build()
         val session = GeckoSession(settings)
 
@@ -229,6 +231,9 @@ class TabManager(private val context: Context) {
                 event: org.mozilla.geckoview.ContentBlocking.BlockEvent
             ) {
                 pending.incrementAndGet()
+                if (!tab.isPrivate) {
+                    trackerStats?.record(runCatching { android.net.Uri.parse(event.uri).host }.getOrNull())
+                }
                 if (scheduled.compareAndSet(false, true)) {
                     mainHandler.postDelayed({
                         scheduled.set(false)
@@ -580,7 +585,8 @@ class TabManager(private val context: Context) {
                     initialTitle = saved.title,
                     initialUrl = saved.url,
                     initialSession = dummySession,
-                    initialIsPrivate = false
+                    initialIsPrivate = false,
+                    container = saved.container
                 ).apply {
                     isDesktopMode = saved.isDesktopMode
                     zoomLevel = saved.zoomLevel
@@ -635,7 +641,8 @@ class TabManager(private val context: Context) {
     fun createNewTab(
         runtime: GeckoRuntime,
         initialUrl: String = HOME_URL,
-        isPrivate: Boolean = false
+        isPrivate: Boolean = false,
+        container: String? = null
     ): TabModel {
         // Create a placeholder session with proper private mode flag
         val dummySession = GeckoSession(GeckoSessionSettings.Builder().usePrivateMode(isPrivate).build())
@@ -645,7 +652,8 @@ class TabManager(private val context: Context) {
             } else if (isPrivate) "Private Tab" else "New Tab",
             initialUrl = initialUrl,
             initialSession = dummySession,
-            initialIsPrivate = isPrivate
+            initialIsPrivate = isPrivate,
+            container = if (isPrivate) null else container
         )
 
         val session = buildSession(tab)

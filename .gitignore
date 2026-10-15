@@ -19,3 +19,6 @@ local.properties
 keystore.properties
 *.jks
 *.keystore
+
+# Copied from the repository root at build time
+app/src/main/assets/legal/

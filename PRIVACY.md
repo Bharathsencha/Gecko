@@ -21,6 +21,8 @@ Gecko is an Android web browser. This policy explains what Gecko stores, what it
 | Bookmarks and favourites | Until you delete them | Bookmarks page, or Edit on the start page |
 | Saved passwords | Only when you choose to save one | Settings > Saved passwords |
 | Settings, per-site settings, start-page designs | Until changed or deleted | Settings, or uninstall the app |
+| Tracker statistics (blocked count per day, most-blocked domains) | Normal tabs only, last 60 days | Tracker report > reset |
+| Containers you create, and their cookies and site data | Kept apart from each other and from normal tabs | Settings > Containers (Clear, or delete the container) |
 | App PIN | Only a keyed check value, never the PIN itself | Change it in Settings, or uninstall the app |
 | Downloaded files | In your phone's Downloads folder | Delete them from the Downloads page or your file manager |
 
@@ -38,6 +40,7 @@ Besides loading the pages you open, Gecko makes these requests:
 | Extra blocking rules, checked at most once a day | raw.githubusercontent.com (this project's repository) | Your IP address |
 | Tracking protection lists of the browser engine | Mozilla | Your IP address |
 | Keeping the video downloader working, checked at most once a day | GitHub (yt-dlp releases) | Your IP address |
+| Looking up site addresses (DNS) | Your encrypted DNS provider, Quad9 by default (Settings > Advanced > Encrypted DNS). Set to Off, your network's DNS is used instead | The names of the sites you visit, encrypted in transit so your network cannot read them |
 | Searches typed in the address bar | The search engine you chose in Settings (DuckDuckGo by default) | Your search, as with any browser |
 | Site icons in history, bookmarks, tabs and favourites | The site itself (`/favicon.ico`) | That you have that site saved |
 | Video and audio downloads | The site the media comes from, only if you turned on the download button and opened it | That you requested the media |
@@ -66,8 +69,9 @@ When the VPN is on, downloads and the video downloader use the same route as pag
 | Internet, network state | To load pages |
 | Notifications | To show download progress and media controls |
 | Foreground service (media playback, data sync), wake lock | To keep audio playing and downloads running when the app is in the background |
+| Storage (Android 9 and older only) | To save downloads to the Downloads folder; newer Android versions need no permission for this |
 
-Gecko does not ask for location, contacts, camera, microphone or storage permissions. If a website asks for something like location or camera, the browser engine handles it, and it is off unless you allow it.
+Gecko does not ask for location, contacts, camera or microphone permissions. If a website asks for something like location or camera, the browser engine handles it, and it is off unless you allow it.
 
 ## Children
 

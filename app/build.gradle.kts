@@ -89,6 +89,8 @@ android {
         }
         jniLibs {
             useLegacyPackaging = true
+            // Gecko's crash reporter (crash reporting is off in this app)
+            excludes += setOf("**/libcrashtools.so", "**/libcrashhelper.so")
         }
     }
 }
@@ -138,3 +140,11 @@ dependencies {
     // Networking (OkHttp)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }
+
+// The privacy policy and terms ship inside the app, copied from the repository root
+// so there is one source of truth.
+val copyLegalDocs by tasks.registering(Copy::class) {
+    from(rootProject.file("PRIVACY.md"), rootProject.file("TERMS.md"))
+    into(layout.projectDirectory.dir("src/main/assets/legal"))
+}
+tasks.named("preBuild") { dependsOn(copyLegalDocs) }

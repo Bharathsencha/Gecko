@@ -363,7 +363,9 @@ if (browser.webRequest && browser.webRequest.onBeforeRequest) {
                         action: "blocked_count",
                         tabId: tabId,
                         count: tabBlockStats[tabId],
-                        total: totalBlocked
+                        total: totalBlocked,
+                        host: hostOf(details.url),
+                        incognito: !!details.incognito
                     });
                 }
                 return result;

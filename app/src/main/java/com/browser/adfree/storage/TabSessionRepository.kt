@@ -28,7 +28,8 @@ data class SavedTab(
     val url: String,
     val title: String,
     val isDesktopMode: Boolean = false,
-    val zoomLevel: Int = 100
+    val zoomLevel: Int = 100,
+    val container: String? = null
 )
 
 class TabSessionRepository(private val context: Context) {
@@ -47,6 +48,7 @@ class TabSessionRepository(private val context: Context) {
                     put("title", tab.title)
                     put("isDesktopMode", tab.isDesktopMode)
                     put("zoomLevel", tab.zoomLevel)
+                    tab.container?.let { put("container", it) }
                 }
                 tabsArray.put(tabObj)
             }
@@ -82,7 +84,8 @@ class TabSessionRepository(private val context: Context) {
                                 url = obj.optString("url", "about:home"),
                                 title = obj.optString("title", "Start Page"),
                                 isDesktopMode = obj.optBoolean("isDesktopMode", false),
-                                zoomLevel = obj.optInt("zoomLevel", 100)
+                                zoomLevel = obj.optInt("zoomLevel", 100),
+                                container = obj.optString("container").ifBlank { null }
                             )
                         )
                     }

@@ -79,6 +79,31 @@ class BrowserPreferencesRepository(context: Context) {
     var httpsOnlyMode by mutableStateOf(prefs.getBoolean("https_only_mode", true))
         private set
 
+    /** Encrypted DNS (DNS over HTTPS) provider; OFF uses the network's DNS. */
+    var dnsProvider by mutableStateOf(
+        runCatching { DnsProvider.valueOf(prefs.getString("dns_provider", DnsProvider.QUAD9.name) ?: "") }.getOrDefault(DnsProvider.QUAD9)
+    )
+        private set
+
+    /** Strict: never fall back to unencrypted DNS (pages fail if the provider is blocked). */
+    var dnsStrict by mutableStateOf(prefs.getBoolean("dns_strict", false))
+        private set
+
+    fun setDnsPreference(provider: DnsProvider, strict: Boolean) {
+        dnsProvider = provider
+        dnsStrict = strict
+        prefs.edit().putString("dns_provider", provider.name).putBoolean("dns_strict", strict).apply()
+    }
+
+    /** Tracker statistics card on the start page. */
+    var showTrackerStats by mutableStateOf(prefs.getBoolean("show_tracker_stats", true))
+        private set
+
+    fun setShowTrackerStatsPreference(show: Boolean) {
+        showTrackerStats = show
+        prefs.edit().putBoolean("show_tracker_stats", show).apply()
+    }
+
     /** Icon and animation of the clear-data button. */
     var clearStyle by mutableStateOf(
         runCatching { ClearStyle.valueOf(prefs.getString("clear_style", ClearStyle.FIRE.name) ?: "") }.getOrDefault(ClearStyle.FIRE)
@@ -391,4 +416,14 @@ enum class ClearStyle(val displayName: String) {
     SWEEP("Sweep"),
     SHRED("Shred"),
     PIXEL("Pixel")
+}
+
+/** DNS-over-HTTPS resolvers offered in Settings. */
+enum class DnsProvider(val displayName: String, val detail: String, val url: String) {
+    OFF("Off", "Use your network's DNS", ""),
+    QUAD9("Quad9", "Swiss non-profit, blocks known malware domains", "https://dns.quad9.net/dns-query"),
+    MULLVAD("Mullvad", "No logging, run by the VPN company", "https://dns.mullvad.net/dns-query"),
+    MULLVAD_ADBLOCK("Mullvad ad blocking", "Mullvad, also blocks ad and tracker domains", "https://adblock.dns.mullvad.net/dns-query"),
+    CLOUDFLARE("Cloudflare", "Fastest in most places, audited not to log", "https://mozilla.cloudflare-dns.com/dns-query"),
+    ADGUARD("AdGuard", "Blocks ad and tracker domains", "https://dns.adguard-dns.com/dns-query")
 }

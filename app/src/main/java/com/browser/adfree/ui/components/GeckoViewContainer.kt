@@ -34,7 +34,11 @@ fun GeckoViewContainer(
     // Plain holder, not Compose state: scroll events arrive every frame on the
     // main thread (which also drives Gecko's touch scrolling), and a state
     // write per event schedules UI work that makes scrolling stutter.
-    val scrollY = remember(session) { java.util.concurrent.atomic.AtomicInteger(0) }
+    val scrollY = remember { java.util.concurrent.atomic.AtomicInteger(0) }
+    // True while text is selected: dragging selection handles down at the top
+    // of a page must not be taken as pull-to-refresh.
+    val selecting = remember { java.util.concurrent.atomic.AtomicBoolean(false) }
+    val activity = androidx.compose.ui.platform.LocalContext.current as? android.app.Activity
     val spinnerInk = com.browser.adfree.ui.theme.BorderSubtle.toArgb()
     val spinnerFill = com.browser.adfree.ui.theme.AccentCyan.toArgb()
 
@@ -45,9 +49,28 @@ fun GeckoViewContainer(
             }
         }
         session.scrollDelegate = scrollDelegate
+        scrollY.set(0)
+        selecting.set(false)
+        val selectionDelegate = activity?.let {
+            object : org.mozilla.geckoview.BasicSelectionActionDelegate(it) {
+                override fun onShowActionRequest(session: GeckoSession, selection: GeckoSession.SelectionActionDelegate.Selection) {
+                    selecting.set(true)
+                    super.onShowActionRequest(session, selection)
+                }
+
+                override fun onHideAction(session: GeckoSession, reason: Int) {
+                    selecting.set(false)
+                    super.onHideAction(session, reason)
+                }
+            }
+        }
+        if (selectionDelegate != null) session.selectionActionDelegate = selectionDelegate
         onDispose {
             if (session.scrollDelegate === scrollDelegate) {
                 session.scrollDelegate = null
+            }
+            if (selectionDelegate != null && session.selectionActionDelegate === selectionDelegate) {
+                session.selectionActionDelegate = null
             }
         }
     }
@@ -77,7 +100,7 @@ fun GeckoViewContainer(
                 // Only allow pull-to-refresh when strictly at the very top of the webpage (scrollY <= 0).
                 // If scrollY > 0, return true so GeckoView can scroll up smoothly without triggering reload.
                 setOnChildScrollUpCallback { _, _ ->
-                    scrollY.get() > 0
+                    scrollY.get() > 0 || selecting.get()
                 }
             }
         },

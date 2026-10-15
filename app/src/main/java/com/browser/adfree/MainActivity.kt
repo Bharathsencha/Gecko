@@ -55,6 +55,7 @@ class MainActivity : FragmentActivity() {
     private lateinit var favoritesRepo: FavoritesRepository
     private lateinit var vpnManager: VpnManager
     private lateinit var shieldsRepo: com.browser.adfree.shields.ShieldsRepository
+    private lateinit var trackerStats: com.browser.adfree.storage.TrackerStatsRepository
 
     private var extensionPort: WebExtension.Port? = null
     private var appBridgeExtension: WebExtension? = null
@@ -137,6 +138,8 @@ class MainActivity : FragmentActivity() {
         passwordRepo = SecurePasswordRepository(this)
         historyRepo = HistoryRepository(this)
         favoritesRepo = FavoritesRepository(this)
+        trackerStats = com.browser.adfree.storage.TrackerStatsRepository(this)
+        com.browser.adfree.model.TabContainer.init(this)
         downloadManager = BrowserDownloadManager(this)
         vpnManager = VpnManager(this, preferencesRepo)
 
@@ -144,6 +147,7 @@ class MainActivity : FragmentActivity() {
             this.historyRepository = historyRepo
             this.preferencesRepository = preferencesRepo
             this.shieldsRepository = shieldsRepo
+            this.trackerStats = this@MainActivity.trackerStats
             this.downloadManager = downloadManager
             this.onCookiesRequested = { url -> requestCookiesFor(url) }
         }
@@ -207,6 +211,8 @@ class MainActivity : FragmentActivity() {
                 return GeckoResult.fromValue(AllowOrDeny.ALLOW)
             }
         }
+
+        com.browser.adfree.ui.components.applyDns(runtime, preferencesRepo)
 
         // 3a. uBlock Origin 1.75.0 (YouTube is exempt, see its js/start.js)
         runtime.webExtensionController.ensureBuiltIn(
@@ -323,6 +329,7 @@ class MainActivity : FragmentActivity() {
                     passwordRepo = passwordRepo,
                     historyRepo = historyRepo,
                     favoritesRepo = favoritesRepo,
+                    trackerStats = trackerStats,
                     shieldsRepo = shieldsRepo,
                     vpnManager = vpnManager,
                     onExtensionConfigChanged = { syncExtensionConfig() },
@@ -475,6 +482,9 @@ class MainActivity : FragmentActivity() {
                 // Counted per page by the extension; a navigation resets it to 0.
                 // Only the latest value matters, so publish it at most twice a second.
                 latestExtensionCount = json.optInt("count", 0)
+                if (!json.optBoolean("incognito", false)) {
+                    json.optString("host").takeIf { it.isNotBlank() }?.let { trackerStats.record(it) }
+                }
                 if (json.optInt("count", 0) == 0 || !countUpdateScheduled) {
                     countUpdateScheduled = true
                     window.decorView.postDelayed({

@@ -29,7 +29,9 @@ class TabModel(
     initialTitle: String = "Start Page",
     initialUrl: String = "about:home",
     initialSession: GeckoSession,
-    initialIsPrivate: Boolean = false
+    initialIsPrivate: Boolean = false,
+    /** [TabContainer.id], or null for the default store. Fixed for the tab's life. */
+    val container: String? = null
 ) {
     var session by mutableStateOf(initialSession)
     var title by mutableStateOf(initialTitle)

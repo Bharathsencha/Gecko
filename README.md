@@ -25,6 +25,10 @@ License: GNU General Public License v3.0 or later
 - **Clear button:** wipes history, cookies, cache and tabs behind one of five animations (Fire, Flood, Sweep, Shred, Vortex), chosen in Settings.
 - **Start page:** block compositions, patterns, solid colours, gradients or your own photo, plus a built-in designer for making and naming your own block layouts.
 - **Look:** neo-brutalist light and dark themes with the Space Grotesk typeface. Pages render at the screen's full resolution and refresh rate.
+- **Containers:** create your own (Work, Shopping, anything), each with separate cookies and site data so sites cannot link you across them.
+- **Encrypted DNS:** DNS over HTTPS with Quad9 by default, or Mullvad, Cloudflare or AdGuard, under Settings > Advanced.
+- **Tracker report:** trackers and ads blocked per day and the domains blocked most, counted on the phone only.
+- **Privacy policy and terms built in:** readable in the app under Settings > About.
 - **Reader view, night mode, per-site settings, HTTPS-only mode.**
 
 ## Install

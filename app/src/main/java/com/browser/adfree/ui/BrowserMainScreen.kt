@@ -69,6 +69,7 @@ fun BrowserMainScreen(
     passwordRepo: SecurePasswordRepository,
     historyRepo: HistoryRepository,
     favoritesRepo: FavoritesRepository,
+    trackerStats: com.browser.adfree.storage.TrackerStatsRepository,
     shieldsRepo: com.browser.adfree.shields.ShieldsRepository,
     vpnManager: VpnManager,
     onExtensionConfigChanged: () -> Unit = {},
@@ -80,6 +81,7 @@ fun BrowserMainScreen(
     var showTabSwitcher by remember { mutableStateOf(false) }
     var showSettingsSheet by remember { mutableStateOf(false) }
     var showPasswordsSheet by remember { mutableStateOf(false) }
+    var showTrackerReport by remember { mutableStateOf(false) }
     val vaultLock = remember { com.browser.adfree.storage.VaultLock(context) }
     var pinMode by remember { mutableStateOf<PinMode?>(null) }
     // Passwords need fingerprint, screen lock or the app PIN every time they are opened.
@@ -185,6 +187,9 @@ fun BrowserMainScreen(
     BackHandler(enabled = showDownloadsPage) {
         showDownloadsPage = false
     }
+    BackHandler(enabled = showTrackerReport) {
+        showTrackerReport = false
+    }
     BackHandler(enabled = showPasswordsSheet) {
         showPasswordsSheet = false
     }
@@ -192,7 +197,7 @@ fun BrowserMainScreen(
         showVideoDownloadSheet = false
     }
 
-    val hasModalOpen = showSettingsSheet || showHistoryPage || showBookmarksPage || showDownloadsPage || showTabSwitcher || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showVideoDownloadSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
+    val hasModalOpen = showTrackerReport || showSettingsSheet || showHistoryPage || showBookmarksPage || showDownloadsPage || showTabSwitcher || showPasswordsSheet || showShieldsSheet || showClearDataSheet || showVideoDownloadSheet || showDefaultPrompt || pendingInsecureHttpUrl != null || pendingSaveLogin != null
     // Opening any page or sheet dismisses the keyboard, including one a web page opened.
     val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
     val keyboard = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
@@ -213,6 +218,7 @@ fun BrowserMainScreen(
         }
     }
 
+    androidx.compose.runtime.CompositionLocalProvider(LocalTrackerStats provides trackerStats) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -253,7 +259,8 @@ fun BrowserMainScreen(
                         }
                     },
                     historySuggestions = historySuggestions,
-                    clearStyle = preferencesRepo.clearStyle
+                    clearStyle = preferencesRepo.clearStyle,
+                    container = com.browser.adfree.model.TabContainer.byId(activeTab?.container)
                 )
             }
 
@@ -289,6 +296,8 @@ fun BrowserMainScreen(
                                     tabManager.createNewTab(runtime, "about:home", isPrivate = true)
                                 }
                             },
+                            trackerStats = trackerStats,
+                            onOpenTrackerReport = { showTrackerReport = true },
                             onSwitchToNormal = {
                                 val normalIndex = tabManager.tabs.indexOfFirst { !it.isPrivate }
                                 if (normalIndex != -1) {
@@ -435,8 +444,9 @@ fun BrowserMainScreen(
                 onChangePin = { pinMode = if (vaultLock.hasPin) PinMode.CHANGE else PinMode.CREATE },
                 onOpenClearData = { showClearDataSheet = true },
                 onOpenUrl = { url -> tabManager.createNewTab(runtime, url) },
+                onOpenTrackerReport = { showTrackerReport = true },
                 onClose = { showSettingsSheet = false },
-                backEnabled = !showPasswordsSheet
+                backEnabled = !showPasswordsSheet && !showTrackerReport
             )
                     }
 }
@@ -490,6 +500,16 @@ fun BrowserMainScreen(
             )
                     }
 }
+
+        androidx.compose.animation.AnimatedVisibility(
+            visible = showTrackerReport,
+            enter = androidx.compose.animation.slideInHorizontally(androidx.compose.animation.core.tween(260)) { it / 3 } + androidx.compose.animation.fadeIn(androidx.compose.animation.core.tween(200)),
+            exit = androidx.compose.animation.slideOutHorizontally(androidx.compose.animation.core.tween(220)) { it / 3 } + androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(180))
+        ) {
+            Box(Modifier.fillMaxSize().blockTouchesBelow()) {
+                TrackerReportPage(trackerStats) { showTrackerReport = false }
+            }
+        }
 
         pinMode?.let { mode -> androidx.compose.runtime.key(mode) {
             PinDialog(
@@ -559,8 +579,8 @@ fun BrowserMainScreen(
                 onCloseTab = { index ->
                     tabManager.closeTab(index, runtime)
                 },
-                onNewTab = { isPrivate ->
-                    tabManager.createNewTab(runtime, "about:home", isPrivate = isPrivate)
+                onNewTab = { isPrivate, container ->
+                    tabManager.createNewTab(runtime, "about:home", isPrivate = isPrivate, container = container)
                     showTabSwitcher = false
                 },
                 onCloseAllTabs = {
@@ -664,6 +684,7 @@ fun BrowserMainScreen(
             onFinished = { pendingWipe = null }
         )
     }
+}
 }
 
 private fun shareUrl(context: Context, title: String, url: String) {

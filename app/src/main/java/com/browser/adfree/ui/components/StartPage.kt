@@ -101,6 +101,8 @@ fun StartPage(
     isPrivate: Boolean = false,
     onSwitchToPrivate: () -> Unit = {},
     onSwitchToNormal: () -> Unit = {},
+    trackerStats: com.browser.adfree.storage.TrackerStatsRepository? = null,
+    onOpenTrackerReport: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var isEditMode by remember { mutableStateOf(false) }
@@ -181,6 +183,25 @@ fun StartPage(
                     isPrivate = isPrivate,
                     onToggle = { if (isPrivate) onSwitchToNormal() else onSwitchToPrivate() }
                 )
+            }
+
+            if (!isPrivate && trackerStats != null && preferencesRepo.showTrackerStats) {
+                val snap = trackerStats.snapshot
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(end = 4.dp, bottom = 22.dp)
+                        .brutalPressable(fill = SurfaceDark, border = BorderSubtle, shadow = HardShadow, onClick = onOpenTrackerReport)
+                        .padding(14.dp)
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text(formatCount(snap.week), color = TextPrimary, fontSize = 28.sp, fontWeight = FontWeight.Bold)
+                        Text("trackers and ads blocked this week", color = TextSecondary, fontSize = 12.5.sp, lineHeight = 16.sp)
+                    }
+                    Spacer(Modifier.width(12.dp))
+                    WeekBars(snap.lastSevenDays, Modifier.width(120.dp).height(54.dp), labels = false)
+                }
             }
 
             if (isPrivate) {

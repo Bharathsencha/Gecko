@@ -71,6 +71,7 @@ import androidx.compose.material.icons.filled.Https
 import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -129,7 +130,7 @@ import com.browser.adfree.vpn.VpnStatus
 import org.mozilla.geckoview.GeckoRuntime
 import java.io.File
 
-private enum class SettingsScreen { MAIN, VPN, APPEARANCE, ABOUT, DESIGNER }
+private enum class SettingsScreen { MAIN, VPN, APPEARANCE, ABOUT, DESIGNER, PRIVACY_DOC, TERMS_DOC, ADVANCED }
 
 /**
  * Settings as a full page with pushed subpages. Back (gesture, button or the
@@ -148,6 +149,7 @@ fun SettingsPage(
     onOpenPasswords: () -> Unit,
     vaultLock: com.browser.adfree.storage.VaultLock,
     onChangePin: () -> Unit,
+    onOpenTrackerReport: () -> Unit,
     onOpenClearData: () -> Unit,
     onOpenUrl: (String) -> Unit,
     onClose: () -> Unit,
@@ -163,6 +165,7 @@ fun SettingsPage(
         screen = when (screen) {
             SettingsScreen.MAIN -> { onClose(); SettingsScreen.MAIN }
             SettingsScreen.DESIGNER -> SettingsScreen.APPEARANCE
+            SettingsScreen.PRIVACY_DOC, SettingsScreen.TERMS_DOC -> SettingsScreen.ABOUT
             else -> SettingsScreen.MAIN
         }
     }
@@ -196,6 +199,8 @@ fun SettingsPage(
                 onOpenPasswords = onOpenPasswords,
                 vaultLock = vaultLock,
                 onChangePin = onChangePin,
+                onOpenTrackerReport = onOpenTrackerReport,
+                onOpenAdvanced = { screen = SettingsScreen.ADVANCED },
                 onOpenClearData = onOpenClearData,
                 onClose = onClose
             )
@@ -208,8 +213,13 @@ fun SettingsPage(
                     onOpenUrl(url)
                     onClose()
                 },
+                onOpenPrivacy = { screen = SettingsScreen.PRIVACY_DOC },
+                onOpenTerms = { screen = SettingsScreen.TERMS_DOC },
                 onBack = { screen = SettingsScreen.MAIN }
             )
+            SettingsScreen.ADVANCED -> AdvancedSettings(preferencesRepo, runtime) { screen = SettingsScreen.MAIN }
+            SettingsScreen.PRIVACY_DOC -> LegalPage("PRIVACY.md", "Privacy policy") { screen = SettingsScreen.ABOUT }
+            SettingsScreen.TERMS_DOC -> LegalPage("TERMS.md", "Terms of use") { screen = SettingsScreen.ABOUT }
             SettingsScreen.APPEARANCE -> AppearanceSettings(
                 preferencesRepo = preferencesRepo,
                 onOpenDesigner = { id ->
@@ -382,6 +392,8 @@ private fun MainSettings(
     onOpenPasswords: () -> Unit,
     vaultLock: com.browser.adfree.storage.VaultLock,
     onChangePin: () -> Unit,
+    onOpenTrackerReport: () -> Unit,
+    onOpenAdvanced: () -> Unit,
     onOpenClearData: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -521,6 +533,28 @@ private fun MainSettings(
                 onCheckedChange = { preferencesRepo.setHttpsOnlyModePreference(it) }
             )
         }
+
+        BrutalSectionLabel("Tracker report")
+        SettingsGroup(shadow = CardShadows[5]) {
+            val stats = LocalTrackerStats.current
+            BrutalListRow(
+                title = "${stats?.snapshot?.week ?: 0} blocked this week",
+                subtitle = "Trackers and ads stopped in normal tabs, counted on this phone only",
+                icon = Icons.Default.Shield,
+                onClick = onOpenTrackerReport,
+                trailing = { Chevron() }
+            )
+            BrutalHairline(startIndent = 64.dp)
+            BrutalListRow(
+                title = "Show on the start page",
+                icon = Icons.Default.Star,
+                checked = preferencesRepo.showTrackerStats,
+                onCheckedChange = { preferencesRepo.setShowTrackerStatsPreference(it) }
+            )
+        }
+
+        BrutalSectionLabel("Containers")
+        ContainersSection(runtime)
 
         BrutalSectionLabel("Cookies")
         SettingsGroup(shadow = CardShadows[2]) {
@@ -737,6 +771,17 @@ private fun MainSettings(
             }
         }
 
+        BrutalSectionLabel("Advanced")
+        SettingsGroup(shadow = CardShadows[1]) {
+            BrutalListRow(
+                title = "Encrypted DNS",
+                subtitle = preferencesRepo.dnsProvider.let { if (it == com.browser.adfree.storage.DnsProvider.OFF) "Off" else it.displayName + if (preferencesRepo.dnsStrict) ", encrypted only" else "" },
+                icon = Icons.Default.Https,
+                onClick = onOpenAdvanced,
+                trailing = { Chevron() }
+            )
+        }
+
         BrutalSectionLabel("About")
         SettingsGroup(shadow = CardShadows[4]) {
             BrutalListRow(
@@ -898,6 +943,48 @@ private fun VpnSettings(vpnManager: VpnManager, onBack: () -> Unit) {
     }
 }
 
+
+@Composable
+private fun AdvancedSettings(preferencesRepo: BrowserPreferencesRepository, runtime: GeckoRuntime, onBack: () -> Unit) {
+    SettingsScaffold(title = "Advanced", onBack = onBack) {
+        Text(
+            "Encrypted DNS hides the names of the sites you open from your mobile network or Wi-Fi. Pick who resolves them; the default works for most people.",
+            color = TextSecondary,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)
+        )
+        BrutalSectionLabel("Encrypted DNS")
+        SettingsGroup(shadow = CardShadows[1]) {
+            com.browser.adfree.storage.DnsProvider.values().forEachIndexed { index, provider ->
+                if (index > 0) BrutalHairline(startIndent = 16.dp)
+                ChoiceRow(
+                    title = provider.displayName,
+                    subtitle = provider.detail,
+                    selected = preferencesRepo.dnsProvider == provider,
+                    onClick = {
+                        preferencesRepo.setDnsPreference(provider, preferencesRepo.dnsStrict)
+                        applyDns(runtime, preferencesRepo)
+                    }
+                )
+            }
+            if (preferencesRepo.dnsProvider != com.browser.adfree.storage.DnsProvider.OFF) {
+                BrutalHairline(startIndent = 16.dp)
+                BrutalListRow(
+                    title = "Encrypted DNS only",
+                    subtitle = "Never fall back to your network's DNS. Some public Wi-Fi blocks this and pages will not load.",
+                    checked = preferencesRepo.dnsStrict,
+                    onCheckedChange = {
+                        preferencesRepo.setDnsPreference(preferencesRepo.dnsProvider, it)
+                        applyDns(runtime, preferencesRepo)
+                    }
+                )
+            }
+        }
+
+    }
+}
+
 // ------------------------------------------------------------------ About
 
 private data class Credit(val name: String, val role: String, val license: String, val url: String)
@@ -931,7 +1018,7 @@ private val INSPIRATIONS = listOf(
 )
 
 @Composable
-private fun AboutSettings(onOpenUrl: (String) -> Unit, onBack: () -> Unit) {
+private fun AboutSettings(onOpenUrl: (String) -> Unit, onOpenPrivacy: () -> Unit, onOpenTerms: () -> Unit, onBack: () -> Unit) {
     SettingsScaffold(title = "About", onBack = onBack) {
         Row(
             verticalAlignment = Alignment.CenterVertically,
@@ -967,13 +1054,13 @@ private fun AboutSettings(onOpenUrl: (String) -> Unit, onBack: () -> Unit) {
             BrutalListRow(
                 title = "Privacy policy",
                 subtitle = "What Gecko stores and what it sends",
-                onClick = { onOpenUrl("https://github.com/Bharathsencha/Gecko/blob/main/PRIVACY.md") },
+                onClick = onOpenPrivacy,
                 trailing = { Chevron() }
             )
             BrutalHairline(startIndent = 16.dp)
             BrutalListRow(
                 title = "Terms of use",
-                onClick = { onOpenUrl("https://github.com/Bharathsencha/Gecko/blob/main/TERMS.md") },
+                onClick = onOpenTerms,
                 trailing = { Chevron() }
             )
             BrutalHairline(startIndent = 16.dp)
@@ -1369,5 +1456,132 @@ fun saveCustomWallpaper(context: Context, uri: Uri): String? {
         destinationFile.absolutePath
     } catch (e: Exception) {
         null
+    }
+}
+
+/** Tracker stats for Settings, provided by the main screen. */
+val LocalTrackerStats = androidx.compose.runtime.staticCompositionLocalOf<com.browser.adfree.storage.TrackerStatsRepository?> { null }
+
+/** Applies the chosen DNS-over-HTTPS resolver to the running engine. */
+fun applyDns(runtime: GeckoRuntime, prefs: BrowserPreferencesRepository) {
+    val provider = prefs.dnsProvider
+    try {
+        if (provider == com.browser.adfree.storage.DnsProvider.OFF) {
+            runtime.settings.setTrustedRecursiveResolverMode(org.mozilla.geckoview.GeckoRuntimeSettings.TRR_MODE_OFF)
+        } else {
+            runtime.settings.setTrustedRecursiveResolverUri(provider.url)
+            runtime.settings.setTrustedRecursiveResolverMode(
+                if (prefs.dnsStrict) org.mozilla.geckoview.GeckoRuntimeSettings.TRR_MODE_ONLY
+                else org.mozilla.geckoview.GeckoRuntimeSettings.TRR_MODE_FIRST
+            )
+        }
+    } catch (e: Exception) {
+        Log.w("Settings", "Encrypted DNS not applied: ${e.message}")
+    }
+}
+
+/** User-created containers: add, rename, recolour, clear data, delete. */
+@Composable
+private fun ContainersSection(runtime: GeckoRuntime) {
+    val context = LocalContext.current
+    var editing by remember { mutableStateOf<com.browser.adfree.model.TabContainer?>(null) }
+    var creating by remember { mutableStateOf(false) }
+    val containers = com.browser.adfree.model.TabContainer.all
+
+    SettingsGroup(shadow = CardShadows[3]) {
+        Text(
+            "A container keeps its own cookies and site data, so sites in one cannot recognise you in another. Make one for work, shopping or anything else, then pick it when you open a new tab.",
+            color = TextSecondary,
+            fontSize = 12.5.sp,
+            lineHeight = 17.sp,
+            modifier = Modifier.padding(16.dp)
+        )
+        containers.forEach { container ->
+            BrutalHairline(startIndent = 16.dp)
+            BrutalListRow(
+                title = container.displayName,
+                subtitle = "Tap to rename, recolour or delete",
+                icon = Icons.Default.Layers,
+                iconFill = Color(container.color),
+                onClick = { editing = container },
+                trailing = {
+                    Text(
+                        "Clear",
+                        color = DangerRed,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier
+                            .brutalTap {
+                                runtime.storageController.clearDataForSessionContext(container.id)
+                                android.widget.Toast.makeText(context, "${container.displayName} data cleared", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                            .padding(horizontal = 12.dp, vertical = 12.dp)
+                    )
+                }
+            )
+        }
+        BrutalHairline(startIndent = 16.dp)
+        BrutalListRow(
+            title = "New container",
+            icon = Icons.Default.Add,
+            onClick = { creating = true },
+            trailing = { Chevron() }
+        )
+    }
+
+    if (creating || editing != null) {
+        val current = editing
+        var name by remember(current) { mutableStateOf(current?.displayName ?: "") }
+        var color by remember(current) { mutableStateOf(current?.color ?: com.browser.adfree.model.TabContainer.PALETTE[com.browser.adfree.model.TabContainer.all.size % com.browser.adfree.model.TabContainer.PALETTE.size]) }
+        val close = { creating = false; editing = null }
+        BrutalDialog(
+            title = if (current == null) "New container" else "Edit container",
+            onDismiss = close,
+            confirmLabel = "Save",
+            onConfirm = {
+                val clean = name.trim()
+                if (clean.isNotEmpty()) {
+                    if (current == null) com.browser.adfree.model.TabContainer.add(clean, color)
+                    else com.browser.adfree.model.TabContainer.update(current.copy(displayName = clean.take(24), color = color))
+                    close()
+                }
+            },
+            dismissLabel = if (current == null) "Cancel" else "Delete",
+            onDismissAction = if (current == null) close else {
+                {
+                    runtime.storageController.clearDataForSessionContext(current.id)
+                    com.browser.adfree.model.TabContainer.remove(current.id)
+                    close()
+                }
+            }
+        ) {
+            BrutalTextField(value = name, onValueChange = { name = it.take(24) }, label = "Name", placeholder = "Work, Shopping, Gaming...")
+            Spacer(Modifier.height(14.dp))
+            Text("Colour", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                com.browser.adfree.model.TabContainer.PALETTE.forEach { c ->
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .brutalPressable(
+                                fill = Color(c),
+                                border = BorderSubtle,
+                                shadow = HardShadow,
+                                shadowOffset = if (c == color) 0.dp else 2.dp,
+                                role = Role.RadioButton,
+                                onClick = { color = c }
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (c == color) androidx.compose.material3.Icon(Icons.Default.Check, contentDescription = null, tint = InkBlack, modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+            if (current != null) {
+                Spacer(Modifier.height(10.dp))
+                Text("Deleting also erases this container's cookies and site data. Open tabs in it keep working until closed.", color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
+            }
+        }
     }
 }

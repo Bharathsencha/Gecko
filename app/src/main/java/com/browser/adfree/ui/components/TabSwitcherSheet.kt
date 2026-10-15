@@ -17,6 +17,10 @@
 
 package com.browser.adfree.ui.components
 
+import androidx.compose.foundation.rememberScrollState
+
+import androidx.compose.foundation.horizontalScroll
+
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateFloatAsState
@@ -58,13 +62,15 @@ fun TabSwitcherSheet(
     activeTabIndex: Int,
     onTabSelected: (Int) -> Unit,
     onCloseTab: (Int) -> Unit,
-    onNewTab: (isPrivate: Boolean) -> Unit,
+    onNewTab: (isPrivate: Boolean, container: String?) -> Unit,
     onCloseAllTabs: () -> Unit,
     onCloseAllPrivateTabs: () -> Unit,
     onDismissRequest: () -> Unit
 ) {
     val activeTab = if (activeTabIndex in tabs.indices) tabs[activeTabIndex] else null
     var isPrivateModeSelected by remember { mutableStateOf(activeTab?.isPrivate == true) }
+    // Container for the next new tab; starts as the current tab's.
+    var newTabContainer by remember { mutableStateOf(activeTab?.container) }
 
     val normalTabs = remember(tabs.map { it.id to it.isPrivate }) { tabs.filter { !it.isPrivate } }
     val privateTabs = remember(tabs.map { it.id to it.isPrivate }) { tabs.filter { it.isPrivate } }
@@ -99,7 +105,7 @@ fun TabSwitcherSheet(
     LaunchedEffect(isOpeningNewTab) {
         if (isOpeningNewTab) {
             delay(160L)
-            onNewTab(isPrivateModeSelected)
+            onNewTab(isPrivateModeSelected, if (isPrivateModeSelected) null else newTabContainer)
             onDismissRequest()
         }
     }
@@ -184,6 +190,22 @@ fun TabSwitcherSheet(
                     }
                 )
             }
+            if (!isPrivateModeSelected && com.browser.adfree.model.TabContainer.all.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
+                        .padding(start = 16.dp, end = 16.dp, bottom = 14.dp)
+                ) {
+                    Text("New tab in", color = TextSecondary, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    ContainerChip("Default", null, newTabContainer == null) { newTabContainer = null }
+                    com.browser.adfree.model.TabContainer.all.forEach { c ->
+                        ContainerChip(c.displayName, Color(c.color), newTabContainer == c.id) { newTabContainer = c.id }
+                    }
+                }
+            }
             BrutalRule()
 
             if (currentDisplayList.isEmpty()) {
@@ -263,8 +285,10 @@ private fun TabCard(
         try { URI(tab.url).host?.removePrefix("www.") ?: "" } catch (e: Exception) { "" }
     }
     val isHome = tab.url == "about:home" || tab.url.isBlank()
+    val container = com.browser.adfree.model.TabContainer.byId(tab.container)
     val headerFill = when {
         tab.isPrivate -> PrivatePurple
+        container != null -> Color(container.color)
         isActive -> AccentCyan
         else -> SurfaceCard
     }
@@ -296,12 +320,16 @@ private fun TabCard(
             } else {
                 Icon(Icons.Default.Public, contentDescription = null, tint = InkBlack, modifier = Modifier.size(18.dp))
             }
+            if (container != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(container.displayName, color = InkBlack, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            }
             Spacer(Modifier.weight(1f))
             BrutalIconButton(
                 icon = Icons.Default.Close,
                 contentDescription = "Close tab",
                 onClick = onClose,
-                tint = if (tab.isPrivate || isActive) InkBlack else TextPrimary,
+                tint = if (tab.isPrivate || isActive || container != null) InkBlack else TextPrimary,
                 iconSize = 18.dp,
                 modifier = Modifier.size(40.dp)
             )
@@ -331,5 +359,28 @@ private fun TabCard(
                 Text(host, color = TextSecondary, fontSize = 11.5.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
         }
+    }
+}
+
+@Composable
+private fun ContainerChip(label: String, color: Color?, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .brutalPressable(
+                fill = if (selected) (color ?: AccentCyan) else SurfaceDark,
+                border = BorderSubtle,
+                shadow = HardShadow,
+                shadowOffset = if (selected) 0.dp else 2.dp,
+                role = androidx.compose.ui.semantics.Role.RadioButton,
+                onClick = onClick
+            )
+            .padding(horizontal = 10.dp, vertical = 7.dp)
+    ) {
+        if (color != null && !selected) {
+            Box(Modifier.size(10.dp).background(color, RoundedCornerShape(2.dp)))
+            Spacer(Modifier.width(6.dp))
+        }
+        Text(label, color = if (selected) InkBlack else TextPrimary, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
     }
 }
