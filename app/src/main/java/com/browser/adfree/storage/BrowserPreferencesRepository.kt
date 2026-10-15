@@ -79,6 +79,17 @@ class BrowserPreferencesRepository(context: Context) {
     var httpsOnlyMode by mutableStateOf(prefs.getBoolean("https_only_mode", true))
         private set
 
+    /** Icon and animation of the clear-data button. */
+    var clearStyle by mutableStateOf(
+        runCatching { ClearStyle.valueOf(prefs.getString("clear_style", ClearStyle.FIRE.name) ?: "") }.getOrDefault(ClearStyle.FIRE)
+    )
+        private set
+
+    fun setClearStylePreference(style: ClearStyle) {
+        clearStyle = style
+        prefs.edit().putString("clear_style", style.name).apply()
+    }
+
     /** Ask keyboards not to learn or store typing (always on in private tabs). */
     var incognitoKeyboard by mutableStateOf(prefs.getBoolean("incognito_keyboard", true))
         private set
@@ -372,4 +383,12 @@ enum class HomepageWallpaper(val displayName: String) {
     FOREST("Forest"),
     SUNSET("Sunset"),
     CUSTOM("Photo")
+}
+
+enum class ClearStyle(val displayName: String) {
+    FIRE("Fire"),
+    FLOOD("Flood"),
+    SWEEP("Sweep"),
+    SHRED("Shred"),
+    VORTEX("Vortex")
 }

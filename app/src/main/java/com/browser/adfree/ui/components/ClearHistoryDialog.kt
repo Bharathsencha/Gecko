@@ -73,6 +73,7 @@ fun ClearBrowsingDataSheet(
     runtime: GeckoRuntime,
     /** Receives the wipe so the caller can run it while the fire covers the screen. */
     onBurn: ((wipe: () -> Unit) -> Unit)? = null,
+    clearStyle: com.browser.adfree.storage.ClearStyle = com.browser.adfree.storage.ClearStyle.FIRE,
     onDismissRequest: () -> Unit
 ) {
     val context = LocalContext.current
@@ -170,9 +171,9 @@ fun ClearBrowsingDataSheet(
 
             val anything = clearHistoryChecked || clearCookiesChecked || clearCacheChecked || closeTabsChecked
             BrutalButton(
-                text = "Burn it",
-                icon = Icons.Default.LocalFireDepartment,
-                fill = Color(0xFFFF6B4A),
+                text = "Clear now",
+                icon = clearStyleIcon(clearStyle),
+                fill = clearStyleFill(clearStyle),
                 contentColor = InkBlack,
                 enabled = anything,
                 onClick = {

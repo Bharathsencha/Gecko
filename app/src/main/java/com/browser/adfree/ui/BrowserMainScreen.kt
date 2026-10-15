@@ -252,7 +252,8 @@ fun BrowserMainScreen(
                             }
                         }
                     },
-                    historySuggestions = historySuggestions
+                    historySuggestions = historySuggestions,
+                    clearStyle = preferencesRepo.clearStyle
                 )
             }
 
@@ -447,6 +448,7 @@ fun BrowserMainScreen(
                 tabManager = tabManager,
                 runtime = runtime,
                 onBurn = { wipe -> pendingWipe = wipe },
+                clearStyle = preferencesRepo.clearStyle,
                 onDismissRequest = {
                     showClearDataSheet = false
                     urlText = tabManager.activeTab?.url ?: "about:home"
@@ -607,7 +609,7 @@ fun BrowserMainScreen(
             )
         }
 
-        // Brave-style Shields Quick Panel (linked to existing Shield badge)
+        // Per-site protection panel (opened from the address bar badge)
         if (showShieldsSheet && activeTab != null) {
             ShieldsQuickSheet(
                 tab = activeTab,
@@ -654,6 +656,7 @@ fun BrowserMainScreen(
 
         FireBurnOverlay(
             playing = pendingWipe != null,
+            style = preferencesRepo.clearStyle,
             onCovered = {
                 pendingWipe?.invoke()
                 urlText = tabManager.activeTab?.url ?: "about:home"

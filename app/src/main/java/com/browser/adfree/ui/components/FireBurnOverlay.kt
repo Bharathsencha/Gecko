@@ -31,12 +31,18 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.material.icons.filled.Cyclone
+import androidx.compose.material.icons.filled.ContentCut
+import androidx.compose.material.icons.filled.CleaningServices
+import androidx.compose.material.icons.filled.Water
+import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.dp
@@ -61,6 +67,7 @@ private val FlameYellow = Color(0xFFFFD84D)
 @Composable
 fun FireBurnOverlay(
     playing: Boolean,
+    style: com.browser.adfree.storage.ClearStyle = com.browser.adfree.storage.ClearStyle.FIRE,
     onCovered: () -> Unit,
     onFinished: () -> Unit
 ) {
@@ -98,28 +105,13 @@ fun FireBurnOverlay(
             }
     ) {
         val p = progress.value
-        val outline = Stroke(width = 3.dp.toPx())
-        val amp = size.height * 0.07f
-        // Each wall: bottom edge trails its top edge, so walls are bands that
-        // sweep up and leave the screen. Red leads, yellow trails.
-        val walls = listOf(
-            Triple(FlameRed, 0.00f, 1.5f),
-            Triple(FlameOrange, 0.08f, 2.1f),
-            Triple(FlameYellow, 0.16f, 2.7f)
-        )
-        for ((color, lag, freq) in walls) {
-            val local = ((p - lag) / (1f - lag)).coerceIn(0f, 1f)
-            // 0..COVER: top edge rises from below the screen to above it.
-            val top = lerp(size.height + amp, -amp * 2.5f, (local / COVER_AT).coerceAtMost(1f).ease())
-            // After cover: the bottom edge follows the top off screen.
-            val bottomProgress = ((local - COVER_AT) / (1f - COVER_AT)).coerceIn(0f, 1f).ease()
-            val bottom = lerp(size.height + amp * 3, -amp * 3, bottomProgress)
-            if (bottom <= top) continue
-            val path = flameBand(top, bottom, amp, freq, t + lag * 10f)
-            drawPath(path, color)
-            drawPath(path, InkBlack, style = outline)
+        when (style) {
+            com.browser.adfree.storage.ClearStyle.FIRE -> drawFire(p, t, embers)
+            com.browser.adfree.storage.ClearStyle.FLOOD -> drawFlood(p, t)
+            com.browser.adfree.storage.ClearStyle.SWEEP -> drawSweep(p)
+            com.browser.adfree.storage.ClearStyle.SHRED -> drawShred(p)
+            com.browser.adfree.storage.ClearStyle.VORTEX -> drawVortex(p, t)
         }
-        drawEmbers(embers, p, t)
     }
 }
 
@@ -163,4 +155,184 @@ private fun DrawScope.drawEmbers(embers: List<Ember>, p: Float, t: Float) {
         drawRect(FlameYellow, topLeft = Offset(x, y), size = Size(s, s))
         drawRect(InkBlack, topLeft = Offset(x, y), size = Size(s, s), style = Stroke(1.5.dp.toPx()))
     }
+}
+
+private fun DrawScope.drawFire(p: Float, t: Float, embers: List<Ember>) {
+        val outline = Stroke(width = 3.dp.toPx())
+    val amp = size.height * 0.07f
+    // Each wall: bottom edge trails its top edge, so walls are bands that
+    // sweep up and leave the screen. Red leads, yellow trails.
+    val walls = listOf(
+        Triple(FlameRed, 0.00f, 1.5f),
+        Triple(FlameOrange, 0.08f, 2.1f),
+        Triple(FlameYellow, 0.16f, 2.7f)
+    )
+    for ((color, lag, freq) in walls) {
+        val local = ((p - lag) / (1f - lag)).coerceIn(0f, 1f)
+        // 0..COVER: top edge rises from below the screen to above it.
+        val top = lerp(size.height + amp, -amp * 2.5f, (local / COVER_AT).coerceAtMost(1f).ease())
+        // After cover: the bottom edge follows the top off screen.
+        val bottomProgress = ((local - COVER_AT) / (1f - COVER_AT)).coerceIn(0f, 1f).ease()
+        val bottom = lerp(size.height + amp * 3, -amp * 3, bottomProgress)
+        if (bottom <= top) continue
+        val path = flameBand(top, bottom, amp, freq, t + lag * 10f)
+        drawPath(path, color)
+        drawPath(path, InkBlack, style = outline)
+    }
+    drawEmbers(embers, p, t)
+}
+
+private val Water1 = Color(0xFF8EC5FF)
+private val Water2 = Color(0xFF5FA8F5)
+private val Water3 = Color(0xFFBFE0FF)
+
+/** Flood: water rises in waves until the screen is under, then drains away downwards. */
+private fun DrawScope.drawFlood(p: Float, t: Float) {
+    val outline = Stroke(3.dp.toPx())
+    val amp = size.height * 0.03f
+    listOf(Triple(Water1, 0f, 1.3f), Triple(Water2, 0.07f, 1.9f), Triple(Water3, 0.14f, 2.5f)).forEach { (color, lag, freq) ->
+        val local = ((p - lag) / (1f - lag)).coerceIn(0f, 1f)
+        val rise = (local / COVER_AT).coerceAtMost(1f).ease()
+        val drain = ((local - COVER_AT) / (1f - COVER_AT)).coerceIn(0f, 1f).ease()
+        val top = lerp(size.height + amp * 2, -amp * 2, rise) + drain * (size.height + amp * 4)
+        if (top >= size.height + amp) return@forEach
+        val path = Path()
+        val steps = 40
+        for (i in 0..steps) {
+            val x = size.width * i / steps
+            val y = top + sin(x / size.width * freq * 2f * PI.toFloat() + t * 4f) * amp
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.lineTo(size.width, size.height + 10f)
+        path.lineTo(0f, size.height + 10f)
+        path.close()
+        drawPath(path, color)
+        drawPath(path, InkBlack, style = outline)
+    }
+    // Rising square bubbles while the water climbs
+    if (p < COVER_AT) {
+        repeat(14) { i ->
+            val x = size.width * ((i * 0.137f + 0.05f) % 1f)
+            val speed = 0.8f + (i % 4) * 0.2f
+            val y = size.height * (1.1f - (p / COVER_AT) * speed * 1.2f) + i * 30f
+            val s = (6 + i % 3 * 4).dp.toPx()
+            drawRect(Color.White, Offset(x, y), Size(s, s))
+            drawRect(InkBlack, Offset(x, y), Size(s, s), style = Stroke(1.5.dp.toPx()))
+        }
+    }
+}
+
+/** Sweep: a big eraser block wipes left to right, leaving clean paper behind, then the paper slides away. */
+private fun DrawScope.drawSweep(p: Float) {
+    val outline = Stroke(3.dp.toPx())
+    val blockW = size.width * 0.28f
+    val cover = (p / COVER_AT).coerceAtMost(1f).ease()
+    val leave = ((p - COVER_AT) / (1f - COVER_AT)).coerceIn(0f, 1f).ease()
+    val lead = lerp(-blockW, size.width + blockW, cover)
+    val trail = lerp(0f, size.width + blockW * 2, leave)
+    val panelRight = lead.coerceAtMost(size.width)
+    if (panelRight > trail) {
+        drawRect(Color(0xFFF4F1EA), Offset(trail, 0f), Size(panelRight - trail, size.height))
+        // diagonal sweep marks on the cleaned area
+        var x = trail - size.height
+        while (x < panelRight) {
+            drawLine(InkBlack.copy(alpha = 0.06f), Offset(x, size.height), Offset(x + size.height, 0f), 12.dp.toPx())
+            x += 48.dp.toPx()
+        }
+    }
+    // the eraser
+    val ex = if (p < COVER_AT) lead - blockW else trail - blockW
+    if (ex < size.width && ex + blockW > 0) {
+        val tilt = if (p < COVER_AT) -6f else 6f
+        rotate(tilt, Offset(ex + blockW / 2, size.height / 2)) {
+            val top = size.height * 0.08f
+            val h = size.height * 0.84f
+            drawRect(InkBlack, Offset(ex + 8.dp.toPx(), top + 8.dp.toPx()), Size(blockW, h))
+            drawRect(Color(0xFFFF9EC7), Offset(ex, top), Size(blockW, h))
+            drawRect(Color(0xFF8EC5FF), Offset(ex, top), Size(blockW, h * 0.35f))
+            drawRect(InkBlack, Offset(ex, top), Size(blockW, h), style = outline)
+            drawLine(InkBlack, Offset(ex, top + h * 0.35f), Offset(ex + blockW, top + h * 0.35f), 3.dp.toPx())
+        }
+    }
+}
+
+/** Shred: coloured strips drop in one after another, then fall through the bottom. */
+private fun DrawScope.drawShred(p: Float) {
+    val outline = Stroke(2.5.dp.toPx())
+    val strips = 8
+    val w = size.width / strips
+    val colors = listOf(Color(0xFFFFD84D), Color(0xFFFFB067), Color(0xFFFF9EC7), Color(0xFFB49CFF), Color(0xFF8EC5FF), Color(0xFF7FD8C8))
+    for (i in 0 until strips) {
+        val delay = i * 0.035f
+        val drop = (((p - delay) / (COVER_AT - 0.1f)).coerceIn(0f, 1f)).ease()
+        val fall = (((p - COVER_AT - delay) / (1f - COVER_AT - 0.25f)).coerceIn(0f, 1f)).let { it * it }
+        val top = lerp(-size.height, 0f, drop) + fall * size.height * 1.1f
+        if (top >= size.height) continue
+        val left = i * w
+        val skew = sin((i + 1) * 1.7f) * 6f * fall
+        rotate(skew, Offset(left + w / 2, top + size.height / 2)) {
+            drawRect(colors[i % colors.size], Offset(left, top), Size(w + 1f, size.height))
+            drawRect(InkBlack, Offset(left, top), Size(w + 1f, size.height), style = outline)
+            // torn bottom edge
+            val path = Path().apply {
+                moveTo(left, top + size.height)
+                var x = left
+                var up = true
+                while (x < left + w) {
+                    x += w / 6
+                    lineTo(x.coerceAtMost(left + w), top + size.height + if (up) 14f else 0f)
+                    up = !up
+                }
+                lineTo(left + w, top + size.height)
+                close()
+            }
+            drawPath(path, colors[i % colors.size])
+        }
+    }
+}
+
+/** Vortex: a spinning disc of blocks spirals out to swallow the page, then collapses to a point. */
+private fun DrawScope.drawVortex(p: Float, t: Float) {
+    val center = Offset(size.width / 2, size.height / 2)
+    val maxR = kotlin.math.hypot(size.width / 2, size.height / 2) * 1.05f
+    val grow = (p / COVER_AT).coerceAtMost(1f).ease()
+    val shrink = ((p - COVER_AT) / (1f - COVER_AT)).coerceIn(0f, 1f).ease()
+    val r = maxR * grow * (1f - shrink)
+    if (r <= 1f) return
+    val colors = listOf(Color(0xFFFFD84D), Color(0xFFB49CFF), Color(0xFF7FD8C8), Color(0xFFFFB067))
+    val spin = t * 220f + p * 540f
+    rotate(spin, center) {
+        colors.forEachIndexed { i, c ->
+            drawArc(c, startAngle = i * 90f, sweepAngle = 90f, useCenter = true, topLeft = center - Offset(r, r), size = Size(r * 2, r * 2))
+        }
+        // spiral rings
+        var rr = r
+        var k = 0
+        while (rr > 8f) {
+            drawCircle(InkBlack, rr, center, style = Stroke((3 - k % 2).dp.toPx()))
+            rr *= 0.72f
+            k++
+        }
+        drawLine(InkBlack, center - Offset(r, 0f), center + Offset(r, 0f), 3.dp.toPx())
+        drawLine(InkBlack, center - Offset(0f, r), center + Offset(0f, r), 3.dp.toPx())
+    }
+    drawCircle(InkBlack, r * 0.08f + 4f, center)
+}
+
+/** Icon for the clear button in each style. */
+fun clearStyleIcon(style: com.browser.adfree.storage.ClearStyle): androidx.compose.ui.graphics.vector.ImageVector = when (style) {
+    com.browser.adfree.storage.ClearStyle.FIRE -> androidx.compose.material.icons.Icons.Default.LocalFireDepartment
+    com.browser.adfree.storage.ClearStyle.FLOOD -> androidx.compose.material.icons.Icons.Default.Water
+    com.browser.adfree.storage.ClearStyle.SWEEP -> androidx.compose.material.icons.Icons.Default.CleaningServices
+    com.browser.adfree.storage.ClearStyle.SHRED -> androidx.compose.material.icons.Icons.Default.ContentCut
+    com.browser.adfree.storage.ClearStyle.VORTEX -> androidx.compose.material.icons.Icons.Default.Cyclone
+}
+
+/** Tile colour for the clear button in each style. */
+fun clearStyleFill(style: com.browser.adfree.storage.ClearStyle): Color = when (style) {
+    com.browser.adfree.storage.ClearStyle.FIRE -> Color(0xFFFFB067)
+    com.browser.adfree.storage.ClearStyle.FLOOD -> Color(0xFF8EC5FF)
+    com.browser.adfree.storage.ClearStyle.SWEEP -> Color(0xFFFF9EC7)
+    com.browser.adfree.storage.ClearStyle.SHRED -> Color(0xFFFFD84D)
+    com.browser.adfree.storage.ClearStyle.VORTEX -> Color(0xFFB49CFF)
 }

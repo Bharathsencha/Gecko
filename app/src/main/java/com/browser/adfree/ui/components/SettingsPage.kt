@@ -474,7 +474,7 @@ private fun MainSettings(
             BrutalHairline(startIndent = 64.dp)
             BrutalListRow(
                 title = "Block ads and trackers",
-                subtitle = "Gecko tracking protection and the built-in request filter. uBlock Origin always runs (except on YouTube, where ads are fast-forwarded).",
+                subtitle = "Tracking protection and the built-in request filter. uBlock Origin always runs.",
                 icon = Icons.Default.Shield,
                 checked = preferencesRepo.adBlockingEnabled,
                 onCheckedChange = {
@@ -658,6 +658,55 @@ private fun MainSettings(
 
         BrutalSectionLabel("Browsing data")
         SettingsGroup(shadow = CardShadows[2]) {
+            Text(
+                "Clear button",
+                color = TextPrimary,
+                fontSize = 15.sp,
+                fontWeight = FontWeight.SemiBold,
+                modifier = Modifier.padding(start = 16.dp, top = 14.dp)
+            )
+            Text(
+                "Icon and animation used when you clear browsing data",
+                color = TextSecondary,
+                fontSize = 12.5.sp,
+                modifier = Modifier.padding(start = 16.dp, top = 2.dp, bottom = 12.dp)
+            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 19.dp, bottom = 16.dp)
+            ) {
+                com.browser.adfree.storage.ClearStyle.values().forEach { style ->
+                    val selected = preferencesRepo.clearStyle == style
+                    Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.weight(1f)) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(52.dp)
+                                .brutalPressable(
+                                    fill = clearStyleFill(style),
+                                    border = BorderSubtle,
+                                    shadow = HardShadow,
+                                    shadowOffset = if (selected) 0.dp else 3.dp,
+                                    role = Role.RadioButton,
+                                    onClick = { preferencesRepo.setClearStylePreference(style) }
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            androidx.compose.material3.Icon(clearStyleIcon(style), contentDescription = style.displayName, tint = InkBlack, modifier = Modifier.size(24.dp))
+                        }
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            style.displayName,
+                            color = if (selected) TextPrimary else TextSecondary,
+                            fontSize = 11.5.sp,
+                            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+                        )
+                    }
+                }
+            }
+            BrutalHairline(startIndent = 16.dp)
             BrutalListRow(
                 title = "Clear data when leaving",
                 subtitle = "History, cookies and cache are wiped when the app closes",
@@ -901,6 +950,19 @@ private fun AboutSettings(onOpenUrl: (String) -> Unit, onBack: () -> Unit) {
                 title = "Source code",
                 subtitle = "github.com/Bharathsencha/Gecko",
                 onClick = { onOpenUrl("https://github.com/Bharathsencha/Gecko") },
+                trailing = { Chevron() }
+            )
+            BrutalHairline(startIndent = 16.dp)
+            BrutalListRow(
+                title = "Privacy policy",
+                subtitle = "What Gecko stores and what it sends",
+                onClick = { onOpenUrl("https://github.com/Bharathsencha/Gecko/blob/main/PRIVACY.md") },
+                trailing = { Chevron() }
+            )
+            BrutalHairline(startIndent = 16.dp)
+            BrutalListRow(
+                title = "Terms of use",
+                onClick = { onOpenUrl("https://github.com/Bharathsencha/Gecko/blob/main/TERMS.md") },
                 trailing = { Chevron() }
             )
             BrutalHairline(startIndent = 16.dp)

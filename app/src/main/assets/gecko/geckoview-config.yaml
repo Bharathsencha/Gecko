@@ -9,7 +9,11 @@ prefs:
   privacy.resistFingerprinting: false
   privacy.fingerprintingProtection: true
   privacy.fingerprintingProtection.pbmode: true
-  privacy.fingerprintingProtection.overrides: "+AllTargets,-CSSPrefersColorScheme"
+  # Excluded for rendering quality: FrameRate caps animations at 60 fps on
+  # 120 Hz screens, WindowDevicePixelRatio makes pages render at a lower
+  # resolution (blurry text), ReduceTimerPrecision makes animations stutter
+  # (Gecko's default 1 ms timer clamping still applies).
+  privacy.fingerprintingProtection.overrides: "+AllTargets,-CSSPrefersColorScheme,-FrameRate,-WindowDevicePixelRatio,-ReduceTimerPrecision"
   privacy.resistFingerprinting.block_mozAddonManager: true
   # Ask every site for plain US English, like every other protected user.
   privacy.spoof_english: 2

@@ -31,14 +31,17 @@ fun GeckoViewContainer(
     onRefresh: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
-    var scrollY by remember(session) { mutableIntStateOf(0) }
+    // Plain holder, not Compose state: scroll events arrive every frame on the
+    // main thread (which also drives Gecko's touch scrolling), and a state
+    // write per event schedules UI work that makes scrolling stutter.
+    val scrollY = remember(session) { java.util.concurrent.atomic.AtomicInteger(0) }
     val spinnerInk = com.browser.adfree.ui.theme.BorderSubtle.toArgb()
     val spinnerFill = com.browser.adfree.ui.theme.AccentCyan.toArgb()
 
     DisposableEffect(session) {
         val scrollDelegate = object : GeckoSession.ScrollDelegate {
             override fun onScrollChanged(session: GeckoSession, scrollX: Int, y: Int) {
-                scrollY = y
+                scrollY.set(y)
             }
         }
         session.scrollDelegate = scrollDelegate
@@ -74,7 +77,7 @@ fun GeckoViewContainer(
                 // Only allow pull-to-refresh when strictly at the very top of the webpage (scrollY <= 0).
                 // If scrollY > 0, return true so GeckoView can scroll up smoothly without triggering reload.
                 setOnChildScrollUpCallback { _, _ ->
-                    scrollY > 0
+                    scrollY.get() > 0
                 }
             }
         },

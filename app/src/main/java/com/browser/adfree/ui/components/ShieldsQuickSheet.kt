@@ -101,46 +101,44 @@ fun ShieldsQuickSheet(
                     .padding(start = 16.dp, end = 20.dp, bottom = 16.dp)
                     .fillMaxWidth()
                     .brutalBox(
-                        fill = if (isShieldsActive && !isYouTube) Color(0xFF7FDCA4) else SurfaceCard,
+                        fill = if (isShieldsActive) Color(0xFF7FDCA4) else SurfaceCard,
                         border = BorderSubtle,
                         shadow = HardShadow
                     )
                     .padding(16.dp)
             ) {
                 Text(
-                    text = if (isYouTube) "--" else blockCount.toString(),
+                    text = blockCount.toString(),
                     fontSize = 34.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (isShieldsActive && !isYouTube) InkBlack else TextPrimary
+                    color = if (isShieldsActive) InkBlack else TextPrimary
                 )
                 Spacer(Modifier.width(14.dp))
                 Column {
                     Text(
                         text = when {
-                            isYouTube -> "Ads fast-forwarded"
                             isShieldsActive -> "Blocked on this page"
-                            else -> "Shields are off"
+                            else -> "Protection is off"
                         },
                         fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isShieldsActive && !isYouTube) InkBlack else TextPrimary
+                        color = if (isShieldsActive) InkBlack else TextPrimary
                     )
                     Text(
                         text = when {
-                            isYouTube -> "YouTube blocks players that filter requests, so ads load muted at 16x and are skipped."
                             isShieldsActive -> "Trackers and ad requests stopped by tracking protection and the request filter."
                             else -> "Trackers and ads are allowed on this site."
                         },
                         fontSize = 12.sp,
                         lineHeight = 16.sp,
-                        color = if (isShieldsActive && !isYouTube) InkBlack else TextSecondary
+                        color = if (isShieldsActive) InkBlack else TextSecondary
                     )
                 }
             }
 
             BrutalRule()
             BrutalListRow(
-                title = "Shields for this site",
+                title = "Protection on this site",
                 subtitle = "Tracking protection on this domain. uBlock Origin keeps filtering ads.",
                 icon = Icons.Default.Shield,
                 checked = siteConfig.shieldsEnabled,

@@ -58,6 +58,8 @@ class MainActivity : FragmentActivity() {
 
     private var extensionPort: WebExtension.Port? = null
     private var appBridgeExtension: WebExtension? = null
+    @Volatile private var latestExtensionCount = 0
+    @Volatile private var countUpdateScheduled = false
     private var pendingSaveLogin by mutableStateOf<PendingSaveLogin?>(null)
 
     private val notificationPermissionLauncher = registerForActivityResult(
@@ -86,6 +88,20 @@ class MainActivity : FragmentActivity() {
         }
     }
 
+    /** Pages scroll at the display's top refresh rate (e.g. 120 Hz) instead of whatever the system picks. */
+    private fun requestHighestRefreshRate() {
+        try {
+            val display = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) display else @Suppress("DEPRECATION") windowManager.defaultDisplay
+            val current = display?.mode ?: return
+            val best = display.supportedModes
+                .filter { it.physicalWidth == current.physicalWidth && it.physicalHeight == current.physicalHeight }
+                .maxByOrNull { it.refreshRate } ?: return
+            window.attributes = window.attributes.apply { preferredDisplayModeId = best.modeId }
+        } catch (e: Exception) {
+            Log.w("AdFreeBrowser", "Could not request refresh rate: ${e.message}")
+        }
+    }
+
     private fun checkAndRequestNotificationPermission() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
@@ -108,6 +124,8 @@ class MainActivity : FragmentActivity() {
             }
             .build()
         coil.Coil.setImageLoader(imageLoader)
+
+        requestHighestRefreshRate()
 
         // Request notification permission on Android 13+ for background download progress & alerts
         checkAndRequestNotificationPermission()
@@ -455,10 +473,14 @@ class MainActivity : FragmentActivity() {
                 }
             } else if (action == "blocked_count") {
                 // Counted per page by the extension; a navigation resets it to 0.
-                // Gecko's own tracker blocks are added on top in TabManager.
-                val count = json.optInt("count", 0)
-                runOnUiThread {
-                    tabManager.activeTab?.let { tab -> tab.extensionBlockCount = count }
+                // Only the latest value matters, so publish it at most twice a second.
+                latestExtensionCount = json.optInt("count", 0)
+                if (json.optInt("count", 0) == 0 || !countUpdateScheduled) {
+                    countUpdateScheduled = true
+                    window.decorView.postDelayed({
+                        countUpdateScheduled = false
+                        tabManager.activeTab?.extensionBlockCount = latestExtensionCount
+                    }, if (latestExtensionCount == 0) 0 else 500)
                 }
             } else if (action == "download_blob") {
                 val filename = json.optString("filename")

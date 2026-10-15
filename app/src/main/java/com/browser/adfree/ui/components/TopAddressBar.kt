@@ -77,6 +77,7 @@ fun TopAddressBar(
     isBookmarked: Boolean = false,
     onToggleBookmark: () -> Unit = {},
     historySuggestions: List<HistoryItem> = emptyList(),
+    clearStyle: com.browser.adfree.storage.ClearStyle = com.browser.adfree.storage.ClearStyle.FIRE,
     modifier: Modifier = Modifier
 ) {
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -143,7 +144,7 @@ fun TopAddressBar(
                 .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 8.dp)
         ) {
             BrutalIconButton(
-                icon = Icons.Default.LocalFireDepartment,
+                icon = clearStyleIcon(clearStyle),
                 contentDescription = "Clear browsing data",
                 onClick = {
                     keyboardController?.hide()
@@ -151,7 +152,7 @@ fun TopAddressBar(
                     onOpenClearData()
                 },
                 boxed = true,
-                fill = FlameOrange,
+                fill = clearStyleFill(clearStyle),
                 tint = InkBlack
             )
 
@@ -203,7 +204,7 @@ fun TopAddressBar(
                     } else if (!isStartPage && urlInput.startsWith("https://")) {
                         Icon(
                             imageVector = Icons.Default.Lock,
-                            contentDescription = "Secure connection, open shields",
+                            contentDescription = "Secure connection, site protection",
                             tint = fieldInk,
                             modifier = Modifier
                                 .size(16.dp)

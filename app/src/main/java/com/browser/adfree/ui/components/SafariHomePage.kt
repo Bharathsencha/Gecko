@@ -89,7 +89,6 @@ import com.browser.adfree.storage.BrowserPreferencesRepository
 import com.browser.adfree.storage.HomepageWallpaper
 import com.browser.adfree.ui.theme.*
 import java.net.URI
-import java.net.URLEncoder
 
 
 @Composable
@@ -419,7 +418,8 @@ private fun AddTile(labelColor: Color, onClick: () -> Unit) {
 
 private fun faviconUrl(url: String): String {
     val host = try { URI(url).host ?: url } catch (e: Exception) { url }
-    return "https://www.google.com/s2/favicons?domain_url=" + URLEncoder.encode(host, "UTF-8") + "&sz=128"
+    // Straight from the site, never through a third-party favicon service.
+    return "https://$host/favicon.ico"
 }
 
 private fun builtInIcon(type: String?): ImageVector = when (type) {

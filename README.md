@@ -21,7 +21,10 @@ License: GNU General Public License v3.0 or later
 - **Private tabs:** in-memory only, no history or session saved, screenshots and recent-apps previews blocked, no page titles on the lock screen.
 - **Incognito keyboard:** every text field, in the app and on web pages, asks the keyboard not to learn or store what you type.
 - **Downloads:** direct, HLS and split video and audio streams, remuxed on device. YouTube streams that get cut off fall back to yt-dlp. Audio is saved as a real `.m4a` or `.opus` file.
-- **Password vault:** AES-256-GCM with the key held in the Android Keystore.
+- **Password vault:** AES-256-GCM with the key held in the Android Keystore. Opening it needs your fingerprint, the phone's screen lock or a 4-digit app PIN (checked against a hardware-held key, with lockouts).
+- **Clear button:** wipes history, cookies, cache and tabs behind one of five animations (Fire, Flood, Sweep, Shred, Vortex), chosen in Settings.
+- **Start page:** block compositions, patterns, solid colours, gradients or your own photo, plus a built-in designer for making and naming your own block layouts.
+- **Look:** neo-brutalist light and dark themes with the Space Grotesk typeface. Pages render at the screen's full resolution and refresh rate.
 - **Reader view, night mode, per-site settings, HTTPS-only mode.**
 
 ## Install
@@ -38,6 +41,10 @@ adb install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk
 Requirements: Android 8.0 (API 26) or newer, on arm64 or x86_64. To build you need JDK 17 or newer and the Android SDK with platform 37.1. Release builds are signed with the key named in a git-ignored `keystore.properties`; without it they fall back to the debug key.
 
 On first launch Gecko offers to become the default browser. You can also do this later in Settings, under Default browser.
+
+## Privacy and terms
+
+Gecko has no accounts, analytics, ads or servers of its own, and everything it keeps stays on your phone. The [privacy policy](PRIVACY.md) lists exactly what is stored and every network request the app makes on its own. Use of the app is covered by the [terms of use](TERMS.md).
 
 ## Credits
 

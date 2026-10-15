@@ -46,8 +46,9 @@ fun DefaultBrowserPromptDialog(
         confirmLabel = "Set as default",
         onConfirm = onSetDefault,
         dismissLabel = "Not now",
+        stackButtons = true,
         header = {
-            Image(painterResource(R.drawable.gecko_logo), contentDescription = null, modifier = Modifier.size(56.dp))
+            Image(painterResource(R.drawable.gecko_logo), contentDescription = null, modifier = Modifier.size(64.dp))
         }
     ) {
         Text(

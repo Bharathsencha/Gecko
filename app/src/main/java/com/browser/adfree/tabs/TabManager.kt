@@ -218,12 +218,22 @@ class TabManager(private val context: Context) {
 
         // Content Blocking / Ad & Tracker Shield Delegate
         session.contentBlockingDelegate = object : org.mozilla.geckoview.ContentBlocking.Delegate {
+            // Counted off the UI, published at most twice a second: pages block
+            // dozens of requests while scrolling and each UI update stole time
+            // from Gecko's touch handling on the main thread.
+            private val pending = java.util.concurrent.atomic.AtomicInteger(0)
+            private val scheduled = java.util.concurrent.atomic.AtomicBoolean(false)
+
             override fun onContentBlocked(
                 session: GeckoSession,
                 event: org.mozilla.geckoview.ContentBlocking.BlockEvent
             ) {
-                mainHandler.post {
-                    tab.trackerBlockCount++
+                pending.incrementAndGet()
+                if (scheduled.compareAndSet(false, true)) {
+                    mainHandler.postDelayed({
+                        scheduled.set(false)
+                        tab.trackerBlockCount += pending.getAndSet(0)
+                    }, 500)
                 }
             }
         }

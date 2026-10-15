@@ -45,6 +45,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.material.icons.Icons
@@ -620,7 +621,8 @@ fun SiteFavicon(url: String, modifier: Modifier = Modifier, size: Dp = 32.dp) {
     ) {
         Text(host.take(1).uppercase(), color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
         coil.compose.AsyncImage(
-            model = "https://www.google.com/s2/favicons?sz=64&domain_url=" + java.net.URLEncoder.encode(host, "UTF-8"),
+            // Straight from the site: a third-party favicon service would learn every site in your history.
+            model = "https://$host/favicon.ico",
             contentDescription = null,
             modifier = Modifier.size(size * 0.55f)
         )
@@ -666,12 +668,17 @@ fun BrutalDialog(
     onDismissAction: (() -> Unit)? = null,
     confirmFill: Color = AccentCyan,
     dismissOnOutside: Boolean = true,
+    /** Stack the buttons full width; use when a label would not fit at half width. */
+    stackButtons: Boolean = false,
     header: (@Composable () -> Unit)? = null,
     body: @Composable () -> Unit
 ) {
     androidx.compose.ui.window.Dialog(
         onDismissRequest = onDismiss,
-        properties = androidx.compose.ui.window.DialogProperties(dismissOnClickOutside = dismissOnOutside)
+        properties = androidx.compose.ui.window.DialogProperties(
+            dismissOnClickOutside = dismissOnOutside,
+            usePlatformDefaultWidth = false
+        )
     ) {
         val appear = remember { androidx.compose.animation.core.Animatable(0.92f) }
         androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -680,6 +687,8 @@ fun BrutalDialog(
         Column(
             modifier = Modifier
                 .graphicsLayer { scaleX = appear.value; scaleY = appear.value }
+                .padding(horizontal = 20.dp)
+                .widthIn(max = 460.dp)
                 .padding(end = 5.dp, bottom = 5.dp)
                 .fillMaxWidth()
                 .brutalBox(fill = SurfaceDark, border = BorderSubtle, shadow = HardShadow, shadowOffset = 5.dp)
@@ -693,11 +702,21 @@ fun BrutalDialog(
             Spacer(Modifier.height(8.dp))
             body()
             Spacer(Modifier.height(20.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-                if (dismissLabel != null) {
-                    BrutalOutlineButton(dismissLabel, onDismissAction ?: onDismiss, Modifier.weight(1f))
+            val longLabels = stackButtons || confirmLabel.length > 10 || (dismissLabel?.length ?: 0) > 10
+            if (longLabels) {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    BrutalButton(confirmLabel, onConfirm, Modifier.fillMaxWidth().padding(end = 3.dp), fill = confirmFill, contentColor = InkBlack)
+                    if (dismissLabel != null) {
+                        BrutalOutlineButton(dismissLabel, onDismissAction ?: onDismiss, Modifier.fillMaxWidth().padding(end = 3.dp))
+                    }
                 }
-                BrutalButton(confirmLabel, onConfirm, Modifier.weight(1f), fill = confirmFill, contentColor = InkBlack)
+            } else {
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
+                    if (dismissLabel != null) {
+                        BrutalOutlineButton(dismissLabel, onDismissAction ?: onDismiss, Modifier.weight(1f))
+                    }
+                    BrutalButton(confirmLabel, onConfirm, Modifier.weight(1f), fill = confirmFill, contentColor = InkBlack)
+                }
             }
         }
     }
