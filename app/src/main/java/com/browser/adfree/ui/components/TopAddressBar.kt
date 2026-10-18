@@ -31,6 +31,8 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
@@ -124,9 +126,9 @@ fun TopAddressBar(
 
     val privateFill = PrivatePurple
     val chipGreen = Color(0xFF7FDCA4)
-    // Private mode: solid purple field with ink text, readable in both themes.
-    val fieldInk = if (isPrivate) InkBlack else TextPrimary
-    val fieldInkDim = if (isPrivate) InkBlack.copy(alpha = 0.65f) else TextSecondary
+    // Private mode: the night field from the private start page, the same in both themes.
+    val fieldInk = if (isPrivate) PrivateNightInk else TextPrimary
+    val fieldInkDim = if (isPrivate) PrivateNightMuted else TextSecondary
 
     Box(modifier = modifier
         .fillMaxWidth()
@@ -165,9 +167,9 @@ fun TopAddressBar(
                     .weight(1f)
                     .height(44.dp)
                     .brutalBox(
-                        fill = if (isPrivate) privateFill else SurfaceElevated,
+                        fill = if (isPrivate) PrivateNight else SurfaceElevated,
                         border = BorderSubtle,
-                        shadow = if (isFocused) HardShadow else null,
+                        shadow = if (isFocused) (if (isPrivate) privateFill else HardShadow) else null,
                         shadowOffset = 3.dp
                     )
                     .padding(horizontal = 10.dp),
@@ -190,15 +192,15 @@ fun TopAddressBar(
                         Spacer(modifier = Modifier.width(6.dp))
                     }
                     if (isPrivate) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
+                        Box(
+                            contentAlignment = Alignment.Center,
                             modifier = Modifier
-                                .brutalBox(fill = InkBlack, border = InkBlack, borderWidth = 1.5.dp, shape = RoundedCornerShape(3.dp))
-                                .padding(horizontal = 5.dp, vertical = 2.dp)
+                                .size(width = 28.dp, height = 22.dp)
+                                .brutalBox(fill = privateFill, border = privateFill, borderWidth = 1.dp, shape = RoundedCornerShape(3.dp))
+                                .clickable { onOpenShields() }
+                                .semantics { contentDescription = "Private tab. Site settings" }
                         ) {
-                            PrivateMask(maskColor = privateFill, eyeColor = InkBlack, modifier = Modifier.size(width = 16.dp, height = 10.dp))
-                            Spacer(modifier = Modifier.width(3.dp))
-                            Text("PRIVATE", color = privateFill, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                            PrivateMask(maskColor = InkBlack, eyeColor = privateFill, modifier = Modifier.size(width = 18.dp, height = 11.dp))
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                     } else if (adBlockCount > 0) {

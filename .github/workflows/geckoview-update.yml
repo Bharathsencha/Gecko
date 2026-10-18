@@ -1,0 +1,72 @@
+# Once a week, check Mozilla's Maven repository for a newer stable GeckoView.
+# When there is one, bump it, run the tests and open a pull request.
+# Engine updates carry Firefox security fixes, so merge these quickly.
+name: GeckoView update
+
+on:
+  schedule:
+    - cron: "0 6 * * 1"   # Mondays 06:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Find versions
+        id: v
+        run: |
+          current=$(grep -oP 'org\.mozilla\.geckoview:geckoview:\K[0-9.]+' app/build.gradle.kts)
+          latest=$(curl -fsSL https://maven.mozilla.org/maven2/org/mozilla/geckoview/geckoview/maven-metadata.xml \
+            | grep -oP '<release>\K[0-9.]+(?=</release>)')
+          echo "current=$current" >> "$GITHUB_OUTPUT"
+          echo "latest=$latest" >> "$GITHUB_OUTPUT"
+          echo "GeckoView: current $current, latest $latest"
+
+      - name: Bump
+        if: steps.v.outputs.latest != steps.v.outputs.current
+        run: |
+          sed -i "s/org.mozilla.geckoview:geckoview:${{ steps.v.outputs.current }}/org.mozilla.geckoview:geckoview:${{ steps.v.outputs.latest }}/" app/build.gradle.kts
+          major=$(echo "${{ steps.v.outputs.latest }}" | cut -d. -f1)
+          sed -i -E "s/GeckoView \([0-9]+\)/GeckoView ($major)/; s/Mozilla GeckoView [0-9]+/Mozilla GeckoView $major/" CLAUDE.md README.md 2>/dev/null || true
+
+      - uses: actions/setup-java@v4
+        if: steps.v.outputs.latest != steps.v.outputs.current
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+        if: steps.v.outputs.latest != steps.v.outputs.current
+      - name: Install SDK platform
+        if: steps.v.outputs.latest != steps.v.outputs.current
+        run: sdkmanager "platforms;android-37.1" "build-tools;37.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.v.outputs.latest != steps.v.outputs.current
+
+      - name: Test the new engine
+        id: test
+        if: steps.v.outputs.latest != steps.v.outputs.current
+        continue-on-error: true
+        run: ./gradlew :app:testDebugUnitTest :app:compileReleaseKotlin --stacktrace
+
+      - name: Open pull request
+        if: steps.v.outputs.latest != steps.v.outputs.current
+        uses: peter-evans/create-pull-request@v7
+        with:
+          branch: geckoview-${{ steps.v.outputs.latest }}
+          commit-message: "chore: update GeckoView to ${{ steps.v.outputs.latest }}"
+          title: "Update GeckoView to ${{ steps.v.outputs.latest }}"
+          body: |
+            GeckoView ${{ steps.v.outputs.current }} -> ${{ steps.v.outputs.latest }}.
+
+            Tests and release compile: **${{ steps.test.outcome }}**.
+            ${{ steps.test.outcome == 'success' && 'Install a build on a phone, check pages, video and the VPN, then merge and tag a release.' || 'The new engine broke the build. Check the CI log; usually a changed GeckoView API.' }}
+
+            Release notes: https://firefox-source-docs.mozilla.org/mobile/android/geckoview/
+          delete-branch: true

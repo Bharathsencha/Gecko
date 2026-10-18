@@ -40,6 +40,25 @@ object YtDlpDownloader {
         Regex("[?&]itag=(\\d+)").find(streamUrl)?.groupValues?.get(1)
 
     /**
+     * yt-dlp asks YouTube with different clients, which do not always list the
+     * same format ids as the stream URL came from. Ask for that id first, then
+     * the closest stream of the same kind: same container, same height.
+     */
+    fun selectorFor(streamUrl: String, itag: String, height: Int?): String {
+        val mime = java.net.URLDecoder.decode(Regex("[?&]mime=([^&]+)").find(streamUrl)?.groupValues?.get(1).orEmpty(), "UTF-8")
+        val isAudio = mime.startsWith("audio")
+        val ext = when {
+            mime.contains("webm") -> "webm"
+            isAudio -> "m4a"
+            else -> "mp4"
+        }
+        if (isAudio) return "$itag/ba[ext=$ext]/ba"
+        val h = height ?: 0
+        return if (h > 0) "$itag/bv*[height=$h][ext=$ext]/bv*[height=$h]/bv*[height<=$h][ext=$ext]/bv*[height<=$h]"
+        else "$itag/bv*[ext=$ext]/bv*"
+    }
+
+    /**
      * Returns null on success, otherwise a short reason. [onProgress] gets 0..100.
      * Runs blocking; call from a background thread.
      */
@@ -70,17 +89,26 @@ object YtDlpDownloader {
         UniversalVideoExtractor.ytDlpLock.lock()
         try {
             if (!isActive()) return "Cancelled"
-            YoutubeDL.getInstance().execute(request, processId) { progress, _, _ ->
+            var loggedStep = -1
+            val started = System.currentTimeMillis()
+            YoutubeDL.getInstance().execute(request, processId) { progress, _, line ->
                 if (!isActive()) {
                     YoutubeDL.getInstance().destroyProcessById(processId)
-                } else if (progress >= 0f) {
-                    onProgress(progress.toInt().coerceIn(0, 100))
+                    return@execute
+                }
+                if (progress >= 0f) onProgress(progress.toInt().coerceIn(0, 100))
+                // Phases and every 10% go to the log, with addresses removed.
+                val step = (progress / 10).toInt()
+                if (progress < 0f || step != loggedStep) {
+                    loggedStep = step
+                    Log.i(TAG, "[$formatId] ${(System.currentTimeMillis() - started) / 1000}s " +
+                        line.replace(Regex("https?://\\S+"), "<url>").replace(Regex("/data/\\S+"), "<file>").take(160))
                 }
             }
         } catch (e: YoutubeDL.CanceledException) {
             return "Cancelled"
         } catch (e: Exception) {
-            Log.w(TAG, "yt-dlp download failed for format $formatId: ${e.message}")
+            Log.w(TAG, "yt-dlp download failed for format $formatId: ${e.message?.replace(Regex("https?://\\S+"), "<url>")?.takeLast(600)}")
             return e.message?.lineSequence()?.lastOrNull { it.isNotBlank() }?.take(160) ?: "yt-dlp failed"
         } finally {
             UniversalVideoExtractor.ytDlpLock.unlock()

@@ -20,7 +20,9 @@
 
     MODIFIED by Gibbly Gobbly for the Gecko browser, 15 October 2026:
     onNetWhitelistReady() always adds two trusted-site directives
-    (search "Gecko AdFree" below). No other file of uBlock Origin was changed.
+    (search "Gecko AdFree" below). On 18 October 2026 the dashboard-only
+    folders img/flags-of-the-world and lib/codemirror were removed to save
+    space; Gecko never opens the dashboard. No other file was changed.
     This modified file is distributed under the same GNU GPL v3 or later.
 */
 

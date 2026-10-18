@@ -84,6 +84,8 @@ class TabManager(private val context: Context) {
         const val MODERN_MOBILE_UA = "Mozilla/5.0 (Android 10; Mobile; rv:122.0) Gecko/122.0 Firefox/122.0"
         const val DESKTOP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:122.0) Gecko/20100101 Firefox/122.0"
 
+        private val WEB_SCHEMES = setOf("http", "https", "about", "data", "blob", "file", "content", "javascript", "moz-extension", "resource", "view-source")
+
         private val YOUTUBE_HOST = Regex("(^|\\.)(youtube\\.com|youtube-nocookie\\.com|youtu\\.be)$", RegexOption.IGNORE_CASE)
 
         /** YouTube runs without request blocking; content.js fast-forwards its ads instead. */
@@ -157,6 +159,83 @@ class TabManager(private val context: Context) {
                 }
             }
         }
+    }
+
+    /** Hands a non-web link to the app that handles it, or its fallback page. */
+    private fun openExternally(uri: String, session: GeckoSession) {
+        try {
+            val intent = if (uri.startsWith("intent:", true)) {
+                android.content.Intent.parseUri(uri, android.content.Intent.URI_INTENT_SCHEME).apply {
+                    addCategory(android.content.Intent.CATEGORY_BROWSABLE)
+                    component = null
+                    selector = null
+                }
+            } else {
+                android.content.Intent(android.content.Intent.ACTION_VIEW, Uri.parse(uri))
+            }
+            intent.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+            try {
+                context.startActivity(intent)
+            } catch (e: android.content.ActivityNotFoundException) {
+                val fallback = intent.getStringExtra("browser_fallback_url")
+                if (fallback != null && fallback.startsWith("https://")) session.loadUri(fallback)
+                else android.widget.Toast.makeText(context, "No app can open this link", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        } catch (e: Exception) {
+            android.widget.Toast.makeText(context, "No app can open this link", android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** Long-press on a link, image or media element. */
+    var onContextMenu: ((TabModel, GeckoSession.ContentDelegate.ContextElement) -> Unit)? = null
+
+    /** Asks Android for runtime permissions (location, camera, microphone) a site needs. */
+    var onAndroidPermissions: ((Array<String>, (Boolean) -> Unit) -> Unit)? = null
+
+    /**
+     * Answers from the saved decision when there is one, otherwise queues a
+     * question for the user. The answer is remembered for the site.
+     */
+    private fun ask(host: String, kinds: List<com.browser.adfree.storage.SitePermission>, isPrivate: Boolean): GeckoResult<Boolean> {
+        val store = com.browser.adfree.storage.SitePermissions
+        val known = kinds.map { store.get(host, it, isPrivate) }
+        if (known.all { it == true }) return GeckoResult.fromValue(true)
+        if (known.any { it == false }) return GeckoResult.fromValue(false)
+        val result = GeckoResult<Boolean>()
+        mainHandler.post {
+            store.pending.add(com.browser.adfree.storage.PermissionAsk(host, kinds, isPrivate) { allow ->
+                kinds.forEach { store.set(host, it, allow, isPrivate) }
+                result.complete(allow)
+            })
+        }
+        return result
+    }
+
+    /**
+     * Downloads [url] the way the page would load it: through the engine, with
+     * the tab's cookies (or none, in private tabs) and the VPN route.
+     */
+    fun downloadUrl(tab: TabModel, url: String, runtime: GeckoRuntime, suggestedName: String? = null) {
+        val dm = downloadManager ?: return
+        when {
+            url.startsWith("data:") -> { dm.startDownload(url = url, customFileName = suggestedName); return }
+            !(url.startsWith("http://") || url.startsWith("https://")) -> {
+                android.widget.Toast.makeText(context, "This item can't be saved", android.widget.Toast.LENGTH_SHORT).show()
+                return
+            }
+        }
+        val request = org.mozilla.geckoview.WebRequest.Builder(url)
+            .referrer(tab.url.takeIf { it.startsWith("http") })
+            .build()
+        val flags = if (tab.isPrivate) org.mozilla.geckoview.GeckoWebExecutor.FETCH_FLAGS_PRIVATE
+            else org.mozilla.geckoview.GeckoWebExecutor.FETCH_FLAGS_NONE
+        org.mozilla.geckoview.GeckoWebExecutor(runtime).fetch(request, flags).accept({ response ->
+            if (response != null) dm.saveWebResponse(response, suggestedName)
+        }, { error ->
+            mainHandler.post {
+                android.widget.Toast.makeText(context, "Download failed: ${error?.message ?: "network error"}", android.widget.Toast.LENGTH_SHORT).show()
+            }
+        })
     }
 
     /** Shown when a page has no readable article or no page bridge yet. */
@@ -331,8 +410,72 @@ class TabManager(private val context: Context) {
             }
 
             override fun onExternalResponse(session: GeckoSession, response: WebResponse) {
+                // Gecko hands over the open response; saving its body keeps the
+                // request's cookies, private state and route.
+                downloadManager?.saveWebResponse(response)
+            }
+
+            override fun onContextMenu(
+                session: GeckoSession,
+                screenX: Int,
+                screenY: Int,
+                element: GeckoSession.ContentDelegate.ContextElement
+            ) {
+                if (element.linkUri == null && element.srcUri == null) return
+                mainHandler.post { onContextMenu?.invoke(tab, element) }
+            }
+        }
+
+        session.permissionDelegate = object : GeckoSession.PermissionDelegate {
+            override fun onContentPermissionRequest(
+                session: GeckoSession,
+                perm: GeckoSession.PermissionDelegate.ContentPermission
+            ): GeckoResult<Int> {
+                val allow = GeckoSession.PermissionDelegate.ContentPermission.VALUE_ALLOW
+                val deny = GeckoSession.PermissionDelegate.ContentPermission.VALUE_DENY
+                when (perm.permission) {
+                    // Autoplay follows the engine prefs; it is not worth a question.
+                    GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_INAUDIBLE,
+                    GeckoSession.PermissionDelegate.PERMISSION_AUTOPLAY_AUDIBLE -> return GeckoResult.fromValue(allow)
+                    GeckoSession.PermissionDelegate.PERMISSION_TRACKING -> return GeckoResult.fromValue(deny)
+                }
+                val kind = com.browser.adfree.storage.SitePermission.fromGecko(perm.permission)
+                    ?: return GeckoResult.fromValue(deny)
+                val host = com.browser.adfree.storage.SitePermissions.hostOf(perm.uri)
+                return ask(host, listOf(kind), tab.isPrivate).map { if (it == true) allow else deny }
+            }
+
+            override fun onMediaPermissionRequest(
+                session: GeckoSession,
+                uri: String,
+                video: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+                audio: Array<out GeckoSession.PermissionDelegate.MediaSource>?,
+                callback: GeckoSession.PermissionDelegate.MediaCallback
+            ) {
+                val cam = video?.firstOrNull { it.source == GeckoSession.PermissionDelegate.MediaSource.SOURCE_CAMERA }
+                val mic = audio?.firstOrNull { it.source == GeckoSession.PermissionDelegate.MediaSource.SOURCE_MICROPHONE }
+                if (cam == null && mic == null) { callback.reject(); return }
+                val kinds = listOfNotNull(
+                    cam?.let { com.browser.adfree.storage.SitePermission.CAMERA },
+                    mic?.let { com.browser.adfree.storage.SitePermission.MICROPHONE }
+                )
+                val host = com.browser.adfree.storage.SitePermissions.hostOf(uri)
+                ask(host, kinds, tab.isPrivate).accept { ok ->
+                    if (ok == true) callback.grant(cam, mic) else callback.reject()
+                }
+            }
+
+            override fun onAndroidPermissionsRequest(
+                session: GeckoSession,
+                permissions: Array<out String>?,
+                callback: GeckoSession.PermissionDelegate.Callback
+            ) {
+                val wanted = permissions?.toList().orEmpty()
+                if (wanted.isEmpty()) { callback.grant(); return }
                 mainHandler.post {
-                    downloadManager?.startDownload(url = response.uri)
+                    val request = onAndroidPermissions
+                    if (request == null) callback.reject()
+                    else request(wanted.toTypedArray()) { granted -> if (granted) callback.grant() else callback.reject() }
                 }
             }
         }
@@ -371,18 +514,11 @@ class TabManager(private val context: Context) {
                 val uri = request.uri
                 val httpsOnly = preferencesRepository?.httpsOnlyMode ?: true
 
-                // Direct file download extension interceptor
-                val lowerUri = uri.lowercase().substringBefore("?")
-                val isDownloadable = lowerUri.endsWith(".apk") || lowerUri.endsWith(".pdf") ||
-                        lowerUri.endsWith(".zip") || lowerUri.endsWith(".rar") ||
-                        lowerUri.endsWith(".7z") || lowerUri.endsWith(".tar.gz") ||
-                        lowerUri.endsWith(".dmg") || lowerUri.endsWith(".iso") ||
-                        lowerUri.endsWith(".exe") || lowerUri.endsWith(".epub") ||
-                        lowerUri.endsWith(".csv") || lowerUri.endsWith(".json")
-
-                if (isDownloadable && (uri.startsWith("http://") || uri.startsWith("https://"))) {
-                    mainHandler.post {
-                        downloadManager?.startDownload(url = uri)
+                // mailto:, tel:, intent:, market: and app links go to the app that handles them.
+                val scheme = uri.substringBefore(':').lowercase()
+                if (scheme !in WEB_SCHEMES) {
+                    if (request.hasUserGesture || request.isDirectNavigation) {
+                        mainHandler.post { openExternally(uri, session) }
                     }
                     return GeckoResult.fromValue(AllowOrDeny.DENY)
                 }
@@ -412,6 +548,29 @@ class TabManager(private val context: Context) {
                     }
                 }
                 return GeckoResult.fromValue(AllowOrDeny.ALLOW)
+            }
+
+            // target="_blank" links and window.open(): a new tab next to this one,
+            // in the same private or container context.
+            override fun onNewSession(session: GeckoSession, uri: String): GeckoResult<GeckoSession> {
+                val result = GeckoResult<GeckoSession>()
+                mainHandler.post {
+                    val child = TabModel(
+                        initialTitle = if (tab.isPrivate) "Private Tab" else "New Tab",
+                        initialUrl = uri,
+                        initialSession = GeckoSession(),
+                        initialIsPrivate = tab.isPrivate,
+                        container = tab.container
+                    ).also { it.group = tab.group }
+                    val newSession = buildSession(child)
+                    child.session = newSession
+                    val at = (tabs.indexOf(tab) + 1).coerceIn(0, tabs.size)
+                    tabs.add(at, child)
+                    activeTabIndex.intValue = at
+                    if (!child.isPrivate) saveSession()
+                    result.complete(newSession)
+                }
+                return result
             }
 
             override fun onCanGoBack(session: GeckoSession, canGoBack: Boolean) {
@@ -590,6 +749,7 @@ class TabManager(private val context: Context) {
                 ).apply {
                     isDesktopMode = saved.isDesktopMode
                     zoomLevel = saved.zoomLevel
+                    group = saved.group
                 }
 
                 val session = buildSession(tab)
@@ -642,7 +802,9 @@ class TabManager(private val context: Context) {
         runtime: GeckoRuntime,
         initialUrl: String = HOME_URL,
         isPrivate: Boolean = false,
-        container: String? = null
+        container: String? = null,
+        /** False opens the tab behind the current one, like a long-press "open in new tab". */
+        select: Boolean = true
     ): TabModel {
         // Create a placeholder session with proper private mode flag
         val dummySession = GeckoSession(GeckoSessionSettings.Builder().usePrivateMode(isPrivate).build())
@@ -664,8 +826,9 @@ class TabManager(private val context: Context) {
             session.loadUri(resolveInputUrl(initialUrl))
         }
 
+        val current = activeTab
         tabs.add(tab)
-        activeTabIndex.intValue = tabs.size - 1
+        activeTabIndex.intValue = if (select || current == null) tabs.size - 1 else tabs.indexOf(current)
         if (!isPrivate) {
             saveSession()
         }
@@ -711,6 +874,7 @@ class TabManager(private val context: Context) {
                 closingTab.session.promptDelegate = null
                 closingTab.session.mediaSessionDelegate = null
                 closingTab.session.contentBlockingDelegate = null
+                closingTab.session.permissionDelegate = null
                 closingTab.session.close()
             } catch (e: Exception) {}
             tabs.removeAt(index)
@@ -734,10 +898,12 @@ class TabManager(private val context: Context) {
                 tab.session.promptDelegate = null
                 tab.session.mediaSessionDelegate = null
                 tab.session.contentBlockingDelegate = null
+                tab.session.permissionDelegate = null
                 tab.session.close()
             } catch (e: Exception) {}
             tabs.remove(tab)
         }
+        com.browser.adfree.storage.SitePermissions.clearPrivate()
         if (tabs.isEmpty()) {
             createNewTab(runtime, HOME_URL, isPrivate = false)
         } else {
@@ -755,6 +921,7 @@ class TabManager(private val context: Context) {
                 tab.session.promptDelegate = null
                 tab.session.mediaSessionDelegate = null
                 tab.session.contentBlockingDelegate = null
+                tab.session.permissionDelegate = null
                 tab.session.close()
             } catch (e: Exception) {}
         }
@@ -762,6 +929,19 @@ class TabManager(private val context: Context) {
         sessionRepository.clearSession()
         createNewTab(runtime, HOME_URL, isPrivate = false)
         saveSession()
+    }
+
+    /** Files [tab] under [group]; null takes it out of any group. */
+    fun setGroup(tab: TabModel, group: String?) {
+        tab.group = group?.trim()?.ifBlank { null }
+        if (!tab.isPrivate) saveSession()
+    }
+
+    /** Group names in use, in the order their first tab appears. */
+    val groups: List<String> get() = tabs.mapNotNull { it.group }.distinct()
+
+    fun closeGroup(group: String, runtime: GeckoRuntime) {
+        tabs.indices.reversed().filter { tabs[it].group == group }.forEach { closeTab(it, runtime) }
     }
 
     fun toggleDesktopMode(tab: TabModel) {
@@ -816,45 +996,8 @@ class TabManager(private val context: Context) {
         saveSession()
     }
 
-    fun resolveInputUrl(input: String): String {
-        var trimmed = input.trim()
-        if (trimmed.isEmpty() || trimmed == HOME_URL) return HOME_URL
-
-        // If markdown link format was pasted e.g. [coveryourtracks.eff.org](https://coveryourtracks.eff.org/)
-        val mdMatch = Regex("\\[.*?\\]\\((https?://.*?)\\)").find(trimmed)
-        if (mdMatch != null) {
-            trimmed = mdMatch.groupValues[1]
-        }
-
-        val searchEngine = preferencesRepository?.searchEngine ?: SearchEngine.DUCKDUCKGO
-
-        if (trimmed.startsWith("https://", ignoreCase = true) ||
-            trimmed.startsWith("http://", ignoreCase = true)) {
-            return com.browser.adfree.model.UrlSanitizer.cleanUrl(trimmed)
-        }
-
-        if (trimmed.startsWith("about:", ignoreCase = true) ||
-            trimmed.startsWith("javascript:", ignoreCase = true) ||
-            trimmed.startsWith("file://", ignoreCase = true)) {
-            return trimmed
-        }
-
-        // Domain matching without spaces (e.g., coveryourtracks.eff.org, adblock-tester.com/test)
-        val isDomain = !trimmed.contains(" ") && trimmed.contains(".") &&
-                       !trimmed.startsWith(".") && !trimmed.endsWith(".") &&
-                       (trimmed.substringBefore("/").split(".").lastOrNull()?.all { it.isLetter() } == true) &&
-                       (trimmed.substringBefore("/").split(".").lastOrNull()?.length ?: 0) in 2..24
-
-        if (isDomain) {
-            return com.browser.adfree.model.UrlSanitizer.cleanUrl("https://$trimmed")
-        }
-
-        return try {
-            searchEngine.searchUrl + URLEncoder.encode(trimmed, "UTF-8")
-        } catch (e: Exception) {
-            searchEngine.searchUrl + trimmed.replace(" ", "+")
-        }
-    }
+    fun resolveInputUrl(input: String): String =
+        com.browser.adfree.model.UrlInput.resolve(input, preferencesRepository?.searchEngine ?: SearchEngine.DUCKDUCKGO)
 
     fun destroy() {
         saveSession()

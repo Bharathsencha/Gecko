@@ -115,6 +115,33 @@ class BrowserPreferencesRepository(context: Context) {
         prefs.edit().putString("clear_style", style.name).apply()
     }
 
+    /** Block screenshots, screen recording and the recent-apps preview in normal tabs. */
+    var blockScreenshots by mutableStateOf(prefs.getBoolean("block_screenshots", false))
+        private set
+
+    fun setBlockScreenshotsPreference(enabled: Boolean) {
+        blockScreenshots = enabled
+        prefs.edit().putBoolean("block_screenshots", enabled).apply()
+    }
+
+    /** The same for private tabs; on unless the user turns it off. */
+    var blockScreenshotsPrivate by mutableStateOf(prefs.getBoolean("block_screenshots_private", true))
+        private set
+
+    fun setBlockScreenshotsPrivatePreference(enabled: Boolean) {
+        blockScreenshotsPrivate = enabled
+        prefs.edit().putBoolean("block_screenshots_private", enabled).apply()
+    }
+
+    /** Clearing history also resets the tracker report. */
+    var resetStatsWithHistory by mutableStateOf(prefs.getBoolean("reset_stats_with_history", true))
+        private set
+
+    fun setResetStatsWithHistoryPreference(enabled: Boolean) {
+        resetStatsWithHistory = enabled
+        prefs.edit().putBoolean("reset_stats_with_history", enabled).apply()
+    }
+
     /** Ask keyboards not to learn or store typing (always on in private tabs). */
     var incognitoKeyboard by mutableStateOf(prefs.getBoolean("incognito_keyboard", true))
         private set

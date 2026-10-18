@@ -159,7 +159,12 @@ object VideoAudioMuxer {
             val videoMime = videoFormat.mime()
             val audioMime = audioFormat.mime()
 
+            // Android 10+ can also write Opus into MP4 (needed for AV1/H.264 + Opus).
+            val opusInMp4 = pickContainer(videoMime, audioMime) == null &&
+                supports(Container.MP4, videoMime) && audioMime.equals("audio/opus", true) &&
+                Build.VERSION.SDK_INT >= 29
             val container = pickContainer(videoMime, audioMime)
+                ?: (if (opusInMp4) Container.MP4 else null)
                 ?: return writeSeparately(videoFile, audioFile, videoMime, audioMime, outputFile)
 
             ve.selectTrack(videoTrack)
@@ -255,8 +260,15 @@ object VideoAudioMuxer {
 
         } catch (e: Exception) {
             Log.e(TAG, "Muxing failed for ${videoFile.name} + ${audioFile.name}", e)
+            runCatching { muxer?.release() }
+            muxer = null
             runCatching { outputFile.delete() }
-            return Result.Failure("Muxing failed: ${e.message}")
+            // Last resort: keep both streams as separate playable files.
+            return runCatching {
+                val vm = MediaExtractor().run { setDataSource(videoFile.absolutePath); val m = (0 until trackCount).map { getTrackFormat(it).mime() }.first { it.startsWith("video/") }; release(); m }
+                val am = MediaExtractor().run { setDataSource(audioFile.absolutePath); val m = (0 until trackCount).map { getTrackFormat(it).mime() }.first { it.startsWith("audio/") }; release(); m }
+                writeSeparately(videoFile, audioFile, vm, am, outputFile)
+            }.getOrElse { Result.Failure("Muxing failed: ${e.message}") }
         } finally {
             runCatching { videoExtractor?.release() }
             runCatching { audioExtractor?.release() }

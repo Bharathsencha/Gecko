@@ -100,7 +100,11 @@ class HistoryRepository(private val context: Context) {
         }
     }
 
+    /** Runs after history is cleared (the tracker report can be reset with it). */
+    var onCleared: (() -> Unit)? = null
+
     fun clearHistoryByTimeframe(timeframe: TimeframeWipe) {
+        onCleared?.invoke()
         if (timeframe == TimeframeWipe.ALL_TIME) {
             history.clear()
         } else {
@@ -113,6 +117,7 @@ class HistoryRepository(private val context: Context) {
     fun clearAll() {
         history.clear()
         saveHistory()
+        onCleared?.invoke()
     }
 
     private fun saveHistory() {

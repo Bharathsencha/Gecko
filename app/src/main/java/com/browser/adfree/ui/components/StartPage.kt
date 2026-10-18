@@ -43,6 +43,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Cookie
+import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.Public
+import androidx.compose.material.icons.filled.Remove
+import androidx.compose.material.icons.filled.Screenshot
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Forum
@@ -103,11 +110,12 @@ fun StartPage(
     onSwitchToNormal: () -> Unit = {},
     trackerStats: com.browser.adfree.storage.TrackerStatsRepository? = null,
     onOpenTrackerReport: () -> Unit = {},
+    onClosePrivateTabs: () -> Unit = {},
+    privateTabCount: Int = 0,
     modifier: Modifier = Modifier
 ) {
     var isEditMode by remember { mutableStateOf(false) }
     var showAddSheet by remember { mutableStateOf(false) }
-    var showPrivateFacts by remember { mutableStateOf(false) }
 
     val wallpaper = preferencesRepo.homepageWallpaper
     val hasPhoto = !isPrivate &&
@@ -115,13 +123,13 @@ fun StartPage(
         preferencesRepo.customWallpaperUri.isNotBlank()
     val drawn = !isPrivate && wallpaper != HomepageWallpaper.CUSTOM
     val backdropText = when {
-        isPrivate -> null
+        isPrivate -> PrivateNightInk
         hasPhoto -> Color.White
         else -> wallpaperTextColor(wallpaper, preferencesRepo.activeDesign)
     }
     val onBackdrop = backdropText != null
 
-    Box(modifier = modifier.fillMaxSize().background(DarkBg)) {
+    Box(modifier = modifier.fillMaxSize().background(if (isPrivate) PrivateNight else DarkBg)) {
         // The page shrinks when the keyboard opens; the background keeps the
         // tallest size it has had, so it stays put like an image wallpaper.
         BoxWithConstraints(Modifier.fillMaxSize()) {
@@ -166,14 +174,23 @@ fun StartPage(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().padding(bottom = 20.dp)
             ) {
-                Image(
-                    painter = painterResource(R.drawable.gecko_logo),
-                    contentDescription = null,
-                    modifier = Modifier.size(44.dp)
-                )
+                if (isPrivate) {
+                    Box(
+                        Modifier.size(44.dp).brutalBox(fill = PrivatePurple, border = PrivateNightInk, shadow = PrivateNightSurface, shadowOffset = 3.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        PrivateMask(maskColor = InkBlack, eyeColor = PrivatePurple, modifier = Modifier.size(width = 28.dp, height = 18.dp))
+                    }
+                } else {
+                    Image(
+                        painter = painterResource(R.drawable.gecko_logo),
+                        contentDescription = null,
+                        modifier = Modifier.size(44.dp)
+                    )
+                }
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    text = if (isPrivate) "Private" else "Gecko",
+                    text = if (isPrivate) "Private browsing" else "Gecko",
                     fontSize = 22.sp,
                     fontWeight = FontWeight.Bold,
                     color = backdropText ?: TextPrimary,
@@ -205,7 +222,11 @@ fun StartPage(
             }
 
             if (isPrivate) {
-                PrivatePanel(expanded = showPrivateFacts, onToggleFacts = { showPrivateFacts = !showPrivateFacts })
+                PrivatePanel(
+                    screenshotsBlocked = preferencesRepo.blockScreenshotsPrivate,
+                    tabCount = privateTabCount,
+                    onClose = onClosePrivateTabs
+                )
             } else if (preferencesRepo.showFavoritesGrid) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
@@ -303,53 +324,82 @@ fun StartPage(
 }
 
 @Composable
-private fun PrivatePanel(expanded: Boolean, onToggleFacts: () -> Unit) {
+private fun PrivatePanel(screenshotsBlocked: Boolean, tabCount: Int, onClose: () -> Unit) {
+    Text(
+        "Nothing from these tabs is saved.",
+        color = PrivateNightInk,
+        fontSize = 20.sp,
+        fontWeight = FontWeight.Bold,
+        lineHeight = 26.sp
+    )
+    Spacer(Modifier.height(6.dp))
+    Text(
+        "Closing the last private tab erases everything below.",
+        color = PrivateNightMuted,
+        fontSize = 14.sp,
+        lineHeight = 19.sp
+    )
+    Spacer(Modifier.height(20.dp))
     Column(
-        modifier = Modifier
+        Modifier
             .fillMaxWidth()
             .padding(end = 4.dp, bottom = 4.dp)
-            .brutalBox(fill = PrivatePurple, border = BorderSubtle, shadow = HardShadow)
-            .padding(16.dp)
+            .brutalBox(fill = PrivateNightSurface, border = PrivateNightInk, shadow = PrivatePurple, shadowOffset = 4.dp)
     ) {
-        Text("Private tab", color = InkBlack, fontSize = 18.sp, fontWeight = FontWeight.Bold)
-        Spacer(Modifier.height(6.dp))
-        Text(
-            "History, cookies and site data from private tabs are kept in memory only and erased when the tabs close. " +
-                "Sites and your network can still see your IP address unless the VPN is on.",
-            color = InkBlack,
-            fontSize = 14.sp,
-            lineHeight = 20.sp
+        PrivateFact(Icons.Default.History, "History and searches", "Never written to the phone", true)
+        PrivateFact(Icons.Default.Cookie, "Cookies and site data", "Kept in memory, gone when you close", true)
+        PrivateFact(Icons.Default.Keyboard, "Keyboard", "Asked not to learn what you type", true)
+        PrivateFact(
+            Icons.Default.Screenshot, "Screenshots",
+            if (screenshotsBlocked) "Blocked, and hidden from recent apps" else "Allowed (change in Settings)",
+            screenshotsBlocked
         )
-        Spacer(Modifier.height(12.dp))
-        Text(
-            if (expanded) "Hide details" else "What private tabs do not do",
-            color = InkBlack,
-            fontSize = 13.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier
-                .clickable(onClick = onToggleFacts)
-                .padding(vertical = 8.dp)
+        PrivateFact(Icons.Default.Public, "Your IP address", "Still visible to sites. Turn on the VPN to hide it", false, last = true)
+    }
+    if (tabCount > 0) {
+        Spacer(Modifier.height(20.dp))
+        BrutalButton(
+            text = if (tabCount == 1) "Close private tab" else "Close $tabCount private tabs",
+            icon = Icons.Default.Close,
+            fill = PrivatePurple,
+            contentColor = InkBlack,
+            onClick = onClose,
+            modifier = Modifier.fillMaxWidth().padding(end = 3.dp)
         )
-        if (expanded) {
-            Fact("They do not hide your IP address. Use the VPN in Settings for that.")
-            Fact("They do not stop websites from recognising an account you sign in to.")
-            Fact("Downloads and bookmarks made in a private tab stay on the device.")
-        }
     }
 }
 
 @Composable
-private fun Fact(text: String) {
-    Row(Modifier.padding(top = 6.dp)) {
-        Box(
-            Modifier
-                .padding(top = 7.dp)
-                .size(6.dp)
-                .background(InkBlack)
-        )
+private fun PrivateFact(icon: ImageVector, title: String, detail: String, protected: Boolean, last: Boolean = false) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = PrivateNightInk, modifier = Modifier.size(20.dp))
+        Spacer(Modifier.width(14.dp))
+        Column(Modifier.weight(1f)) {
+            Text(title, color = PrivateNightInk, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+            Text(detail, color = PrivateNightMuted, fontSize = 12.5.sp, lineHeight = 16.sp)
+        }
         Spacer(Modifier.width(10.dp))
-        Text(text, color = InkBlack, fontSize = 13.sp, lineHeight = 18.sp)
+        Box(
+            Modifier.size(24.dp).brutalBox(
+                fill = if (protected) PrivatePurple else PrivateNightSurface,
+                border = PrivateNightInk,
+                borderWidth = 1.5.dp,
+                shape = RoundedCornerShape(4.dp)
+            ),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                if (protected) Icons.Default.Check else Icons.Default.Remove,
+                contentDescription = if (protected) "Protected" else "Not protected",
+                tint = if (protected) InkBlack else PrivateNightInk,
+                modifier = Modifier.size(16.dp)
+            )
+        }
     }
+    if (!last) Box(Modifier.fillMaxWidth().padding(start = 48.dp).height(1.dp).background(PrivateNightInk.copy(alpha = 0.15f)))
 }
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -469,6 +519,19 @@ private fun brandFill(fav: FavoriteItem): Color = when (fav.builtInType) {
  */
 @Composable
 private fun PrivateModeToggle(isPrivate: Boolean, onToggle: () -> Unit) {
+    if (isPrivate) {
+        Text(
+            "Leave",
+            color = PrivateNightInk,
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier
+                .brutalPressable(fill = PrivateNightSurface, border = PrivateNightInk, shadow = PrivatePurple, shadowOffset = 3.dp, onClick = onToggle)
+                .semantics { contentDescription = "Leave private browsing" }
+                .padding(horizontal = 14.dp, vertical = 10.dp)
+        )
+        return
+    }
     Box(
         modifier = Modifier.size(48.dp),
         contentAlignment = Alignment.Center

@@ -47,6 +47,8 @@ class TabModel(
     var extensionBlockCount by mutableIntStateOf(0)
     val adBlockCount: Int get() = trackerBlockCount + extensionBlockCount
     var isDesktopMode by mutableStateOf(false)
+    /** Name of the tab group this tab is filed under, or null. */
+    var group by mutableStateOf<String?>(null)
 
     // Page presentation
     var zoomLevel by mutableIntStateOf(100)

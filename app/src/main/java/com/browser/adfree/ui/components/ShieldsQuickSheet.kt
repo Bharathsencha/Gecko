@@ -15,6 +15,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.rounded.*
 import androidx.compose.material3.*
@@ -45,6 +47,9 @@ fun ShieldsQuickSheet(
     onToggleBackgroundMedia: (Boolean) -> Unit,
     onToggleDarkWeb: () -> Unit,
     onToggleDesktop: () -> Unit,
+    onSetPermission: (com.browser.adfree.storage.SitePermission, Boolean?) -> Unit = { _, _ -> },
+    onZoom: (Int) -> Unit = {},
+    onReader: () -> Unit = {},
     onDismissRequest: () -> Unit
 ) {
     val domain = remember(tab.url) {
@@ -77,6 +82,7 @@ fun ShieldsQuickSheet(
             modifier = Modifier
                 .fillMaxWidth()
                 .navigationBarsPadding()
+                .verticalScroll(rememberScrollState())
         ) {
             Row(
                 modifier = Modifier
@@ -170,7 +176,99 @@ fun ShieldsQuickSheet(
                 checked = tab.isDesktopMode,
                 onCheckedChange = { onToggleDesktop() }
             )
-            Spacer(Modifier.height(12.dp))
+            BrutalHairline(startIndent = 64.dp)
+            BrutalListRow(
+                title = "Text size",
+                subtitle = "${tab.zoomLevel}%",
+                icon = Icons.Default.ZoomIn,
+                trailing = {
+                    Row {
+                        BrutalIconButton(Icons.Default.Remove, "Smaller", { onZoom(tab.zoomLevel - 10) }, enabled = tab.zoomLevel > 50)
+                        BrutalIconButton(Icons.Default.Add, "Larger", { onZoom(tab.zoomLevel + 10) }, enabled = tab.zoomLevel < 200)
+                    }
+                }
+            )
+            BrutalHairline(startIndent = 64.dp)
+            BrutalListRow(
+                title = "Reader view",
+                subtitle = if (tab.isExtractingArticle) "Finding the article" else "Show only the article text",
+                icon = Icons.Default.ChromeReaderMode,
+                enabled = !tab.isExtractingArticle && tab.url.startsWith("http"),
+                onClick = onReader
+            )
+            // Permissions this site asked for, with the answer the user gave.
+            val permHost = com.browser.adfree.storage.SitePermissions.hostOf(tab.url)
+            val asked = com.browser.adfree.storage.SitePermission.entries.mapNotNull { p ->
+                com.browser.adfree.storage.SitePermissions.get(permHost, p, tab.isPrivate)?.let { p to it }
+            }
+            BrutalSectionLabel("Permissions")
+            if (asked.isEmpty()) {
+                Text(
+                    "This site has not asked for location, camera, microphone or other permissions.",
+                    color = TextSecondary,
+                    fontSize = 13.sp,
+                    lineHeight = 17.sp,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            } else {
+                asked.forEach { (p, allowed) ->
+                    PermissionRow(p, allowed) { onSetPermission(p, it) }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
         }
     }
+}
+
+/** One permission with Allow, Block and Ask choices. */
+@Composable
+fun PermissionRow(
+    permission: com.browser.adfree.storage.SitePermission,
+    allowed: Boolean?,
+    onChange: (Boolean?) -> Unit
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 56.dp)
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+    ) {
+        BrutalIconTile(permissionIcon(permission))
+        Spacer(Modifier.width(14.dp))
+        Text(permission.label, color = TextPrimary, fontSize = 15.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf(true to "Allow", false to "Block", null to "Ask").forEach { (value, label) ->
+                val on = allowed == value
+                Text(
+                    label,
+                    color = if (on) InkBlack else TextPrimary,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier
+                        .brutalPressable(
+                            fill = if (on) (if (value == false) Color(0xFFFF9EC7) else AccentCyan) else SurfaceDark,
+                            border = BorderSubtle,
+                            shadow = HardShadow,
+                            shadowOffset = if (on) 0.dp else 2.dp,
+                            role = androidx.compose.ui.semantics.Role.RadioButton,
+                            onClick = { onChange(value) }
+                        )
+                        .padding(horizontal = 9.dp, vertical = 7.dp)
+                )
+            }
+        }
+    }
+}
+
+fun permissionIcon(p: com.browser.adfree.storage.SitePermission): ImageVector = when (p) {
+    com.browser.adfree.storage.SitePermission.LOCATION -> Icons.Default.LocationOn
+    com.browser.adfree.storage.SitePermission.CAMERA -> Icons.Default.CameraAlt
+    com.browser.adfree.storage.SitePermission.MICROPHONE -> Icons.Default.Mic
+    com.browser.adfree.storage.SitePermission.NOTIFICATIONS -> Icons.Default.Notifications
+    com.browser.adfree.storage.SitePermission.DRM -> Icons.Default.Movie
+    com.browser.adfree.storage.SitePermission.STORAGE -> Icons.Default.Storage
+    com.browser.adfree.storage.SitePermission.XR -> Icons.Default.ViewInAr
+    com.browser.adfree.storage.SitePermission.LOCAL_NETWORK -> Icons.Default.Router
+    com.browser.adfree.storage.SitePermission.COOKIES -> Icons.Default.Cookie
 }

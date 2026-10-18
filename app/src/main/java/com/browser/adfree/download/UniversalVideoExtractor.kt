@@ -211,6 +211,10 @@ object UniversalVideoExtractor {
                 (if (isAac) 10000 else 0) + bitrate.toInt()
             }
             val bestAudioUrl = bestAudioFormat?.url?.replace(Regex("&range=[^&]+"), "")
+            // WebM video pairs with Opus/Vorbis so both fit one WebM file.
+            val bestWebmAudioUrl = audioFormats
+                .filter { (it.acodec?.lowercase() ?: "").let { c -> c.contains("opus") || c.contains("vorbis") } }
+                .maxByOrNull { it.abr }?.url?.replace(Regex("&range=[^&]+"), "")
 
             val qualityList = mutableListOf<VideoQualityOption>()
 
@@ -233,7 +237,10 @@ object UniversalVideoExtractor {
                 val isProgressive = !isAudioOnly && !isVideoOnly && !codecsUnknown
                 // Paired audio track when this entry is video-only (or unknown and
                 // the source does publish a separate audio format).
-                val pairAudioUrl = if (isVideoOnly || codecsUnknown) bestAudioUrl else null
+                val videoIsWebm = f.ext?.lowercase() == "webm"
+                val pairAudioUrl = if (isVideoOnly || codecsUnknown) {
+                    if (videoIsWebm) bestWebmAudioUrl ?: bestAudioUrl else bestAudioUrl
+                } else null
                 val hasAudio = isAudioOnly || isProgressive || pairAudioUrl != null
 
                 val height = f.height

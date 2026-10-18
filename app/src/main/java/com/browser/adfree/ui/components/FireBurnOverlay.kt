@@ -191,39 +191,43 @@ private val Water1 = Color(0xFF8EC5FF)
 private val Water2 = Color(0xFF5FA8F5)
 private val Water3 = Color(0xFFBFE0FF)
 
-/** Flood: water rises in waves until the screen is under, then drains away downwards. */
+/** Flood: water rises in waves until the screen is under, then keeps rising and leaves through the top. */
 private fun DrawScope.drawFlood(p: Float, t: Float) {
     val outline = Stroke(3.dp.toPx())
     val amp = size.height * 0.03f
+    val steps = 40
     listOf(Triple(Water1, 0f, 1.3f), Triple(Water2, 0.07f, 1.9f), Triple(Water3, 0.14f, 2.5f)).forEach { (color, lag, freq) ->
         val local = ((p - lag) / (1f - lag)).coerceIn(0f, 1f)
         val rise = (local / COVER_AT).coerceAtMost(1f).ease()
-        val drain = ((local - COVER_AT) / (1f - COVER_AT)).coerceIn(0f, 1f).ease()
-        val top = lerp(size.height + amp * 2, -amp * 2, rise) + drain * (size.height + amp * 4)
-        if (top >= size.height + amp) return@forEach
+        val leave = ((local - COVER_AT) / (1f - COVER_AT)).coerceIn(0f, 1f).ease()
+        val top = lerp(size.height + amp * 2, -amp * 2, rise) - leave * amp * 4
+        // The tail of the water follows the surface up and out of the top.
+        val bottom = lerp(size.height + amp * 3, -amp * 6, leave)
+        if (bottom <= top || bottom < -amp * 2) return@forEach
+        val phase = t * 4f
         val path = Path()
-        val steps = 40
         for (i in 0..steps) {
             val x = size.width * i / steps
-            val y = top + sin(x / size.width * freq * 2f * PI.toFloat() + t * 4f) * amp
+            val y = top + sin(x / size.width * freq * 2f * PI.toFloat() + phase) * amp
             if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
         }
-        path.lineTo(size.width, size.height + 10f)
-        path.lineTo(0f, size.height + 10f)
+        for (i in steps downTo 0) {
+            val x = size.width * i / steps
+            val y = bottom + sin(x / size.width * freq * 2f * PI.toFloat() - phase) * amp
+            path.lineTo(x, y)
+        }
         path.close()
         drawPath(path, color)
         drawPath(path, InkBlack, style = outline)
     }
-    // Rising square bubbles while the water climbs
-    if (p < COVER_AT) {
-        repeat(14) { i ->
-            val x = size.width * ((i * 0.137f + 0.05f) % 1f)
-            val speed = 0.8f + (i % 4) * 0.2f
-            val y = size.height * (1.1f - (p / COVER_AT) * speed * 1.2f) + i * 30f
-            val s = (6 + i % 3 * 4).dp.toPx()
-            drawRect(Color.White, Offset(x, y), Size(s, s))
-            drawRect(InkBlack, Offset(x, y), Size(s, s), style = Stroke(1.5.dp.toPx()))
-        }
+    // Square bubbles rise the whole way through.
+    repeat(14) { i ->
+        val x = size.width * ((i * 0.137f + 0.05f) % 1f)
+        val speed = 0.8f + (i % 4) * 0.2f
+        val y = size.height * (1.1f - p * speed * 1.6f) + i * 30f
+        val s = (6 + i % 3 * 4).dp.toPx()
+        drawRect(Color.White, Offset(x, y), Size(s, s))
+        drawRect(InkBlack, Offset(x, y), Size(s, s), style = Stroke(1.5.dp.toPx()))
     }
 }
 
@@ -298,7 +302,7 @@ private fun DrawScope.drawShred(p: Float) {
 
 /**
  * Pixel: the page is covered cell by cell with chunky 8-bit blocks that pop
- * in, then the blocks drop out of the bottom one by one.
+ * in, then the blocks shrink away in the same random order.
  */
 private fun DrawScope.drawPixel(p: Float) {
     val cols = 9
@@ -312,15 +316,14 @@ private fun DrawScope.drawPixel(p: Float) {
             // Stable pseudo-random order per cell
             val h = ((r * 73856093) xor (c * 19349663)).let { (it and 0x7fffffff) % 1000 } / 1000f
             val inAt = h * 0.32f
-            val outAt = COVER_AT + 0.02f + ((1f - h) * 0.6f + (r.toFloat() / rows) * 0.4f) * 0.32f
+            val outAt = COVER_AT + 0.02f + h * 0.32f
             val pop = ((p - inAt) / 0.14f).coerceIn(0f, 1f)
-            if (pop <= 0f) continue
-            // Overshoot slightly as each block lands
-            val scale = (pop + sin(pop * PI.toFloat()) * 0.18f).coerceAtMost(1.18f)
-            val fall = ((p - outAt) / 0.16f).coerceIn(0f, 1f)
-            val dy = fall * fall * size.height * 1.2f
-            val y = r * cell + dy
-            if (y > size.height + cell) continue
+            val unpop = ((p - outAt) / 0.14f).coerceIn(0f, 1f)
+            if (pop <= 0f || unpop >= 1f) continue
+            // Overshoot slightly as each block lands, then shrink back to nothing.
+            val scale = if (unpop > 0f) (1f - unpop) * (1f + sin((1f - unpop) * PI.toFloat()) * 0.12f)
+                else (pop + sin(pop * PI.toFloat()) * 0.18f).coerceAtMost(1.18f)
+            val y = r * cell
             val sz = cell * scale
             val o = Offset(c * cell + (cell - sz) / 2, y + (cell - sz) / 2)
             drawRect(InkBlack, o + Offset(shadow, shadow), Size(sz, sz))

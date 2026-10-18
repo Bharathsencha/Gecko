@@ -130,6 +130,12 @@ val HardShadow: Color
 /** Solid fill marking private-browsing UI. Content on it is ink. */
 val PrivatePurple = Color(0xFFB49CFF)
 
+/** Private start page: the same deep night surface in light and dark themes. */
+val PrivateNight = Color(0xFF15121C)
+val PrivateNightSurface = Color(0xFF221D2D)
+val PrivateNightInk = Color(0xFFEDE8DC)
+val PrivateNightMuted = Color(0xFFA9A2B8)
+
 // Status colours, readable as text and icons on both paper and dark surfaces.
 val DangerRed = Color(0xFFE5483F)
 val ShieldGreen = Color(0xFF22A05A)

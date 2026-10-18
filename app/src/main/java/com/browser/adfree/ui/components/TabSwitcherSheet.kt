@@ -31,7 +31,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
-import androidx.compose.foundation.lazy.grid.itemsIndexed
+import androidx.compose.foundation.lazy.grid.GridItemSpan
+import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -65,8 +66,12 @@ fun TabSwitcherSheet(
     onNewTab: (isPrivate: Boolean, container: String?) -> Unit,
     onCloseAllTabs: () -> Unit,
     onCloseAllPrivateTabs: () -> Unit,
+    onSetGroup: (TabModel, String?) -> Unit = { _, _ -> },
+    onCloseGroup: (String) -> Unit = {},
     onDismissRequest: () -> Unit
 ) {
+    var groupingTab by remember { mutableStateOf<TabModel?>(null) }
+    var collapsed by remember { mutableStateOf(setOf<String>()) }
     val activeTab = if (activeTabIndex in tabs.indices) tabs[activeTabIndex] else null
     var isPrivateModeSelected by remember { mutableStateOf(activeTab?.isPrivate == true) }
     // Container for the next new tab; starts as the current tab's.
@@ -224,7 +229,9 @@ fun TabSwitcherSheet(
                         .weight(1f),
                     contentPadding = PaddingValues(start = 16.dp, end = 19.dp, top = 16.dp, bottom = 24.dp)
                 ) {
-                    itemsIndexed(currentDisplayList, key = { _, tab -> tab.id }) { _, tab ->
+                    val loose = currentDisplayList.filter { it.group == null }
+                    val grouped = currentDisplayList.filter { it.group != null }.groupBy { it.group!! }
+                    val card: @Composable (TabModel) -> Unit = { tab ->
                         val realIndex = tabs.indexOf(tab)
                         TabCard(
                             tab = tab,
@@ -235,11 +242,104 @@ fun TabSwitcherSheet(
                             onClose = {
                                 if (!isClosingAll && selectedIndexToOpen == null) onCloseTab(realIndex)
                             },
-                            modifier = Modifier.animateItem()
+                            onGroup = { groupingTab = tab }
                         )
+                    }
+                    items(loose, key = { it.id }) { tab -> Box(Modifier.animateItem()) { card(tab) } }
+                    grouped.forEach { (name, members) ->
+                        item(key = "group:$name", span = { GridItemSpan(maxLineSpan) }) {
+                            GroupHeader(
+                                name = name,
+                                count = members.size,
+                                expanded = name !in collapsed,
+                                onToggle = { collapsed = if (name in collapsed) collapsed - name else collapsed + name },
+                                onClose = { onCloseGroup(name) },
+                                modifier = Modifier.animateItem()
+                            )
+                        }
+                        if (name !in collapsed) {
+                            items(members, key = { it.id }) { tab -> Box(Modifier.animateItem()) { card(tab) } }
+                        }
                     }
                 }
             }
+        }
+    }
+
+    groupingTab?.let { tab ->
+        GroupPickerDialog(
+            current = tab.group,
+            groups = tabs.filter { it.isPrivate == tab.isPrivate }.mapNotNull { it.group }.distinct(),
+            onPick = { onSetGroup(tab, it); groupingTab = null },
+            onDismiss = { groupingTab = null }
+        )
+    }
+}
+
+@Composable
+private fun GroupHeader(
+    name: String,
+    count: Int,
+    expanded: Boolean,
+    onToggle: () -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .brutalTap(pressScale = 1f, onClick = onToggle)
+    ) {
+        Icon(
+            if (expanded) Icons.Default.ExpandMore else Icons.Default.ChevronRight,
+            contentDescription = if (expanded) "Collapse group" else "Expand group",
+            tint = TextPrimary,
+            modifier = Modifier.size(22.dp)
+        )
+        Spacer(Modifier.width(6.dp))
+        Text(name, color = TextPrimary, fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Spacer(Modifier.width(8.dp))
+        Text(count.toString(), color = TextSecondary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.weight(1f))
+        BrutalIconButton(Icons.Default.Close, "Close group", onClose, iconSize = 18.dp)
+    }
+}
+
+@Composable
+private fun GroupPickerDialog(
+    current: String?,
+    groups: List<String>,
+    onPick: (String?) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var newName by remember { mutableStateOf("") }
+    BrutalDialog(
+        title = "Group",
+        onDismiss = onDismiss,
+        confirmLabel = if (newName.isBlank()) "Done" else "Create",
+        onConfirm = { if (newName.isBlank()) onDismiss() else onPick(newName.trim()) },
+        dismissLabel = if (current != null) "Ungroup" else "Cancel",
+        onDismissAction = { if (current != null) onPick(null) else onDismiss() }
+    ) {
+        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            if (groups.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 3.dp, end = 3.dp)
+                ) {
+                    groups.forEach { g -> ContainerChip(g, null, g == current) { onPick(g) } }
+                }
+            }
+            BrutalTextField(
+                value = newName,
+                onValueChange = { newName = it.take(24) },
+                label = "New group",
+                placeholder = "Work, Trip, Recipes",
+                imeAction = androidx.compose.ui.text.input.ImeAction.Done,
+                onImeAction = { if (newName.isNotBlank()) onPick(newName.trim()) }
+            )
         }
     }
 }
@@ -279,6 +379,7 @@ private fun TabCard(
     isActive: Boolean,
     onSelect: () -> Unit,
     onClose: () -> Unit,
+    onGroup: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val host = remember(tab.url) {
@@ -325,6 +426,14 @@ private fun TabCard(
                 Text(container.displayName, color = InkBlack, fontSize = 11.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
             Spacer(Modifier.weight(1f))
+            BrutalIconButton(
+                icon = if (tab.group != null) Icons.Default.Folder else Icons.Default.CreateNewFolder,
+                contentDescription = "Group tab",
+                onClick = onGroup,
+                tint = if (tab.isPrivate || isActive || container != null) InkBlack else TextPrimary,
+                iconSize = 17.dp,
+                modifier = Modifier.size(36.dp)
+            )
             BrutalIconButton(
                 icon = Icons.Default.Close,
                 contentDescription = "Close tab",

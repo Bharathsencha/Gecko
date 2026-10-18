@@ -17,6 +17,8 @@
 
 package com.browser.adfree.ui.components
 
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.getValue
 import android.app.role.RoleManager
 import android.content.Context
 import android.content.Intent
@@ -33,8 +35,6 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,59 +50,45 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChromeReaderMode
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Cookie
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.DeleteOutline
-import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.HideSource
 import androidx.compose.material.icons.filled.HighQuality
 import androidx.compose.material.icons.filled.Https
-import androidx.compose.material.icons.filled.Image
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Layers
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.Palette
-import androidx.compose.material.icons.filled.Remove
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.SmartDisplay
 import androidx.compose.material.icons.filled.VpnLock
-import androidx.compose.material.icons.filled.ZoomIn
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -115,12 +101,8 @@ import com.browser.adfree.model.StartupBehavior
 import com.browser.adfree.model.TabModel
 import com.browser.adfree.model.VpnCountry
 import com.browser.adfree.model.DesignPresets
-import com.browser.adfree.model.WallDesign
-import com.browser.adfree.storage.AppAccentColor
-import com.browser.adfree.storage.AppThemeMode
 import com.browser.adfree.storage.BrowserPreferencesRepository
 import com.browser.adfree.storage.HistoryRepository
-import com.browser.adfree.storage.HomepageWallpaper
 import com.browser.adfree.storage.SecurePasswordRepository
 import com.browser.adfree.tabs.TabManager
 import com.browser.adfree.ui.theme.*
@@ -128,9 +110,8 @@ import com.browser.adfree.vpn.VpnManager
 import com.browser.adfree.vpn.VpnMode
 import com.browser.adfree.vpn.VpnStatus
 import org.mozilla.geckoview.GeckoRuntime
-import java.io.File
 
-private enum class SettingsScreen { MAIN, VPN, APPEARANCE, ABOUT, DESIGNER, PRIVACY_DOC, TERMS_DOC, ADVANCED }
+internal enum class SettingsScreen { MAIN, VPN, APPEARANCE, ABOUT, DESIGNER, PRIVACY_DOC, TERMS_DOC, ADVANCED, SITE_PERMISSIONS }
 
 /**
  * Settings as a full page with pushed subpages. Back (gesture, button or the
@@ -201,6 +182,7 @@ fun SettingsPage(
                 onChangePin = onChangePin,
                 onOpenTrackerReport = onOpenTrackerReport,
                 onOpenAdvanced = { screen = SettingsScreen.ADVANCED },
+                onOpenSitePermissions = { screen = SettingsScreen.SITE_PERMISSIONS },
                 onOpenClearData = onOpenClearData,
                 onClose = onClose
             )
@@ -217,6 +199,7 @@ fun SettingsPage(
                 onOpenTerms = { screen = SettingsScreen.TERMS_DOC },
                 onBack = { screen = SettingsScreen.MAIN }
             )
+            SettingsScreen.SITE_PERMISSIONS -> SitePermissionsPage(runtime) { screen = SettingsScreen.MAIN }
             SettingsScreen.ADVANCED -> AdvancedSettings(preferencesRepo, runtime) { screen = SettingsScreen.MAIN }
             SettingsScreen.PRIVACY_DOC -> LegalPage("PRIVACY.md", "Privacy policy") { screen = SettingsScreen.ABOUT }
             SettingsScreen.TERMS_DOC -> LegalPage("TERMS.md", "Terms of use") { screen = SettingsScreen.ABOUT }
@@ -251,7 +234,7 @@ fun SettingsPage(
 }
 
 @Composable
-private fun SettingsScaffold(
+internal fun SettingsScaffold(
     title: String,
     onBack: () -> Unit,
     content: @Composable () -> Unit
@@ -276,13 +259,13 @@ private fun SettingsScaffold(
 }
 
 /** Shadow colours for settings cards, cycled section by section like the reference's coloured bars. */
-private val CardShadows = listOf(
+internal val CardShadows = listOf(
     Color(0xFFFFD84D), Color(0xFF7FD8C8), Color(0xFFFFB067), Color(0xFFB49CFF), Color(0xFFFF9EC7), Color(0xFF8EC5FF)
 )
 
 /** Raised card holding a group of rows: ink outline and a coloured hard shadow. */
 @Composable
-private fun SettingsGroup(shadow: Color = CardShadows[0], content: @Composable () -> Unit) {
+internal fun SettingsGroup(shadow: Color = CardShadows[0], content: @Composable () -> Unit) {
     Column(
         Modifier
             .padding(start = 16.dp, end = 21.dp, bottom = 5.dp)
@@ -295,7 +278,7 @@ private fun SettingsGroup(shadow: Color = CardShadows[0], content: @Composable (
 }
 
 @Composable
-private fun ChoiceRow(
+internal fun ChoiceRow(
     title: String,
     selected: Boolean,
     onClick: () -> Unit,
@@ -328,7 +311,7 @@ private fun ChoiceRow(
 }
 
 @Composable
-private fun SquareRadio(selected: Boolean) {
+internal fun SquareRadio(selected: Boolean) {
     val fill by androidx.compose.animation.animateColorAsState(
         targetValue = if (selected) AccentCyan else SurfaceDark,
         animationSpec = androidx.compose.animation.core.tween(140),
@@ -355,7 +338,7 @@ private fun SquareRadio(selected: Boolean) {
 }
 
 @Composable
-private fun Chevron() {
+internal fun Chevron() {
     androidx.compose.material3.Icon(
         Icons.Default.KeyboardArrowRight,
         contentDescription = null,
@@ -365,7 +348,7 @@ private fun Chevron() {
 }
 
 @Composable
-private fun ValueChip(text: String, fill: Color = SurfaceCard, color: Color = TextPrimary) {
+internal fun ValueChip(text: String, fill: Color = SurfaceCard, color: Color = TextPrimary) {
     Box(
         modifier = Modifier
             .brutalBox(fill = fill, border = BorderSubtle, borderWidth = 1.5.dp, shape = RoundedCornerShape(4.dp))
@@ -394,6 +377,7 @@ private fun MainSettings(
     onChangePin: () -> Unit,
     onOpenTrackerReport: () -> Unit,
     onOpenAdvanced: () -> Unit,
+    onOpenSitePermissions: () -> Unit,
     onOpenClearData: () -> Unit,
     onClose: () -> Unit
 ) {
@@ -412,51 +396,6 @@ private fun MainSettings(
     }
 
     SettingsScaffold(title = "Settings", onBack = onClose) {
-        val page = activeTab?.takeIf { it.url.isNotBlank() && it.url != TabManager.HOME_URL }
-        if (page != null) {
-            BrutalSectionLabel("This page")
-            SettingsGroup(shadow = CardShadows[0]) {
-                BrutalListRow(
-                    title = "Zoom",
-                    subtitle = "${page.zoomLevel}%",
-                    icon = Icons.Default.ZoomIn,
-                    trailing = {
-                        Row {
-                            BrutalIconButton(Icons.Default.Remove, "Zoom out", { if (page.zoomLevel > 50) tabManager.setZoom(page, page.zoomLevel - 10) }, enabled = page.zoomLevel > 50)
-                            BrutalIconButton(Icons.Default.Add, "Zoom in", { if (page.zoomLevel < 200) tabManager.setZoom(page, page.zoomLevel + 10) }, enabled = page.zoomLevel < 200)
-                        }
-                    }
-                )
-                BrutalHairline(startIndent = 64.dp)
-                BrutalListRow(
-                    title = "Night mode",
-                    subtitle = "Invert this page's colours",
-                    icon = Icons.Default.DarkMode,
-                    checked = page.isDarkWeb,
-                    onCheckedChange = { tabManager.setDarkWeb(page, it) }
-                )
-                BrutalHairline(startIndent = 64.dp)
-                BrutalListRow(
-                    title = "Desktop site",
-                    icon = Icons.Default.DesktopWindows,
-                    checked = page.isDesktopMode,
-                    onCheckedChange = { tabManager.toggleDesktopMode(page) }
-                )
-                BrutalHairline(startIndent = 64.dp)
-                BrutalListRow(
-                    title = "Reader view",
-                    subtitle = if (page.isExtractingArticle) "Extracting article" else "Show the article text only",
-                    icon = Icons.Default.ChromeReaderMode,
-                    enabled = !page.isExtractingArticle,
-                    onClick = {
-                        tabManager.requestReaderMode(page)
-                        onClose()
-                    },
-                    trailing = { Chevron() }
-                )
-            }
-        }
-
         BrutalSectionLabel("Privacy")
         SettingsGroup(shadow = CardShadows[1]) {
             val status = vpnManager.status
@@ -526,11 +465,44 @@ private fun MainSettings(
             )
             BrutalHairline(startIndent = 64.dp)
             BrutalListRow(
+                title = "Site permissions",
+                subtitle = "Location, camera, microphone and notifications you allowed or blocked",
+                icon = Icons.Default.LocationOn,
+                onClick = onOpenSitePermissions,
+                trailing = {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        val n = com.browser.adfree.storage.SitePermissions.all.size
+                        if (n > 0) ValueChip("$n")
+                        Chevron()
+                    }
+                }
+            )
+            BrutalHairline(startIndent = 64.dp)
+            BrutalListRow(
                 title = "HTTPS-Only mode",
                 subtitle = "Warn before loading unencrypted pages",
                 icon = Icons.Default.Https,
                 checked = preferencesRepo.httpsOnlyMode,
                 onCheckedChange = { preferencesRepo.setHttpsOnlyModePreference(it) }
+            )
+        }
+
+        BrutalSectionLabel("Block screenshots")
+        SettingsGroup(shadow = CardShadows[3]) {
+            BrutalListRow(
+                title = "Normal tabs",
+                subtitle = "Also hides the page from screen recording and the recent-apps view",
+                icon = Icons.Default.Screenshot,
+                checked = preferencesRepo.blockScreenshots,
+                onCheckedChange = { preferencesRepo.setBlockScreenshotsPreference(it) }
+            )
+            BrutalHairline(startIndent = 64.dp)
+            BrutalListRow(
+                title = "Private tabs",
+                subtitle = "On by default",
+                icon = Icons.Default.VisibilityOff,
+                checked = preferencesRepo.blockScreenshotsPrivate,
+                onCheckedChange = { preferencesRepo.setBlockScreenshotsPrivatePreference(it) }
             )
         }
 
@@ -550,6 +522,14 @@ private fun MainSettings(
                 icon = Icons.Default.Star,
                 checked = preferencesRepo.showTrackerStats,
                 onCheckedChange = { preferencesRepo.setShowTrackerStatsPreference(it) }
+            )
+            BrutalHairline(startIndent = 64.dp)
+            BrutalListRow(
+                title = "Reset when history is cleared",
+                subtitle = "Clearing history also clears the tracker report",
+                icon = Icons.Default.History,
+                checked = preferencesRepo.resetStatsWithHistory,
+                onCheckedChange = { preferencesRepo.setResetStatsWithHistoryPreference(it) }
             )
         }
 
@@ -633,6 +613,7 @@ private fun MainSettings(
                 checked = preferencesRepo.videoDownloaderEnabled,
                 onCheckedChange = { preferencesRepo.setVideoDownloaderEnabledPreference(it) }
             )
+            if (preferencesRepo.videoDownloaderEnabled) {
             BrutalHairline(startIndent = 64.dp)
             BrutalListRow(
                 title = "Prefer AV1",
@@ -648,6 +629,7 @@ private fun MainSettings(
                 checked = preferencesRepo.showWebmFormats,
                 onCheckedChange = { preferencesRepo.setShowWebmFormatsPreference(it) }
             )
+            }
         }
 
         BrutalSectionLabel("Passwords")
@@ -797,610 +779,6 @@ private fun MainSettings(
 
 // ------------------------------------------------------------------ VPN
 
-@Composable
-private fun VpnSettings(vpnManager: VpnManager, onBack: () -> Unit) {
-    var mode by rememberSaveable { mutableStateOf(vpnManager.lastMode) }
-    val status = vpnManager.status
-    val activeMode = when (status) {
-        is VpnStatus.Connected -> status.mode
-        is VpnStatus.Connecting -> status.mode
-        is VpnStatus.Failed -> status.mode
-        VpnStatus.Off -> null
-    }
-
-    fun connect(country: String) {
-        if (mode == VpnMode.TOR) vpnManager.connectTor(country) else vpnManager.connectProxy(country)
-    }
-
-    val selectedCountry = if (mode == VpnMode.TOR) vpnManager.torExitCountry else vpnManager.proxyCountry
-
-    SettingsScaffold(title = "VPN", onBack = onBack) {
-        // Status panel
-        Column(
-            modifier = Modifier
-                .padding(start = 16.dp, end = 20.dp, top = 16.dp, bottom = 4.dp)
-                .fillMaxWidth()
-                .brutalBox(
-                    fill = if (status is VpnStatus.Connected) AccentCyan else SurfaceDark,
-                    border = BorderSubtle,
-                    shadow = HardShadow
-                )
-                .padding(16.dp)
-        ) {
-            val onPanel = if (status is VpnStatus.Connected) OnAccent else TextPrimary
-            val onPanelSecondary = if (status is VpnStatus.Connected) OnAccent.copy(alpha = 0.75f) else TextSecondary
-            Text(
-                text = when (status) {
-                    VpnStatus.Off -> "Not connected"
-                    is VpnStatus.Connecting -> "Connecting"
-                    is VpnStatus.Connected -> "Connected"
-                    is VpnStatus.Failed -> "Connection failed"
-                },
-                color = onPanel,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.Bold
-            )
-            Spacer(Modifier.height(4.dp))
-            when (status) {
-                VpnStatus.Off -> Text("Your real IP address is visible to sites.", color = onPanelSecondary, fontSize = 13.sp)
-                is VpnStatus.Connecting -> {
-                    Text(status.message, color = onPanelSecondary, fontSize = 13.sp)
-                    Spacer(Modifier.height(10.dp))
-                    BrutalProgressLine(progress = status.percent?.let { it / 100f })
-                }
-                is VpnStatus.Connected -> {
-                    Text(
-                        "Via ${if (status.mode == VpnMode.TOR) "Tor" else "free relay"}, exit in ${VpnCountry.nameFor(status.exitCountry)}",
-                        color = onPanelSecondary,
-                        fontSize = 13.sp
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        "Exit IP ${status.exitIp}" + (status.latencyMs?.let { "  |  ${it} ms" } ?: ""),
-                        color = onPanel,
-                        fontSize = 13.sp,
-                        fontFamily = FontFamily.Monospace
-                    )
-                }
-                is VpnStatus.Failed -> Text(status.reason, color = onPanelSecondary, fontSize = 13.sp)
-            }
-            Spacer(Modifier.height(14.dp))
-            when (status) {
-                VpnStatus.Off -> BrutalButton(
-                    text = if (mode == VpnMode.TOR) "Connect to Tor" else "Connect to free relay",
-                    onClick = { connect(selectedCountry) },
-                    modifier = Modifier.fillMaxWidth()
-                )
-                is VpnStatus.Connecting -> BrutalOutlineButton("Cancel", { vpnManager.disconnect() }, Modifier.fillMaxWidth())
-                is VpnStatus.Connected -> BrutalOutlineButton("Disconnect", { vpnManager.disconnect() }, Modifier.fillMaxWidth())
-                is VpnStatus.Failed -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    BrutalButton("Retry", { connect(selectedCountry) }, Modifier.weight(1f))
-                    BrutalOutlineButton("Turn off", { vpnManager.disconnect() }, Modifier.weight(1f))
-                }
-            }
-        }
-
-        BrutalSectionLabel("Network")
-        SettingsGroup(shadow = CardShadows[5]) {
-            ChoiceRow(
-                title = "Tor",
-                subtitle = "Three encrypted hops, strongest anonymity. Pages load slower and some sites show captchas.",
-                selected = mode == VpnMode.TOR,
-                onClick = { mode = VpnMode.TOR }
-            )
-            BrutalHairline(startIndent = 16.dp)
-            ChoiceRow(
-                title = "Free relay",
-                subtitle = "Public SOCKS5 relay, found and tested when you connect. Faster, but its operator can see traffic to non-HTTPS sites.",
-                selected = mode == VpnMode.PROXY,
-                onClick = { mode = VpnMode.PROXY }
-            )
-        }
-
-        BrutalSectionLabel(if (mode == VpnMode.TOR) "Exit country" else "Relay country")
-        SettingsGroup(shadow = CardShadows[0]) {
-            val options = buildList {
-                if (mode == VpnMode.TOR) add(VpnCountry("", "Any country (fastest)"))
-                addAll(VpnCountry.COUNTRIES)
-            }
-            options.forEachIndexed { index, country ->
-                if (index > 0) BrutalHairline(startIndent = 16.dp)
-                ChoiceRow(
-                    title = country.name,
-                    selected = selectedCountry.equals(country.code, ignoreCase = true) &&
-                        (mode == VpnMode.TOR || country.code.isNotBlank()),
-                    onClick = {
-                        // Picking a country connects (or reconnects) right away.
-                        connect(country.code)
-                    },
-                    leading = {
-                        Box(
-                            modifier = Modifier
-                                .size(width = 40.dp, height = 28.dp)
-                                .brutalBox(fill = SurfaceCard, border = BorderSubtle, borderWidth = 1.5.dp, shape = RoundedCornerShape(4.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                country.code.ifBlank { "ANY" },
-                                color = TextPrimary,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold,
-                                fontFamily = FontFamily.Monospace
-                            )
-                        }
-                    }
-                )
-            }
-        }
-        if (activeMode != null && activeMode != mode) {
-            Text(
-                "Picking a country switches the connection to ${if (mode == VpnMode.TOR) "Tor" else "a free relay"}.",
-                color = TextSecondary,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(16.dp)
-            )
-        }
-    }
-}
-
-
-@Composable
-private fun AdvancedSettings(preferencesRepo: BrowserPreferencesRepository, runtime: GeckoRuntime, onBack: () -> Unit) {
-    SettingsScaffold(title = "Advanced", onBack = onBack) {
-        Text(
-            "Encrypted DNS hides the names of the sites you open from your mobile network or Wi-Fi. Pick who resolves them; the default works for most people.",
-            color = TextSecondary,
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 16.dp)
-        )
-        BrutalSectionLabel("Encrypted DNS")
-        SettingsGroup(shadow = CardShadows[1]) {
-            com.browser.adfree.storage.DnsProvider.values().forEachIndexed { index, provider ->
-                if (index > 0) BrutalHairline(startIndent = 16.dp)
-                ChoiceRow(
-                    title = provider.displayName,
-                    subtitle = provider.detail,
-                    selected = preferencesRepo.dnsProvider == provider,
-                    onClick = {
-                        preferencesRepo.setDnsPreference(provider, preferencesRepo.dnsStrict)
-                        applyDns(runtime, preferencesRepo)
-                    }
-                )
-            }
-            if (preferencesRepo.dnsProvider != com.browser.adfree.storage.DnsProvider.OFF) {
-                BrutalHairline(startIndent = 16.dp)
-                BrutalListRow(
-                    title = "Encrypted DNS only",
-                    subtitle = "Never fall back to your network's DNS. Some public Wi-Fi blocks this and pages will not load.",
-                    checked = preferencesRepo.dnsStrict,
-                    onCheckedChange = {
-                        preferencesRepo.setDnsPreference(preferencesRepo.dnsProvider, it)
-                        applyDns(runtime, preferencesRepo)
-                    }
-                )
-            }
-        }
-
-    }
-}
-
-// ------------------------------------------------------------------ About
-
-private data class Credit(val name: String, val role: String, val license: String, val url: String)
-
-private val CREDITS = listOf(
-    Credit("Mozilla GeckoView", "Web engine", "MPL 2.0", "https://mozilla.github.io/geckoview/"),
-    Credit("uBlock Origin", "Ad and tracker blocking", "GPL 3.0", "https://github.com/gorhill/uBlock"),
-    Credit("Tor", "Anonymous network for the VPN", "BSD 3-Clause", "https://www.torproject.org/"),
-    Credit("tor-android", "Tor packaging for Android (Guardian Project)", "BSD 3-Clause", "https://github.com/guardianproject/tor-android"),
-    Credit("jtorctl", "Tor control protocol", "BSD 3-Clause", "https://github.com/guardianproject/jtorctl"),
-    Credit("yt-dlp", "Video and audio extraction", "Unlicense", "https://github.com/yt-dlp/yt-dlp"),
-    Credit("youtubedl-android", "yt-dlp runtime for Android", "GPL 3.0", "https://github.com/JunkFood02/youtubedl-android"),
-    Credit("NewPipe Extractor", "Stream extraction", "GPL 3.0", "https://github.com/TeamNewPipe/NewPipeExtractor"),
-    Credit("OkHttp", "Native HTTP client", "Apache 2.0", "https://square.github.io/okhttp/"),
-    Credit("Coil", "Image loading", "Apache 2.0", "https://coil-kt.github.io/coil/"),
-    Credit("SnakeYAML", "Engine configuration parsing", "Apache 2.0", "https://bitbucket.org/snakeyaml/snakeyaml"),
-    Credit("Jetpack Compose and AndroidX", "User interface", "Apache 2.0", "https://developer.android.com/jetpack"),
-    Credit("Material Icons", "Icons", "Apache 2.0", "https://fonts.google.com/icons"),
-    Credit("Space Grotesk", "Typeface (Florian Karsten)", "SIL OFL 1.1", "https://github.com/floriankarsten/space-grotesk")
-)
-
-/** Projects whose ideas or approach Gecko follows, without copying their code. */
-private val INSPIRATIONS = listOf(
-    Credit("DuckDuckGo Fire Button", "Idea of a one-tap clear button with a fire animation", "Idea", "https://duckduckgo.com/duckduckgo-help-pages/privacy/fire-button/"),
-    Credit("Firefox private browsing", "Mask icon for private mode", "Idea", "https://support.mozilla.org/kb/private-browsing-firefox-android"),
-    Credit("Brave Shields", "Per-site protection panel", "Idea", "https://brave.com/shields/"),
-    Credit("Cat-Catch", "Approach for detecting media on pages", "Idea", "https://github.com/xifangczy/cat-catch"),
-    Credit("Mozilla Readability", "Approach for reader view", "Idea", "https://github.com/mozilla/readability"),
-    Credit("Tor Browser", "Uniform anti-fingerprinting settings", "Idea", "https://support.torproject.org/glossary/fingerprinting/"),
-    Credit("EasyList, AdGuard, Firebog, d3ward", "Sources for the built-in blocklist", "Lists", "https://easylist.to/")
-)
-
-@Composable
-private fun AboutSettings(onOpenUrl: (String) -> Unit, onOpenPrivacy: () -> Unit, onOpenTerms: () -> Unit, onBack: () -> Unit) {
-    SettingsScaffold(title = "About", onBack = onBack) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 4.dp)
-        ) {
-            androidx.compose.foundation.Image(
-                painter = androidx.compose.ui.res.painterResource(com.browser.adfree.R.drawable.gecko_logo),
-                contentDescription = null,
-                modifier = Modifier.size(56.dp)
-            )
-            Spacer(Modifier.width(14.dp))
-            Column {
-                Text("Gecko", color = TextPrimary, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                Text("Version ${BuildConfig.VERSION_NAME}", color = TextSecondary, fontSize = 13.sp)
-            }
-        }
-        Text(
-            "Gecko is free software: you can redistribute it and modify it under the terms of the " +
-                "GNU General Public License, version 3 or later. It comes with no warranty.",
-            color = TextSecondary,
-            fontSize = 13.sp,
-            lineHeight = 18.sp,
-            modifier = Modifier.padding(16.dp)
-        )
-        SettingsGroup(shadow = CardShadows[1]) {
-            BrutalListRow(
-                title = "Source code",
-                subtitle = "github.com/Bharathsencha/Gecko",
-                onClick = { onOpenUrl("https://github.com/Bharathsencha/Gecko") },
-                trailing = { Chevron() }
-            )
-            BrutalHairline(startIndent = 16.dp)
-            BrutalListRow(
-                title = "Privacy policy",
-                subtitle = "What Gecko stores and what it sends",
-                onClick = onOpenPrivacy,
-                trailing = { Chevron() }
-            )
-            BrutalHairline(startIndent = 16.dp)
-            BrutalListRow(
-                title = "Terms of use",
-                onClick = onOpenTerms,
-                trailing = { Chevron() }
-            )
-            BrutalHairline(startIndent = 16.dp)
-            BrutalListRow(
-                title = "GNU General Public License v3",
-                onClick = { onOpenUrl("https://www.gnu.org/licenses/gpl-3.0.html") },
-                trailing = { Chevron() }
-            )
-        }
-
-        BrutalSectionLabel("Built with")
-        SettingsGroup(shadow = CardShadows[2]) {
-            CREDITS.forEachIndexed { index, credit ->
-                if (index > 0) BrutalHairline(startIndent = 16.dp)
-                BrutalListRow(
-                    title = credit.name,
-                    subtitle = credit.role,
-                    onClick = { onOpenUrl(credit.url) },
-                    trailing = { ValueChip(credit.license) }
-                )
-            }
-        }
-        BrutalSectionLabel("Ideas from")
-        SettingsGroup(shadow = CardShadows[2]) {
-            INSPIRATIONS.forEachIndexed { index, credit ->
-                if (index > 0) BrutalHairline(startIndent = 16.dp)
-                BrutalListRow(
-                    title = credit.name,
-                    subtitle = credit.role,
-                    onClick = { onOpenUrl(credit.url) },
-                    trailing = { ValueChip(credit.license) }
-                )
-            }
-        }
-        Text(
-            "Gecko is not affiliated with Mozilla, the Tor Project or any project listed here. " +
-                "Firefox, Tor, Brave and DuckDuckGo are trademarks of their owners.",
-            color = TextSecondary,
-            fontSize = 12.sp,
-            lineHeight = 16.sp,
-            modifier = Modifier.padding(16.dp)
-        )
-    }
-}
-
-// ------------------------------------------------------------------ Appearance
-
-@Composable
-private fun AppearanceSettings(preferencesRepo: BrowserPreferencesRepository, onOpenDesigner: (String?) -> Unit, onBack: () -> Unit) {
-    val context = LocalContext.current
-    val photoPicker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) {
-            val saved = saveCustomWallpaper(context, uri)
-            if (!saved.isNullOrBlank()) preferencesRepo.setHomepageWallpaperPreference(HomepageWallpaper.CUSTOM, saved)
-        }
-    }
-
-    SettingsScaffold(title = "Theme and layout", onBack = onBack) {
-        BrutalSectionLabel("Theme")
-        SettingsGroup(shadow = CardShadows[3]) {
-            AppThemeMode.values().forEachIndexed { index, mode ->
-                if (index > 0) BrutalHairline(startIndent = 16.dp)
-                ChoiceRow(
-                    title = mode.displayName,
-                    subtitle = if (mode == AppThemeMode.SYSTEM) "Follow the phone's dark theme setting" else null,
-                    selected = preferencesRepo.themeMode == mode,
-                    onClick = { preferencesRepo.setThemeModePreference(mode) }
-                )
-            }
-        }
-
-        BrutalSectionLabel("Accent colour")
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(10.dp)
-        ) {
-            AppAccentColor.values().forEach { accent ->
-                val selected = preferencesRepo.accentColor == accent
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(48.dp)
-                        .brutalPressable(
-                            fill = Color(accent.hex),
-                            border = BorderSubtle,
-                            shadow = HardShadow,
-                            shadowOffset = if (selected) 0.dp else 3.dp,
-                            role = Role.RadioButton,
-                            onClick = { preferencesRepo.setAccentColorPreference(accent) }
-                        ),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (selected) {
-                        androidx.compose.material3.Icon(Icons.Default.Check, contentDescription = accent.displayName, tint = InkBlack, modifier = Modifier.size(20.dp))
-                    }
-                }
-            }
-        }
-
-        BrutalSectionLabel("Address bar")
-        SettingsGroup(shadow = CardShadows[4]) {
-            ChoiceRow(
-                title = "Top",
-                selected = !preferencesRepo.bottomAddressBar,
-                onClick = { preferencesRepo.setBottomAddressBarPreference(false) }
-            )
-            BrutalHairline(startIndent = 16.dp)
-            ChoiceRow(
-                title = "Bottom",
-                subtitle = "Above the toolbar, within thumb reach",
-                selected = preferencesRepo.bottomAddressBar,
-                onClick = { preferencesRepo.setBottomAddressBarPreference(true) }
-            )
-        }
-
-        BrutalSectionLabel("Start page")
-        SettingsGroup(shadow = CardShadows[5]) {
-            BrutalListRow(
-                title = "Show favourites",
-                icon = Icons.Default.Star,
-                checked = preferencesRepo.showFavoritesGrid,
-                onCheckedChange = { preferencesRepo.setShowFavoritesGridPreference(it) }
-            )
-            if (preferencesRepo.showFavoritesGrid) {
-                BrutalHairline(startIndent = 64.dp)
-                BrutalListRow(
-                    title = "Favourites per row",
-                    subtitle = "${preferencesRepo.favoritesGridColumns}",
-                    icon = Icons.Default.GridView,
-                    trailing = {
-                        Row {
-                            BrutalIconButton(Icons.Default.Remove, "Fewer", { preferencesRepo.setFavoritesGridColumnsPreference(preferencesRepo.favoritesGridColumns - 1) }, enabled = preferencesRepo.favoritesGridColumns > 3)
-                            BrutalIconButton(Icons.Default.Add, "More", { preferencesRepo.setFavoritesGridColumnsPreference(preferencesRepo.favoritesGridColumns + 1) }, enabled = preferencesRepo.favoritesGridColumns < 5)
-                        }
-                    }
-                )
-            }
-            BrutalHairline(startIndent = 64.dp)
-            Text(
-                "Background",
-                color = TextPrimary,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.padding(start = 16.dp, top = 14.dp, bottom = 10.dp)
-            )
-            WallpaperGrid(
-                preferencesRepo = preferencesRepo,
-                onPhoto = { photoPicker.launch("image/*") },
-                onNewDesign = { onOpenDesigner(null) },
-                onEditDesign = { id -> onOpenDesigner(id) }
-            )
-            val active = preferencesRepo.customDesigns.firstOrNull { it.id == preferencesRepo.selectedDesignId }
-            if (preferencesRepo.homepageWallpaper == HomepageWallpaper.DESIGN && active != null) {
-                BrutalHairline(startIndent = 64.dp)
-                BrutalListRow(
-                    title = "Edit \"${active.name}\"",
-                    subtitle = "Change shapes and colours, rename or delete",
-                    icon = Icons.Default.Palette,
-                    onClick = { onOpenDesigner(active.id) },
-                    trailing = { Chevron() }
-                )
-            }
-            if (preferencesRepo.homepageWallpaper == HomepageWallpaper.CUSTOM || wallpaperBrush(preferencesRepo.homepageWallpaper) != null) {
-                BrutalHairline(startIndent = 16.dp)
-                LabeledSlider("Dim", preferencesRepo.wallpaperDim, 0f..0.8f) { preferencesRepo.setWallpaperDimPreference(it) }
-                if (preferencesRepo.homepageWallpaper == HomepageWallpaper.CUSTOM) {
-                    LabeledSlider("Blur", preferencesRepo.wallpaperBlur, 0f..25f) { preferencesRepo.setWallpaperBlurPreference(it) }
-                }
-            }
-        }
-    }
-}
-
-/**
- * Background tiles: block presets, the user's own designs and a "+" tile to
- * make another, then patterns, pastels, gradients and a photo.
- */
-@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class, androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun WallpaperGrid(
-    preferencesRepo: BrowserPreferencesRepository,
-    onPhoto: () -> Unit,
-    onNewDesign: () -> Unit,
-    onEditDesign: (String) -> Unit
-) {
-    val selected = preferencesRepo.homepageWallpaper
-    // Kinds are kept apart (no headings): blocks and own designs, patterns,
-    // flat colours, gradients, photo.
-    val groups = listOf(
-        listOf(HomepageWallpaper.BLOCKS, HomepageWallpaper.STACK, HomepageWallpaper.SHAPES, HomepageWallpaper.MONDRIAN, HomepageWallpaper.DESIGN),
-        listOf(HomepageWallpaper.DOTS, HomepageWallpaper.GRID, HomepageWallpaper.STRIPES, HomepageWallpaper.CHECKER),
-        listOf(HomepageWallpaper.DEFAULT, HomepageWallpaper.BUTTER, HomepageWallpaper.PEACH, HomepageWallpaper.MINT, HomepageWallpaper.LAVENDER),
-        listOf(HomepageWallpaper.AURORA, HomepageWallpaper.NEBULA, HomepageWallpaper.CYBER, HomepageWallpaper.OLED, HomepageWallpaper.FOREST, HomepageWallpaper.SUNSET),
-        listOf(HomepageWallpaper.CUSTOM)
-    )
-    androidx.compose.foundation.layout.BoxWithConstraints(
-        Modifier
-            .fillMaxWidth()
-            .padding(start = 16.dp, end = 19.dp, bottom = 16.dp)
-    ) {
-        val tileWidth = (maxWidth - 12.dp * 3) / 4
-        Column {
-            groups.forEachIndexed { index, group ->
-                if (index > 0) {
-                    Spacer(Modifier.height(16.dp))
-                    BrutalHairline()
-                    Spacer(Modifier.height(16.dp))
-                }
-                androidx.compose.foundation.layout.FlowRow(
-                    maxItemsInEachRow = 4,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(14.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    group.forEach { wp ->
-                        if (wp == HomepageWallpaper.DESIGN) {
-                            preferencesRepo.customDesigns.forEach { saved ->
-                                WallpaperTile(
-                                    width = tileWidth,
-                                    label = saved.name,
-                                    selected = selected == HomepageWallpaper.DESIGN && preferencesRepo.selectedDesignId == saved.id,
-                                    onClick = { preferencesRepo.selectDesign(saved.id) },
-                                    onLongClick = { onEditDesign(saved.id) }
-                                ) { mod -> DesignCanvas(saved.design, mod) }
-                            }
-                            WallpaperTile(width = tileWidth, label = "New design", selected = false, onClick = onNewDesign) { _ ->
-                                androidx.compose.material3.Icon(Icons.Default.Add, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(26.dp))
-                            }
-                        } else {
-                            WallpaperTile(
-                                width = tileWidth,
-                                label = wp.displayName,
-                                selected = wp == selected,
-                                onClick = { if (wp == HomepageWallpaper.CUSTOM) onPhoto() else preferencesRepo.setHomepageWallpaperPreference(wp) }
-                            ) { mod ->
-                                if (wp == HomepageWallpaper.CUSTOM) {
-                                    androidx.compose.material3.Icon(Icons.Default.Image, contentDescription = null, tint = TextPrimary, modifier = Modifier.size(22.dp))
-                                } else {
-                                    WallpaperBackground(wallpaper = wp, modifier = mod)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
-@Composable
-private fun WallpaperTile(
-    width: androidx.compose.ui.unit.Dp,
-    label: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
-    preview: @Composable (Modifier) -> Unit
-) {
-    val view = androidx.compose.ui.platform.LocalView.current
-    Column(
-        horizontalAlignment = Alignment.CenterHorizontally,
-        modifier = Modifier.width(width)
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(64.dp)
-                .brutalBox(fill = SurfaceCard, border = BorderSubtle, shadow = if (selected) null else HardShadow, shadowOffset = 3.dp)
-                .combinedClickable(
-                    role = Role.RadioButton,
-                    onClick = {
-                        view.performHapticFeedback(android.view.HapticFeedbackConstants.CLOCK_TICK)
-                        onClick()
-                    },
-                    onLongClick = onLongClick?.let { l ->
-                        {
-                            view.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                            l()
-                        }
-                    }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            preview(
-                Modifier
-                    .matchParentSize()
-                    .padding(2.dp)
-                    .clip(RoundedCornerShape(4.dp))
-            )
-            if (selected) {
-                Box(
-                    Modifier
-                        .size(26.dp)
-                        .brutalBox(fill = AccentCyan, border = BorderSubtle, shape = RoundedCornerShape(4.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    androidx.compose.material3.Icon(Icons.Default.Check, contentDescription = null, tint = OnAccent, modifier = Modifier.size(18.dp))
-                }
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-        Text(
-            label,
-            color = if (selected) TextPrimary else TextSecondary,
-            fontSize = 11.5.sp,
-            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            maxLines = 1,
-            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-        )
-    }
-}
-
-@Composable
-private fun LabeledSlider(label: String, value: Float, range: ClosedFloatingPointRange<Float>, onChange: (Float) -> Unit) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Text(label, color = TextPrimary, fontSize = 14.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(56.dp))
-        Slider(
-            value = value,
-            onValueChange = onChange,
-            valueRange = range,
-            colors = SliderDefaults.colors(
-                thumbColor = BorderSubtle,
-                activeTrackColor = BorderSubtle,
-                inactiveTrackColor = SurfaceCard
-            ),
-            modifier = Modifier.weight(1f)
-        )
-    }
-}
-
-// ------------------------------------------------------------------ Helpers
-
 fun isAppDefaultBrowser(context: Context): Boolean {
     val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://www.example.com"))
     val resolveInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1440,148 +818,5 @@ fun requestSetDefaultBrowser(context: Context, launcher: ActivityResultLauncher<
     }
 }
 
-fun saveCustomWallpaper(context: Context, uri: Uri): String? {
-    return try {
-        val mimeType = context.contentResolver.getType(uri) ?: "image/jpeg"
-        val ext = when {
-            mimeType.contains("gif") -> "gif"
-            mimeType.contains("png") -> "png"
-            mimeType.contains("webp") -> "webp"
-            else -> "jpg"
-        }
-        val destinationFile = File(context.filesDir, "custom_wallpaper.$ext")
-        context.contentResolver.openInputStream(uri)?.use { input ->
-            destinationFile.outputStream().use { output -> input.copyTo(output) }
-        }
-        destinationFile.absolutePath
-    } catch (e: Exception) {
-        null
-    }
-}
-
 /** Tracker stats for Settings, provided by the main screen. */
 val LocalTrackerStats = androidx.compose.runtime.staticCompositionLocalOf<com.browser.adfree.storage.TrackerStatsRepository?> { null }
-
-/** Applies the chosen DNS-over-HTTPS resolver to the running engine. */
-fun applyDns(runtime: GeckoRuntime, prefs: BrowserPreferencesRepository) {
-    val provider = prefs.dnsProvider
-    try {
-        if (provider == com.browser.adfree.storage.DnsProvider.OFF) {
-            runtime.settings.setTrustedRecursiveResolverMode(org.mozilla.geckoview.GeckoRuntimeSettings.TRR_MODE_OFF)
-        } else {
-            runtime.settings.setTrustedRecursiveResolverUri(provider.url)
-            runtime.settings.setTrustedRecursiveResolverMode(
-                if (prefs.dnsStrict) org.mozilla.geckoview.GeckoRuntimeSettings.TRR_MODE_ONLY
-                else org.mozilla.geckoview.GeckoRuntimeSettings.TRR_MODE_FIRST
-            )
-        }
-    } catch (e: Exception) {
-        Log.w("Settings", "Encrypted DNS not applied: ${e.message}")
-    }
-}
-
-/** User-created containers: add, rename, recolour, clear data, delete. */
-@Composable
-private fun ContainersSection(runtime: GeckoRuntime) {
-    val context = LocalContext.current
-    var editing by remember { mutableStateOf<com.browser.adfree.model.TabContainer?>(null) }
-    var creating by remember { mutableStateOf(false) }
-    val containers = com.browser.adfree.model.TabContainer.all
-
-    SettingsGroup(shadow = CardShadows[3]) {
-        Text(
-            "A container keeps its own cookies and site data, so sites in one cannot recognise you in another. Make one for work, shopping or anything else, then pick it when you open a new tab.",
-            color = TextSecondary,
-            fontSize = 12.5.sp,
-            lineHeight = 17.sp,
-            modifier = Modifier.padding(16.dp)
-        )
-        containers.forEach { container ->
-            BrutalHairline(startIndent = 16.dp)
-            BrutalListRow(
-                title = container.displayName,
-                subtitle = "Tap to rename, recolour or delete",
-                icon = Icons.Default.Layers,
-                iconFill = Color(container.color),
-                onClick = { editing = container },
-                trailing = {
-                    Text(
-                        "Clear",
-                        color = DangerRed,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier
-                            .brutalTap {
-                                runtime.storageController.clearDataForSessionContext(container.id)
-                                android.widget.Toast.makeText(context, "${container.displayName} data cleared", android.widget.Toast.LENGTH_SHORT).show()
-                            }
-                            .padding(horizontal = 12.dp, vertical = 12.dp)
-                    )
-                }
-            )
-        }
-        BrutalHairline(startIndent = 16.dp)
-        BrutalListRow(
-            title = "New container",
-            icon = Icons.Default.Add,
-            onClick = { creating = true },
-            trailing = { Chevron() }
-        )
-    }
-
-    if (creating || editing != null) {
-        val current = editing
-        var name by remember(current) { mutableStateOf(current?.displayName ?: "") }
-        var color by remember(current) { mutableStateOf(current?.color ?: com.browser.adfree.model.TabContainer.PALETTE[com.browser.adfree.model.TabContainer.all.size % com.browser.adfree.model.TabContainer.PALETTE.size]) }
-        val close = { creating = false; editing = null }
-        BrutalDialog(
-            title = if (current == null) "New container" else "Edit container",
-            onDismiss = close,
-            confirmLabel = "Save",
-            onConfirm = {
-                val clean = name.trim()
-                if (clean.isNotEmpty()) {
-                    if (current == null) com.browser.adfree.model.TabContainer.add(clean, color)
-                    else com.browser.adfree.model.TabContainer.update(current.copy(displayName = clean.take(24), color = color))
-                    close()
-                }
-            },
-            dismissLabel = if (current == null) "Cancel" else "Delete",
-            onDismissAction = if (current == null) close else {
-                {
-                    runtime.storageController.clearDataForSessionContext(current.id)
-                    com.browser.adfree.model.TabContainer.remove(current.id)
-                    close()
-                }
-            }
-        ) {
-            BrutalTextField(value = name, onValueChange = { name = it.take(24) }, label = "Name", placeholder = "Work, Shopping, Gaming...")
-            Spacer(Modifier.height(14.dp))
-            Text("Colour", color = TextPrimary, fontSize = 13.sp, fontWeight = FontWeight.Bold)
-            Spacer(Modifier.height(8.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                com.browser.adfree.model.TabContainer.PALETTE.forEach { c ->
-                    Box(
-                        modifier = Modifier
-                            .size(30.dp)
-                            .brutalPressable(
-                                fill = Color(c),
-                                border = BorderSubtle,
-                                shadow = HardShadow,
-                                shadowOffset = if (c == color) 0.dp else 2.dp,
-                                role = Role.RadioButton,
-                                onClick = { color = c }
-                            ),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (c == color) androidx.compose.material3.Icon(Icons.Default.Check, contentDescription = null, tint = InkBlack, modifier = Modifier.size(16.dp))
-                    }
-                }
-            }
-            if (current != null) {
-                Spacer(Modifier.height(10.dp))
-                Text("Deleting also erases this container's cookies and site data. Open tabs in it keep working until closed.", color = TextSecondary, fontSize = 12.sp, lineHeight = 16.sp)
-            }
-        }
-    }
-}

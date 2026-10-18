@@ -156,14 +156,18 @@ fun BrowserMainScreen(
         if (showVideoDownloadSheet) activeTab?.let { tabManager.checkForVideos(it, it.url, onDemand = true) }
     }
 
-    // Private tabs: no screenshots, screen recording or recent-apps preview.
+    // No screenshots, screen recording or recent-apps preview: private tabs by
+    // default, normal tabs when the user asks for it.
     val isPrivateActive = activeTab?.isPrivate == true
-    DisposableEffect(isPrivateActive) {
+    val secure = if (isPrivateActive) preferencesRepo.blockScreenshotsPrivate else preferencesRepo.blockScreenshots
+    DisposableEffect(secure) {
         val window = (context as? android.app.Activity)?.window
-        if (isPrivateActive) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        if (secure) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         else window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { }
     }
+
+    var contextMenu by remember { mutableStateOf<Pair<com.browser.adfree.model.TabModel, org.mozilla.geckoview.GeckoSession.ContentDelegate.ContextElement>?>(null) }
 
     // Set up insecure HTTP warning prompt listener
     LaunchedEffect(tabManager) {
@@ -171,6 +175,7 @@ fun BrowserMainScreen(
             android.widget.Toast.makeText(context, "No readable article on this page", android.widget.Toast.LENGTH_SHORT).show()
         }
         tabManager.preferencesRepository = preferencesRepo
+        tabManager.onContextMenu = { tab, element -> contextMenu = tab to element }
         tabManager.onInsecureHttpPrompt = { url, proceedCallback ->
             pendingInsecureHttpUrl = url
             pendingInsecureProceedCallback = proceedCallback
@@ -298,6 +303,8 @@ fun BrowserMainScreen(
                             },
                             trackerStats = trackerStats,
                             onOpenTrackerReport = { showTrackerReport = true },
+                            privateTabCount = tabManager.tabs.count { it.isPrivate },
+                            onClosePrivateTabs = { tabManager.closePrivateTabs(runtime) },
                             onSwitchToNormal = {
                                 val normalIndex = tabManager.tabs.indexOfFirst { !it.isPrivate }
                                 if (normalIndex != -1) {
@@ -591,6 +598,8 @@ fun BrowserMainScreen(
                     tabManager.closePrivateTabs(runtime)
                     showTabSwitcher = false
                 },
+                onSetGroup = { tab, group -> tabManager.setGroup(tab, group) },
+                onCloseGroup = { group -> tabManager.closeGroup(group, runtime) },
                 onDismissRequest = { showTabSwitcher = false }
             )
         }
@@ -653,6 +662,16 @@ fun BrowserMainScreen(
                     shieldsRepo.setShieldsForUrl(activeTab.url, desktopModeEnabled = newDesktop)
                     tabManager.toggleDesktopMode(activeTab)
                 },
+                onZoom = { tabManager.setZoom(activeTab, it.coerceIn(50, 200)) },
+                onReader = {
+                    tabManager.requestReaderMode(activeTab)
+                    showShieldsSheet = false
+                },
+                onSetPermission = { p, allowed ->
+                    com.browser.adfree.storage.SitePermissions.set(
+                        com.browser.adfree.storage.SitePermissions.hostOf(activeTab.url), p, allowed, activeTab.isPrivate, runtime
+                    )
+                },
                 onDismissRequest = { showShieldsSheet = false }
             )
         }
@@ -672,6 +691,41 @@ fun BrowserMainScreen(
                     .navigationBarsPadding()
                     .padding(bottom = 72.dp, end = 16.dp)
             )
+        }
+
+        contextMenu?.let { (tab, element) ->
+            val clipboard = androidx.compose.ui.platform.LocalClipboardManager.current
+            ContextMenuSheet(
+                element = element,
+                isPrivate = tab.isPrivate,
+                onAction = { action ->
+                    val link = element.linkUri.orEmpty()
+                    val src = element.srcUri.orEmpty()
+                    when (action) {
+                        ContextAction.OPEN_TAB -> {
+                            tabManager.createNewTab(runtime, link, container = tab.container, select = false).also { tabManager.setGroup(it, tab.group) }
+                            android.widget.Toast.makeText(context, "Opened in a new tab", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        ContextAction.OPEN_PRIVATE -> tabManager.createNewTab(runtime, link, isPrivate = true, select = tab.isPrivate.not()).also {
+                            if (tab.isPrivate) android.widget.Toast.makeText(context, "Opened in a new private tab", android.widget.Toast.LENGTH_SHORT).show()
+                        }
+                        ContextAction.COPY_LINK -> clipboard.setText(androidx.compose.ui.text.AnnotatedString(link))
+                        ContextAction.SHARE_LINK -> shareUrl(context, element.linkText ?: link, link)
+                        ContextAction.DOWNLOAD_LINK -> tabManager.downloadUrl(tab, link, runtime)
+                        ContextAction.OPEN_IMAGE -> tabManager.createNewTab(runtime, src, isPrivate = tab.isPrivate, container = tab.container)
+                        ContextAction.DOWNLOAD_MEDIA -> tabManager.downloadUrl(tab, src, runtime)
+                        ContextAction.COPY_MEDIA -> clipboard.setText(androidx.compose.ui.text.AnnotatedString(src))
+                        ContextAction.SHARE_MEDIA -> shareUrl(context, element.title ?: src, src)
+                    }
+                },
+                onDismiss = { contextMenu = null }
+            )
+        }
+
+        com.browser.adfree.storage.SitePermissions.pending.firstOrNull()?.let { ask ->
+            androidx.compose.runtime.key(ask) {
+                PermissionPrompt(ask) { com.browser.adfree.storage.SitePermissions.pending.remove(ask) }
+            }
         }
 
         FireBurnOverlay(

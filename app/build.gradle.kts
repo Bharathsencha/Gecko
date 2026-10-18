@@ -1,4 +1,10 @@
 import java.util.Properties
+import org.apache.commons.compress.archivers.zip.ZipArchiveOutputStream
+import org.apache.commons.compress.archivers.zip.ZipFile as CompressZipFile
+
+buildscript {
+    dependencies { classpath("org.apache.commons:commons-compress:1.27.1") }
+}
 
 plugins {
     id("com.android.application")
@@ -17,15 +23,16 @@ android {
         applicationId = "com.browser.adfree"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        // Release builds from CI pass these from the git tag (v1.2.3 -> 1.2.3, 10203).
+        versionCode = (findProperty("versionCode") as String?)?.toInt() ?: 1
+        versionName = (findProperty("versionName") as String?) ?: "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
             useSupportLibrary = true
         }
         ndk {
-            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+            abiFilters.addAll(listOf("arm64-v8a"))
         }
     }
 
@@ -65,19 +72,14 @@ android {
         ignoreAssetsPattern = "!.svn:!.git:!.ds_store:!*.scc:.*:<dir>_*:!CVS:!thumbs.db:!picasa.ini:!*~"
     }
 
-    splits {
-        abi {
-            isEnable = true
-            reset()
-            include("arm64-v8a", "x86_64")
-            isUniversalApk = true
-        }
-    }
-
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+    }
+    testOptions {
+        // android.* stubs return defaults instead of throwing in JVM tests.
+        unitTests.isReturnDefaultValues = true
     }
     buildFeatures {
         compose = true
@@ -139,6 +141,8 @@ dependencies {
 
     // Networking (OkHttp)
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    testImplementation("junit:junit:4.13.2")
 }
 
 // The privacy policy and terms ship inside the app, copied from the repository root
@@ -148,3 +152,29 @@ val copyLegalDocs by tasks.registering(Copy::class) {
     into(layout.projectDirectory.dir("src/main/assets/legal"))
 }
 tasks.named("preBuild") { dependsOn(copyLegalDocs) }
+
+// yt-dlp's bundled Python ships things nothing here runs: a 6 MB static
+// library, CPython's test modules, curses, sqlite and the like. Drop them from
+// the merged native libs. Entries are copied raw so symlinks and modes survive.
+val pythonDrop = Regex(
+    "(\\.a$|/include/|/test/|/tests/|/idlelib/|/tkinter/|/turtledemo/|/lib2to3/|/ensurepip/|/pydoc_data/|" +
+        "_testcapi|_testinternalcapi|_testbuffer|_testmultiphase|_testimportmultiple|_xxtestfuzz|_testclinic|" +
+        "_testsinglephase|xxlimited|/curses/|_curses|libncurses|libreadline|readline\\.cpython|/share/man/|" +
+        "/pkgconfig/|/unittest/|/venv/|/sqlite3/|_sqlite3|libsqlite3)"
+)
+tasks.matching { it.name.startsWith("merge") && it.name.endsWith("NativeLibs") }.configureEach {
+    doLast {
+        outputs.files.asFileTree.matching { include("**/libpython.zip.so") }.forEach { lib ->
+            val trimmed = File(lib.parentFile, "libpython.zip.trim")
+            CompressZipFile.builder().setFile(lib).get().use { zip ->
+                ZipArchiveOutputStream(trimmed).use { out ->
+                    zip.entries.asSequence().filterNot { pythonDrop.containsMatchIn(it.name) }.forEach { entry ->
+                        out.addRawArchiveEntry(entry, zip.getRawInputStream(entry))
+                    }
+                }
+            }
+            lib.delete()
+            trimmed.renameTo(lib)
+        }
+    }
+}

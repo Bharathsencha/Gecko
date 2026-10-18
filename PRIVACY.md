@@ -1,6 +1,6 @@
 # Privacy Policy
 
-Effective date: 15 October 2026
+Effective date: 18 October 2026
 
 Gecko is an Android web browser. This policy explains what Gecko stores, what it sends over the network on its own, and what it never does. It covers the Gecko app only. Websites you visit have their own policies.
 
@@ -21,7 +21,9 @@ Gecko is an Android web browser. This policy explains what Gecko stores, what it
 | Bookmarks and favourites | Until you delete them | Bookmarks page, or Edit on the start page |
 | Saved passwords | Only when you choose to save one | Settings > Saved passwords |
 | Settings, per-site settings, start-page designs | Until changed or deleted | Settings, or uninstall the app |
-| Tracker statistics (blocked count per day, most-blocked domains) | Normal tabs only, last 60 days | Tracker report > reset |
+| Tracker statistics (blocked count per day, most-blocked domains) | Normal tabs only, last 60 days | Tracker report > reset. Also reset when you clear history, unless you turn that off in Settings |
+| Site permissions (which sites you allowed or blocked for location, camera, microphone, notifications and similar) | Normal tabs only. Answers given in private tabs are forgotten when the private tabs close | The shield in the address bar, or Settings > Site permissions |
+| Tab groups (the group name of each open tab) | Normal tabs only, with the open tabs | Ungroup or close the tabs |
 | Containers you create, and their cookies and site data | Kept apart from each other and from normal tabs | Settings > Containers (Clear, or delete the container) |
 | App PIN | Only a keyed check value, never the PIN itself | Change it in Settings, or uninstall the app |
 | Downloaded files | In your phone's Downloads folder | Delete them from the Downloads page or your file manager |
@@ -70,8 +72,11 @@ When the VPN is on, downloads and the video downloader use the same route as pag
 | Notifications | To show download progress and media controls |
 | Foreground service (media playback, data sync), wake lock | To keep audio playing and downloads running when the app is in the background |
 | Storage (Android 9 and older only) | To save downloads to the Downloads folder; newer Android versions need no permission for this |
+| Location, camera, microphone | Asked only after you allow a website to use them, and only so that website can. Gecko itself never reads them |
 
-Gecko does not ask for location, contacts, camera or microphone permissions. If a website asks for something like location or camera, the browser engine handles it, and it is off unless you allow it.
+When a website asks for your location, camera, microphone, notifications or similar, Gecko asks you once and remembers the answer for that site. Nothing is shared unless you choose Allow. You can change or remove each answer at any time.
+
+Screenshots, screen recording and the recent-apps preview are blocked in private tabs by default. You can also block them in normal tabs, or allow them in private tabs, under Settings > Block screenshots.
 
 ## Children
 

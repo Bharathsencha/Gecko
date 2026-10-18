@@ -50,13 +50,7 @@ class BrowserDownloadManager(private val context: Context) {
     companion object {
         private const val TAG = "BrowserDownloadManager"
         private val AUDIO_EXTENSIONS = setOf("m4a", "mp3", "aac", "ogg", "opus", "weba", "flac", "wav")
-        private val MEDIA_EXTENSIONS = setOf("mp4", "webm", "mkv", "m4a", "mp3", "aac", "ogg", "opus", "ts", "3gp", "m4v", "flv")
 
-        /** First Range window for hosts that refuse an unbounded request. */
-        private const val MIN_RANGE_WINDOW_BYTES = 256L * 1024
-        private const val MAX_RANGE_WINDOW_BYTES = 16L * 1024 * 1024
-        private const val MAX_WINDOW_ATTEMPTS = 3
-        private val RETRYABLE_HTTP_CODES = setOf(403, 408, 425, 429, 500, 502, 503, 504)
 
         /**
          * Lets extractors reach the cookie cache without holding a manager
@@ -99,6 +93,8 @@ class BrowserDownloadManager(private val context: Context) {
         .readTimeout(60, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
+
+    private val fetcher = StreamFetcher(okHttpClient)
 
     init {
         cookieProvider = { cookiesFor(it) }
@@ -233,37 +229,11 @@ class BrowserDownloadManager(private val context: Context) {
 
     // ---------------------------------------------------------------- Routing
 
-    /**
-     * Chooses the output container from the media type, never from the file
-     * name, so a WebM/VP9 stream is not forced into an MP4 container that
-     * MediaMuxer cannot write.
-     */
-    private fun containerFor(mimeType: String?, format: String?, isAudioOnly: Boolean): VideoAudioMuxer.Container {
-        val mime = mimeType?.lowercase().orEmpty()
-        val fmt = format?.lowercase().orEmpty()
-        return when {
-            mime.contains("webm") || fmt == "webm" -> VideoAudioMuxer.Container.WEBM
-            mime.contains("matroska") || fmt == "mkv" -> VideoAudioMuxer.Container.WEBM
-            mime.contains("mp2t") || mime.contains("mpegurl") || fmt == "m3u8" -> VideoAudioMuxer.Container.MP4
-            mime.contains("mpeg") && mime.contains("audio") -> VideoAudioMuxer.Container.MP4
-            mime.contains("mpeg") -> VideoAudioMuxer.Container.MP4
-            isAudioOnly -> VideoAudioMuxer.Container.MP4
-            else -> VideoAudioMuxer.Container.MP4
-        }
-    }
-
-    /** Appends [container]'s extension unless the name already ends in a media one. */
-    private fun withExtension(fileName: String, container: VideoAudioMuxer.Container): String {
-        val extension = fileName.substringAfterLast(".", "")
-        if (extension.lowercase() in MEDIA_EXTENSIONS) return fileName
-        return "$fileName.${container.extension}"
-    }
-
     private fun resolveTargetFile(fileName: String, container: VideoAudioMuxer.Container): File {
         val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
         if (!downloadsDir.exists()) downloadsDir.mkdirs()
 
-        val finalName = withExtension(fileName, container)
+        val finalName = DownloadNaming.withExtension(fileName, container)
         var targetFile = File(downloadsDir, finalName)
         val nameWithoutExt = finalName.substringBeforeLast(".")
         val ext = finalName.substringAfterLast(".", container.extension)
@@ -288,7 +258,7 @@ class BrowserDownloadManager(private val context: Context) {
         pageUrl: String? = null
     ): Long {
         if (url.startsWith("data:")) {
-            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
+            val fileName = customFileName ?: DownloadNaming.extractFileName(url, contentDisposition, mimeType)
             return saveBase64Download(fileName, url, mimeType)
         }
 
@@ -296,7 +266,7 @@ class BrowserDownloadManager(private val context: Context) {
 
         // 1. HLS (.m3u8) -> segment assembly
         if (isHls) {
-            val fileName = customFileName ?: extractFileName(url, contentDisposition, "video/mp4")
+            val fileName = customFileName ?: DownloadNaming.extractFileName(url, contentDisposition, "video/mp4")
             return startHlsDownload(
                 playlistUrl = url,
                 fileName = fileName,
@@ -309,7 +279,7 @@ class BrowserDownloadManager(private val context: Context) {
 
         // 2. Separate video + audio -> remux
         if (!audioUrl.isNullOrBlank() && audioUrl != url) {
-            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
+            val fileName = customFileName ?: DownloadNaming.extractFileName(url, contentDisposition, mimeType)
             return startMuxedDownload(
                 videoUrl = url,
                 audioUrl = audioUrl,
@@ -328,17 +298,17 @@ class BrowserDownloadManager(private val context: Context) {
         val effectiveMime = mimeType ?: "application/octet-stream"
         val isStreamingMedia = url.contains("googlevideo.com") || url.contains("v.redd.it") ||
                 url.contains("fbcdn.net") || url.contains("twimg.com") || url.contains("tiktokcdn.com") ||
-                MEDIA_EXTENSIONS.any { url.substringBefore("?").lowercase().endsWith(".$it") } ||
+                DownloadNaming.MEDIA_EXTENSIONS.any { url.substringBefore("?").lowercase().endsWith(".$it") } ||
                 effectiveMime.startsWith("video/") || effectiveMime.startsWith("audio/") ||
                 effectiveMime.contains("mpegurl") ||
                 !referer.isNullOrBlank() || !extraHeaders.isNullOrEmpty()
 
         if (isStreamingMedia) {
-            val container = containerFor(effectiveMime, format, false)
-            val fileName = customFileName ?: extractFileName(url, contentDisposition, effectiveMime)
+            val container = DownloadNaming.containerFor(effectiveMime, format, false)
+            val fileName = customFileName ?: DownloadNaming.extractFileName(url, contentDisposition, effectiveMime)
             return startInternalStreamDownload(
                 url = url,
-                fileName = withExtension(fileName, container),
+                fileName = DownloadNaming.withExtension(fileName, container),
                 mimeType = effectiveMime,
                 userAgent = userAgent,
                 referer = referer,
@@ -350,7 +320,7 @@ class BrowserDownloadManager(private val context: Context) {
         // 4. Everything else -> system DownloadManager, unless the VPN is on: the
         //    system service would fetch from the real address, so stay in-app.
         if (com.browser.adfree.vpn.NetworkRoute.socks != null) {
-            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
+            val fileName = customFileName ?: DownloadNaming.extractFileName(url, contentDisposition, mimeType)
             return startInternalStreamDownload(
                 url = url,
                 fileName = fileName,
@@ -373,7 +343,7 @@ class BrowserDownloadManager(private val context: Context) {
         customFileName: String?
     ): Long {
         return try {
-            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
+            val fileName = customFileName ?: DownloadNaming.extractFileName(url, contentDisposition, mimeType)
             val request = DownloadManager.Request(Uri.parse(url)).apply {
                 setTitle(fileName)
                 setDescription("Downloading file...")
@@ -420,7 +390,7 @@ class BrowserDownloadManager(private val context: Context) {
             downloadId
         } catch (e: Exception) {
             Log.e(TAG, "System DownloadManager enqueue failed", e)
-            val fileName = customFileName ?: extractFileName(url, contentDisposition, mimeType)
+            val fileName = customFileName ?: DownloadNaming.extractFileName(url, contentDisposition, mimeType)
             startInternalStreamDownload(
                 url = url,
                 fileName = fileName,
@@ -768,7 +738,7 @@ class BrowserDownloadManager(private val context: Context) {
         pageUrl: String? = null
     ): Long {
         val downloadId = nextDownloadId()
-        val container = containerFor(mimeType, null, mimeType.startsWith("audio/"))
+        val container = DownloadNaming.containerFor(mimeType, null, mimeType.startsWith("audio/"))
         val targetFile = resolveTargetFile(fileName, container)
 
         val item = DownloadItem(
@@ -805,7 +775,7 @@ class BrowserDownloadManager(private val context: Context) {
             try {
                 mainHandler.post { notifyForegroundService() }
                 val tempFile = File(context.cacheDir, "stream_${item.id}.tmp")
-                val outcome = fetchMedia(
+                val outcome = fetcher.fetch(
                     pageUrl = item.sourcePageUrl,
                     url = item.url,
                     targetFile = tempFile,
@@ -879,8 +849,8 @@ class BrowserDownloadManager(private val context: Context) {
     ): Long {
         val downloadId = nextDownloadId()
         // Container is decided by the muxer from the real codecs; start from the
-        // declared mime and let withExtension() avoid ".webm.mp4" style names.
-        val declaredContainer = containerFor(mimeType, null, false)
+        // declared mime and let DownloadNaming.withExtension() avoid ".webm.mp4" style names.
+        val declaredContainer = DownloadNaming.containerFor(mimeType, null, false)
         val targetFile = resolveTargetFile(fileName, declaredContainer)
 
         val item = DownloadItem(
@@ -924,8 +894,31 @@ class BrowserDownloadManager(private val context: Context) {
                 val audioCookie = item.audioUrl?.let { cookiesFor(it) }
 
                 // Video and audio are fetched concurrently, then combined.
+                // Progress covers both streams together, so it never jumps backwards.
+                val vBytes = LongArray(2)
+                val aBytes = LongArray(2)
+                var lastPost = 0L
+                fun postProgress() {
+                    val now = System.currentTimeMillis()
+                    if (now - lastPost < 200) return
+                    lastPost = now
+                    val cur = vBytes[0] + aBytes[0]
+                    val tot = vBytes[1] + aBytes[1]
+                    mainHandler.post {
+                        item.currentBytes = cur
+                        if (vBytes[1] > 0 && aBytes[1] > 0) {
+                            item.totalBytes = tot
+                            item.progress = ((cur * 95) / tot).toInt().coerceIn(0, 95)
+                        }
+                        notifyForegroundService()
+                    }
+                }
+                // One stream failing for good dooms the file; stop the other at once.
+                val abort = java.util.concurrent.atomic.AtomicBoolean(false)
+                val height = Regex("(\\d{3,4})p").find(item.fileName)?.groupValues?.get(1)?.toIntOrNull()
                 val videoDeferred = async {
-                    fetchMedia(
+                    fetcher.fetch(
+                        height = height,
                         pageUrl = item.sourcePageUrl,
                         url = item.url,
                         targetFile = videoTmp,
@@ -933,19 +926,12 @@ class BrowserDownloadManager(private val context: Context) {
                         referer = item.referer,
                         extraHeaders = extraHeaders,
                         cookieHeader = videoCookie,
-                        isActive = { isActive && item.status == DownloadStatus.DOWNLOADING },
-                        onProgress = { cur, tot ->
-                            mainHandler.post {
-                                if (tot > 0) item.totalBytes = tot
-                                item.currentBytes = cur + audioTmp.length()
-                                item.progress = if (tot > 0) ((cur * 80) / tot).toInt().coerceIn(0, 80) else 0
-                                notifyForegroundService()
-                            }
-                        }
-                    )
+                        isActive = { isActive && item.status == DownloadStatus.DOWNLOADING && !abort.get() },
+                        onProgress = { cur, tot -> vBytes[0] = cur; vBytes[1] = tot; postProgress() }
+                    ).also { if (!it.success) abort.set(true) }
                 }
                 val audioDeferred = async {
-                    fetchMedia(
+                    fetcher.fetch(
                         pageUrl = item.sourcePageUrl,
                         url = item.audioUrl.orEmpty(),
                         targetFile = audioTmp,
@@ -953,22 +939,18 @@ class BrowserDownloadManager(private val context: Context) {
                         referer = item.referer,
                         extraHeaders = extraHeaders,
                         cookieHeader = audioCookie,
-                        isActive = { isActive && item.status == DownloadStatus.DOWNLOADING },
-                        onProgress = { cur, tot ->
-                            mainHandler.post {
-                                item.currentBytes = videoTmp.length() + cur
-                                if (tot > 0) {
-                                    item.totalBytes = videoTmp.length() + tot
-                                    item.progress = (80 + ((cur * 15) / tot).toInt()).coerceIn(80, 95)
-                                }
-                                notifyForegroundService()
-                            }
-                        }
-                    )
+                        isActive = { isActive && item.status == DownloadStatus.DOWNLOADING && !abort.get() },
+                        onProgress = { cur, tot -> aBytes[0] = cur; aBytes[1] = tot; postProgress() }
+                    ).also { if (!it.success) abort.set(true) }
                 }
 
                 val videoOutcome = videoDeferred.await()
                 val audioOutcome = audioDeferred.await()
+                // The stream that was stopped reports "interrupted"; show the real cause.
+                if (!videoOutcome.success && !audioOutcome.success) {
+                    failWith(item, (if (videoOutcome.reason == "Transfer was interrupted") audioOutcome.reason else videoOutcome.reason) ?: "Download failed")
+                    return@launch
+                }
 
                 if (!isActive || item.status != DownloadStatus.DOWNLOADING) return@launch
                 if (!videoOutcome.success) {
@@ -1026,327 +1008,6 @@ class BrowserDownloadManager(private val context: Context) {
             }
         }
         activeJobs[item.id] = job
-    }
-
-    // ---------------------------------------------------------------- HTTP core
-
-    /** Outcome of one stream transfer, carrying the reason so the UI can explain failures. */
-    private data class StreamOutcome(
-        val success: Boolean,
-        val httpCode: Int = 0,
-        val reason: String? = null
-    )
-
-    /**
-     * Direct transfer first. When YouTube cuts a stream off (HTTP 403 after
-     * the first megabyte, which happens to Android-client URLs without a
-     * PO token), the same format is fetched again through yt-dlp.
-     */
-    private fun fetchMedia(
-        pageUrl: String?,
-        url: String,
-        targetFile: File,
-        userAgent: String?,
-        referer: String?,
-        extraHeaders: Map<String, String>? = null,
-        cookieHeader: String? = null,
-        isActive: () -> Boolean,
-        onProgress: (current: Long, total: Long) -> Unit
-    ): StreamOutcome {
-        val direct = downloadStream(url, targetFile, userAgent, referer, extraHeaders, cookieHeader, isActive, onProgress)
-        if (direct.success || !isActive()) return direct
-        val itag = YtDlpDownloader.itagOf(url)
-        if (!url.contains("googlevideo.com") || itag == null || pageUrl == null ||
-            !com.browser.adfree.tabs.TabManager.isYouTube(pageUrl)
-        ) return direct
-
-        Log.i(TAG, "Direct fetch stopped (${direct.reason}); fetching itag $itag with yt-dlp")
-        val total = Regex("[?&]clen=(\\d+)").find(url)?.groupValues?.get(1)?.toLongOrNull() ?: 0L
-        val error = YtDlpDownloader.download(pageUrl, itag, targetFile, isActive) { percent ->
-            if (total > 0) onProgress(total * percent / 100, total)
-        }
-        return if (error == null) {
-            StreamOutcome(success = true)
-        } else {
-            StreamOutcome(success = false, httpCode = direct.httpCode, reason = "YouTube cut the stream off and yt-dlp could not finish it: $error")
-        }
-    }
-
-    private fun downloadStream(
-        url: String,
-        targetFile: File,
-        userAgent: String?,
-        referer: String?,
-        extraHeaders: Map<String, String>? = null,
-        cookieHeader: String? = null,
-        isActive: () -> Boolean,
-        onProgress: (current: Long, total: Long) -> Unit
-    ): StreamOutcome {
-        var existingBytes = if (targetFile.exists()) targetFile.length() else 0L
-        val cleanUrl = url.replace(RANGE_PARAM, "")
-        val isGooglevideo = cleanUrl.contains("googlevideo.com")
-
-        val browserUa = com.browser.adfree.tabs.TabManager.MODERN_MOBILE_UA
-
-        // googlevideo validates that the request User-Agent matches the client that
-        // signed the URL, and falls back to 403 when it does not. The extractor
-        // already stored that exact UA on the format's headers, so it wins over
-        // every guess below.
-        val headerUa = extraHeaders?.entries
-            ?.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) && it.value.isNotBlank() }
-            ?.value
-        val clientMarkerUa = YouTubeStreamExtractor.userAgentForClientMarker(
-            Regex("(?:^|[?&])c=([^&]+)").find(cleanUrl)?.groupValues?.get(1)
-        )
-
-        val defaultUa = when {
-            !headerUa.isNullOrBlank() -> headerUa
-            !userAgent.isNullOrBlank() -> userAgent
-            clientMarkerUa != null -> clientMarkerUa
-            isGooglevideo -> YouTubeStreamExtractor.ANDROID_USER_AGENT
-            else -> browserUa
-        }
-
-        val headerCookie = extraHeaders?.entries
-            ?.firstOrNull { it.key.equals("Cookie", ignoreCase = true) && it.value.isNotBlank() }
-            ?.value
-        val effectiveCookie = cookieHeader?.takeIf { it.isNotBlank() } ?: headerCookie
-
-        fun buildRequest(ua: String, includeReferer: Boolean, rangeHeader: String?): Request {
-            val builder = Request.Builder().url(cleanUrl)
-            builder.header("User-Agent", ua)
-
-            if (includeReferer && !isGooglevideo && !referer.isNullOrBlank()) {
-                builder.header("Referer", referer)
-            }
-
-            extraHeaders?.forEach { (k, v) ->
-                if (!k.equals("User-Agent", true) && !k.equals("Range", true) && !k.equals("Cookie", true) &&
-                    !(isGooglevideo && k.equals("Referer", true)) && v.isNotBlank()
-                ) {
-                    builder.header(k, v)
-                }
-            }
-
-            if (!effectiveCookie.isNullOrBlank()) builder.header("Cookie", effectiveCookie)
-
-            if (rangeHeader != null) {
-                // Content-Range is only meaningful over an uncompressed body.
-                builder.header("Range", rangeHeader)
-                builder.header("Accept-Encoding", "identity")
-            }
-            return builder.build()
-        }
-
-        // Candidate attempts, in order. Referer is dropped for googlevideo because
-        // that host rejects it, and a plain browser UA is tried as a fallback
-        // because many CDNs 403 on an unexpected Referer.
-        val candidates: List<Triple<String, Boolean, Boolean>> = buildList {
-            add(Triple(defaultUa, !isGooglevideo, false))
-            if (isGooglevideo) {
-                add(Triple(YouTubeStreamExtractor.IOS_USER_AGENT, false, false))
-                add(Triple(YouTubeStreamExtractor.WEB_USER_AGENT, false, false))
-                add(Triple(browserUa, false, false))
-            } else {
-                add(Triple(browserUa, false, false))
-            }
-        }.distinctBy { it.first }
-
-        var lastCode = 0
-        var bytesOnDisk = existingBytes
-        var remoteTotal = -1L
-
-        for ((ua, includeReferer, _) in candidates) {
-            var start = bytesOnDisk
-            var window = if (isGooglevideo) MIN_RANGE_WINDOW_BYTES else MAX_RANGE_WINDOW_BYTES
-            // googlevideo 403s on a body-length request and on an open-ended
-            // `bytes=N-` resume; ordinary hosts keep the plain one-shot request.
-            var useRange = isGooglevideo || start > 0
-            var failures = 0
-
-            while (isActive()) {
-                val rangeHeader = if (useRange) {
-                    val end = if (remoteTotal > 0) minOf(start + window - 1, remoteTotal - 1)
-                    else start + window - 1
-                    "bytes=$start-$end"
-                } else null
-
-                var response: Response? = null
-                try {
-                    response = okHttpClient.newCall(buildRequest(ua, includeReferer, rangeHeader)).execute()
-                    val code = response.code
-                    lastCode = code
-
-                    if (code == 416 && start > 0) {
-                        // Partial file no longer matches the remote length: restart clean.
-                        response.close()
-                        response = null
-                        targetFile.delete()
-                        start = 0L
-                        bytesOnDisk = 0L
-                        remoteTotal = -1L
-                        useRange = isGooglevideo
-                        window = if (isGooglevideo) MIN_RANGE_WINDOW_BYTES else MAX_RANGE_WINDOW_BYTES
-                        continue
-                    }
-
-                    if (code == 200 || code == 206) {
-                        val contentType = response.header("Content-Type")?.substringBefore(";")?.trim()?.lowercase().orEmpty()
-                        if (code == 200 && start == 0L && isNonMediaType(contentType, targetFile.name)) {
-                            response.close()
-                            response = null
-                            return StreamOutcome(false, lastCode, "Server sent ${contentType} instead of media")
-                        }
-                        val contentRange = response.header("Content-Range")
-                        parseContentRangeTotal(contentRange)?.let { remoteTotal = it }
-
-                        if (code == 200) {
-                            // Body is the whole resource; ignore anything on disk.
-                            start = 0L
-                        }
-                        val written = writeStreamToFile(response, targetFile, start, remoteTotal, isActive, onProgress)
-                        response = null
-                        if (written < 0L) {
-                            return StreamOutcome(false, lastCode, "Transfer was interrupted")
-                        }
-                        start += written
-                        bytesOnDisk = start
-
-                        if (written == 0L) {
-                            return StreamOutcome(false, lastCode, "Server returned an empty body")
-                        }
-                        if (code == 200 || (remoteTotal in 1..start)) {
-                            return StreamOutcome(true, lastCode)
-                        }
-                        if (written < window && remoteTotal <= 0) {
-                            return StreamOutcome(true, lastCode)
-                        }
-                        window = minOf(window * 2, MAX_RANGE_WINDOW_BYTES)
-                        useRange = true
-                        failures = 0
-                        continue
-                    }
-
-                    response.close()
-                    response = null
-
-                    if (code in RETRYABLE_HTTP_CODES) {
-                        // A 403 that only appears once the window crosses the
-                        // host's allowed prefix means we are asking for too much,
-                        // not that the link is dead: shrink and keep going.
-                        if (code == 403 && useRange && window > MIN_RANGE_WINDOW_BYTES) {
-                            window = maxOf(MIN_RANGE_WINDOW_BYTES, window / 2)
-                            continue
-                        }
-                        failures++
-                        if (failures <= MAX_WINDOW_ATTEMPTS) {
-                            Thread.sleep(500L * failures)
-                            continue
-                        }
-                    }
-                    break
-                } catch (e: Exception) {
-                    Log.d(TAG, "Attempt with UA '${ua.take(28)}...' failed: ${e.message}")
-                    runCatching { response?.close() }
-                    lastCode = 0
-                    failures++
-                    if (failures <= MAX_WINDOW_ATTEMPTS) {
-                        Thread.sleep(500L * failures)
-                        continue
-                    }
-                    break
-                }
-            }
-        }
-
-        Log.e(TAG, "All attempts failed for $cleanUrl (last HTTP $lastCode, got $bytesOnDisk/$remoteTotal bytes)")
-        val reason = when {
-            lastCode == 403 && bytesOnDisk > 0 && (remoteTotal <= 0 || bytesOnDisk < remoteTotal) ->
-                if (isGooglevideo) {
-                    "Only ${bytesOnDisk / 1024} KB of the stream were retrievable before the server " +
-                        "stopped answering (HTTP 403). YouTube caps adaptive formats at roughly the first " +
-                        "minute unless a PO token is supplied - try the combined 360p stream instead."
-                } else {
-                    "Only ${bytesOnDisk / 1024} KB of the stream were retrievable before the server " +
-                        "stopped answering (HTTP 403). The host is likely rate-limiting this IP."
-                }
-            lastCode == 403 || lastCode == 401 ->
-                "Server refused the request (HTTP $lastCode). The link may have expired, the host may " +
-                    "require a session cookie, or it is rejecting this network."
-            lastCode == 404 -> "Server returned 404 for this stream"
-            lastCode > 0 -> "Server returned HTTP $lastCode"
-            else -> "Network error while transferring the stream"
-        }
-        return StreamOutcome(false, lastCode, reason)
-    }
-
-    private fun parseContentRangeTotal(contentRange: String?): Long? {
-        if (contentRange.isNullOrBlank()) return null
-        val total = contentRange.substringAfterLast('/', "").trim()
-        if (total.isEmpty() || total == "*") return null
-        return total.toLongOrNull()?.takeIf { it > 0 }
-    }
-
-    /**
-     * True when the response body is clearly not media: error pages, JSON,
-     * protobuf blobs. Those answer 200 and would otherwise be written to disk as a
-     * "completed" video.
-     */
-    private fun isNonMediaType(contentType: String, fileName: String = ""): Boolean {
-        if (contentType.isEmpty()) return false
-        // Playlists are plain text on some hosts.
-        if (fileName.endsWith(".m3u8", true) || fileName.endsWith(".m3u", true) || fileName.endsWith(".mpd", true)) {
-            if (contentType.startsWith("text/")) return false
-        }
-        val mediaMarkers = listOf(
-            "video/", "audio/", "mpegurl", "octet-stream", "mp2t", "mp4", "mp3",
-            "webm", "matroska", "quicktime", "mp2a", "aac", "flac", "ogg", "mpd", "dash"
-        )
-        if (mediaMarkers.any { contentType.contains(it) }) return false
-        val nonMedia = listOf("text/", "json", "protobuf", "xml", "html", "yaml", "csv")
-        return nonMedia.any { contentType.contains(it) }
-    }
-
-    private fun writeStreamToFile(
-        response: Response,
-        targetFile: File,
-        writeOffset: Long,
-        totalBytesHint: Long,
-        isActive: () -> Boolean,
-        onProgress: (current: Long, total: Long) -> Unit
-    ): Long {
-        val body = response.body ?: return -1L
-        val contentLength = body.contentLength()
-        val totalBytes = when {
-            totalBytesHint > 0 -> totalBytesHint
-            contentLength > 0 -> writeOffset + contentLength
-            else -> -1L
-        }
-        val append = writeOffset > 0
-
-        return try {
-            FileOutputStream(targetFile, append).use { out ->
-                body.byteStream().use { input ->
-                    val buffer = ByteArray(64 * 1024)
-                    var written = 0L
-                    while (true) {
-                        val bytesRead = input.read(buffer)
-                        if (bytesRead == -1) break
-                        if (!isActive()) return -1L
-                        out.write(buffer, 0, bytesRead)
-                        written += bytesRead
-                        onProgress(writeOffset + written, totalBytes)
-                    }
-                    out.flush()
-                    written
-                }
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "writeStreamToFile error: ${e.message}")
-            -1L
-        } finally {
-            response.close()
-        }
     }
 
     // ---------------------------------------------------------------- Controls
@@ -1452,7 +1113,7 @@ class BrowserDownloadManager(private val context: Context) {
 
     fun saveBase64Download(fileName: String, dataUrl: String, mimeType: String? = null): Long {
         return try {
-            val cleanName = sanitizeFileName(if (fileName.isNotBlank()) fileName else "download_${System.currentTimeMillis()}.bin")
+            val cleanName = DownloadNaming.sanitizeFileName(if (fileName.isNotBlank()) fileName else "download_${System.currentTimeMillis()}.bin")
             val base64Index = dataUrl.indexOf("base64,")
             val rawBytes = if (base64Index != -1) {
                 android.util.Base64.decode(dataUrl.substring(base64Index + 7).trim(), android.util.Base64.DEFAULT)
@@ -1510,6 +1171,112 @@ class BrowserDownloadManager(private val context: Context) {
             toast("Download failed: ${e.message}")
             -1L
         }
+    }
+
+    // ---------------------------------------------------------------- Engine responses
+
+    /**
+     * Saves a response Gecko already opened (a link the page cannot show, a
+     * PDF's save button, or a context-menu download fetched through the
+     * engine). The body is streamed as-is, so the site's cookies, the tab's
+     * private or container state and the VPN route all carry over, the way a
+     * normal browser download works.
+     */
+    fun saveWebResponse(response: org.mozilla.geckoview.WebResponse, fallbackName: String? = null): Long {
+        val body = response.body
+        if (body == null || response.statusCode >= 400) {
+            toast(if (response.statusCode >= 400) "Download failed (HTTP ${response.statusCode})" else "Nothing to download")
+            return -1L
+        }
+        val headers = response.headers
+        fun header(name: String) = headers.entries.firstOrNull { it.key.equals(name, true) }?.value
+        val mimeType = header("Content-Type")?.substringBefore(";")?.trim()?.lowercase()?.ifBlank { null }
+            ?: "application/octet-stream"
+        var fileName = when {
+            header("Content-Disposition")?.contains("filename", true) == true ->
+                DownloadNaming.extractFileName(response.uri, header("Content-Disposition"), mimeType)
+            !fallbackName.isNullOrBlank() -> DownloadNaming.sanitizeFileName(fallbackName)
+            else -> DownloadNaming.extractFileName(response.uri, null, mimeType)
+        }
+        if (!fileName.contains('.')) {
+            MimeTypeMap.getSingleton().getExtensionFromMimeType(mimeType)?.let { fileName = "$fileName.$it" }
+        }
+        val total = header("Content-Length")?.toLongOrNull() ?: -1L
+        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!downloadsDir.exists()) downloadsDir.mkdirs()
+        var target = File(downloadsDir, fileName)
+        val stem = fileName.substringBeforeLast("."); val ext = fileName.substringAfterLast(".", "")
+        var n = 1
+        while (target.exists()) {
+            target = File(downloadsDir, if (ext.isNotEmpty()) "$stem ($n).$ext" else "$stem ($n)")
+            n++
+        }
+
+        val item = DownloadItem(
+            id = nextDownloadId(),
+            fileName = target.name,
+            url = response.uri,
+            mimeType = mimeType,
+            destinationPath = target.absolutePath,
+            initialStatus = DownloadStatus.DOWNLOADING
+        ).apply { totalBytes = total }
+        mainHandler.post {
+            downloadsList.add(0, item)
+            notifyForegroundService()
+            toast("Downloading ${target.name}")
+        }
+
+        val job = downloadScope.launch {
+            try {
+                response.setReadTimeoutMillis(60_000)
+                var written = 0L
+                var lastPost = 0L
+                FileOutputStream(target).use { out ->
+                    body.use { input ->
+                        val buffer = ByteArray(64 * 1024)
+                        while (true) {
+                            val read = input.read(buffer)
+                            if (read == -1) break
+                            if (!isActive || item.status != DownloadStatus.DOWNLOADING) throw kotlinx.coroutines.CancellationException()
+                            out.write(buffer, 0, read)
+                            written += read
+                            val now = System.currentTimeMillis()
+                            if (now - lastPost > 250) {
+                                lastPost = now
+                                val w = written
+                                mainHandler.post {
+                                    item.currentBytes = w
+                                    if (total > 0) item.progress = ((w * 100) / total).toInt().coerceIn(0, 99)
+                                    notifyForegroundService()
+                                }
+                            }
+                        }
+                    }
+                }
+                registerCompletedDownload(target, mimeType)
+                mainHandler.post {
+                    item.currentBytes = target.length()
+                    item.totalBytes = target.length()
+                    item.progress = 100
+                    item.status = DownloadStatus.COMPLETED
+                    notifyForegroundService()
+                    toast("Saved ${target.name}")
+                }
+            } catch (e: kotlinx.coroutines.CancellationException) {
+                runCatching { target.delete() }
+                mainHandler.post {
+                    if (item.status == DownloadStatus.DOWNLOADING) item.status = DownloadStatus.CANCELLED
+                    notifyForegroundService()
+                }
+            } catch (e: Exception) {
+                runCatching { target.delete() }
+                failWith(item, "Transfer stopped: ${e.message ?: "network error"}")
+            } finally {
+                activeJobs.remove(item.id)
+            }
+        }
+        activeJobs[item.id] = job
+        return item.id
     }
 
     private fun isAudioOnlyItem(item: DownloadItem): Boolean =
@@ -1628,35 +1395,4 @@ class BrowserDownloadManager(private val context: Context) {
             notifyForegroundService()
         }
     }
-
-    // ---------------------------------------------------------------- Naming
-
-    private fun extractFileName(url: String, contentDisposition: String?, mimeType: String?): String {
-        if (!contentDisposition.isNullOrBlank()) {
-            val regex = Regex("filename\\*?=(?:UTF-8'')?[\"']?([^\"';\\n]+)[\"']?", RegexOption.IGNORE_CASE)
-            val match = regex.find(contentDisposition)
-            if (match != null) {
-                val extracted = match.groupValues[1].trim()
-                if (extracted.isNotEmpty()) return sanitizeFileName(extracted)
-            }
-        }
-        try {
-            val lastSegment = Uri.parse(url).lastPathSegment
-            if (!lastSegment.isNullOrBlank() && lastSegment.contains(".") && lastSegment.length > 3) {
-                return sanitizeFileName(lastSegment)
-            }
-        } catch (e: Exception) {
-            Log.d(TAG, "File name extraction from URL failed: ${e.message}")
-        }
-        val ext = mimeType?.let { MimeTypeMap.getSingleton().getExtensionFromMimeType(it) } ?: "bin"
-        return "download_${System.currentTimeMillis()}.$ext"
-    }
-
-    private fun sanitizeFileName(name: String): String = name
-        .replace(Regex("[\\\\/:*?\"<>|•\u0000-\u001f]"), "_")
-        .replace(Regex("\\s+"), " ")
-        .trim()
-        .ifBlank { "download_${System.currentTimeMillis()}" }
 }
-
-private val RANGE_PARAM = Regex("&range=[^&]+")

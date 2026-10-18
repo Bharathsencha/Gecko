@@ -63,6 +63,16 @@ class MainActivity : FragmentActivity() {
     @Volatile private var countUpdateScheduled = false
     private var pendingSaveLogin by mutableStateOf<PendingSaveLogin?>(null)
 
+    /** Location, camera and microphone for a site the user allowed. */
+    private var sitePermissionCallback: ((Boolean) -> Unit)? = null
+    private val sitePermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        val cb = sitePermissionCallback
+        sitePermissionCallback = null
+        cb?.invoke(results.isNotEmpty() && results.values.all { it })
+    }
+
     private val notificationPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { _ -> }
@@ -140,6 +150,8 @@ class MainActivity : FragmentActivity() {
         favoritesRepo = FavoritesRepository(this)
         trackerStats = com.browser.adfree.storage.TrackerStatsRepository(this)
         com.browser.adfree.model.TabContainer.init(this)
+        com.browser.adfree.storage.SitePermissions.init(this)
+        historyRepo.onCleared = { if (preferencesRepo.resetStatsWithHistory) trackerStats.reset() }
         downloadManager = BrowserDownloadManager(this)
         vpnManager = VpnManager(this, preferencesRepo)
 
@@ -150,6 +162,18 @@ class MainActivity : FragmentActivity() {
             this.trackerStats = this@MainActivity.trackerStats
             this.downloadManager = downloadManager
             this.onCookiesRequested = { url -> requestCookiesFor(url) }
+            this.onAndroidPermissions = { perms, done ->
+                val missing = perms.filter {
+                    androidx.core.content.ContextCompat.checkSelfPermission(this@MainActivity, it) !=
+                        android.content.pm.PackageManager.PERMISSION_GRANTED
+                }
+                if (missing.isEmpty()) done(true)
+                else {
+                    sitePermissionCallback?.invoke(false)
+                    sitePermissionCallback = done
+                    sitePermissionLauncher.launch(missing.toTypedArray())
+                }
+            }
         }
 
         // Initialize UniversalVideoExtractor (yt-dlp engine) in background
@@ -272,7 +296,7 @@ class MainActivity : FragmentActivity() {
 
         // 4. Restore Session / Create Initial Tab according to Startup Behavior
         tabManager.restoreSession(runtime, preferencesRepo.startupBehavior)
-        val initialUrl = intent?.dataString
+        val initialUrl = intent?.let { urlFromIntent(it) }
         if (!initialUrl.isNullOrBlank()) {
             val activeTab = tabManager.activeTab
             if (activeTab != null && activeTab.url == TabManager.HOME_URL) {
@@ -782,10 +806,19 @@ class MainActivity : FragmentActivity() {
         return com.browser.adfree.download.VideoQualityParser.sortQualities(list)
     }
 
+    /** A link, a file another app opened with Gecko, or text shared to it. */
+    private fun urlFromIntent(intent: Intent): String? = when (intent.action) {
+        Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.let { text ->
+            Regex("https?://\\S+").find(text)?.value ?: text
+        }
+        Intent.ACTION_WEB_SEARCH -> intent.getStringExtra(android.app.SearchManager.QUERY)
+        else -> intent.dataString
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
-        val url = intent.dataString
+        val url = urlFromIntent(intent)
         if (!url.isNullOrBlank()) {
             val activeTab = tabManager.activeTab
             if (activeTab != null && activeTab.url == TabManager.HOME_URL) {

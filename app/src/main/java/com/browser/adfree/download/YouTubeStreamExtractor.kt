@@ -234,6 +234,9 @@ object YouTubeStreamExtractor {
             }?.maxByOrNull { it.averageBitrate } ?: extractor.audioStreams?.maxByOrNull { it.averageBitrate }
 
             val bestAudioUrl = bestAudioStream?.content
+            val bestOpusUrl = extractor.audioStreams?.filter {
+                (it.format?.getName()?.uppercase() ?: "").let { f -> f.contains("WEBM") || f.contains("OPUS") }
+            }?.maxByOrNull { it.averageBitrate }?.content
             val bestAudioFormat = bestAudioStream?.format?.getName()?.uppercase() ?: "M4A"
 
             // 1. Progressive streams (Video + Audio natively combined)
@@ -285,7 +288,7 @@ object YouTubeStreamExtractor {
                             isAudioOnly = false,
                             isAv1 = isAv1,
                             isProgressive = false,
-                            audioUrl = bestAudioUrl,
+                            audioUrl = if (isWebm) bestOpusUrl ?: bestAudioUrl else bestAudioUrl,
                             mimeType = if (isWebm) "video/webm" else "video/mp4"
                         )
                     )
@@ -494,28 +497,32 @@ object YouTubeStreamExtractor {
 
             val qualityList = mutableListOf<VideoQualityOption>()
 
-            // Find best audio stream from adaptiveFormats to pair with high-res video-only streams
-            var bestAudioUrl: String? = null
-            var bestAudioBitrate = 0
-            var bestAudioLength = 0L
-
+            // Best audio of each family. MP4 video gets AAC and WebM video gets
+            // Opus, so the pair always fits in one file.
+            var bestM4a: Triple<String, Int, Long>? = null
+            var bestOpus: Triple<String, Int, Long>? = null
             if (adaptiveFormats != null) {
                 for (i in 0 until adaptiveFormats.length()) {
                     val f = adaptiveFormats.getJSONObject(i)
                     val mimeType = f.optString("mimeType", "")
-                    if (mimeType.startsWith("audio/")) {
-                        val streamUrl = extractUrlFromFormat(f)
-                        val bitrate = f.optInt("bitrate", 0)
-                        val isM4a = mimeType.contains("mp4") || mimeType.contains("m4a")
-                        // Prefer M4A/AAC for MP4 muxing compatibility
-                        if (streamUrl.isNotBlank() && (isM4a || bestAudioUrl == null || bitrate > bestAudioBitrate)) {
-                            bestAudioUrl = streamUrl
-                            bestAudioBitrate = bitrate
-                            bestAudioLength = f.optLong("contentLength", 0L)
-                        }
+                    if (!mimeType.startsWith("audio/")) continue
+                    val streamUrl = extractUrlFromFormat(f)
+                    if (streamUrl.isBlank()) continue
+                    // Skip dubbed and descriptive tracks; keep the original language.
+                    val track = f.optJSONObject("audioTrack")
+                    if (track != null && !track.optBoolean("audioIsDefault", true)) continue
+                    val entry = Triple(streamUrl, f.optInt("bitrate", 0), f.optLong("contentLength", 0L))
+                    if (mimeType.contains("mp4")) {
+                        if (bestM4a == null || entry.second > bestM4a.second) bestM4a = entry
+                    } else if (bestOpus == null || entry.second > bestOpus.second) {
+                        bestOpus = entry
                     }
                 }
             }
+            fun audioFor(videoMime: String) =
+                if (videoMime.contains("webm")) bestOpus ?: bestM4a else bestM4a ?: bestOpus
+            val bestAudioUrl: String? = (bestM4a ?: bestOpus)?.first
+            val bestAudioLength = (bestM4a ?: bestOpus)?.third ?: 0L
 
             // 1. Progressive formats (Video + Audio natively combined in a single stream)
             if (formats != null) {
@@ -598,11 +605,11 @@ object YouTubeStreamExtractor {
                                 codec = codec,
                                 format = if (isWebm) "WEBM" else "MP4",
                                 url = streamUrl,
-                                estimatedSizeBytes = contentLength + bestAudioLength,
+                                estimatedSizeBytes = contentLength + (audioFor(mimeType)?.third ?: 0L),
                                 isAudioOnly = false,
                                 isAv1 = isAv1,
                                 isProgressive = false,
-                                audioUrl = bestAudioUrl,
+                                audioUrl = audioFor(mimeType)?.first,
                                 mimeType = mimeType,
                                 headers = streamHeaders
                             )
