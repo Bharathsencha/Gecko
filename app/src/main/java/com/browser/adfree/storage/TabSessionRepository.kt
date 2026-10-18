@@ -58,11 +58,10 @@ class TabSessionRepository(private val context: Context) {
             root.put("tabs", tabsArray)
             root.put("activeIndex", activeIndex.coerceIn(0, (tabs.size - 1).coerceAtLeast(0)))
 
-            val tempFile = File(context.filesDir, "tabs_session.json.tmp")
-            tempFile.writeText(root.toString())
-            tempFile.renameTo(file)
+            val json = root.toString()
+            DiskWriter.save(file) { json }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
         }
     }
 
@@ -95,7 +94,7 @@ class TabSessionRepository(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
         }
 
         return Pair(result, activeIndex)
@@ -103,11 +102,9 @@ class TabSessionRepository(private val context: Context) {
 
     fun clearSession() {
         try {
-            if (file.exists()) {
-                file.delete()
-            }
+            DiskWriter.delete(file)
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
         }
     }
 }

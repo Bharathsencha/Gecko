@@ -342,10 +342,15 @@ function initClientDownloadInterceptor() {
     }
 
     document.addEventListener("click", (e) => {
+        // Only a real tap saves a file; a page calling link.click() must not
+        // be able to drop files into Downloads on its own.
+        if (!e.isTrusted) return;
         const target = e.target;
-        if (!target) return;
-        const link = target.closest("a[download], a[href^='blob:'], a[href^='data:']");
+        if (!target || !target.closest) return;
+        const link = target.closest("a[href^='blob:'], a[href^='data:']");
         if (link) {
+            // Saved here once; stop the engine from saving the same file again.
+            e.preventDefault();
             handleDownloadElement(link);
         }
     }, true);

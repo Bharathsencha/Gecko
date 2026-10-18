@@ -644,7 +644,7 @@ class MainActivity : FragmentActivity() {
                     val mimeType = json.optString("mimeType")
                     val contentLength = json.optLong("contentLength", 0L)
                     val isAudio = json.optBoolean("isAudio", false)
-                    Log.d("VideoSniffer", "media_detected received: $mediaUrl [$mimeType]")
+                    Log.d("VideoSniffer", "media_detected received [$mimeType]")
 
                     // googlevideo replies to sniffed range probes with protocol
                     // fragments rather than media; the YouTube extractor already
@@ -728,12 +728,12 @@ class MainActivity : FragmentActivity() {
                                         )
                                         activeTab.detectedVideos.clear()
                                         activeTab.detectedVideos.add(replacement)
-                                        Log.i("VideoSniffer", "Replaced stale entry with ${replacement.title} (${replacement.qualities.size} streams) for $pageUrl")
+                                        Log.i("VideoSniffer", "Replaced stale entry (${replacement.qualities.size} streams)")
                                     } else {
                                         val cleanQualities = existing.qualities.filter { it.url.startsWith("http") && it.url != pageUrl && !it.url.contains("youtube.com/watch") }
                                         val updated = existing.copy(qualities = sortQualities(cleanQualities + newOptions))
                                         activeTab.detectedVideos[existingIndex] = updated
-                                        Log.i("VideoSniffer", "Updated DetectedVideo on tab: ${existing.title} (${updated.qualities.size} streams)")
+                                        Log.i("VideoSniffer", "Updated DetectedVideo on tab (${updated.qualities.size} streams)")
                                     }
                                 } else {
                                     val host = try { java.net.URI(pageUrl).host ?: "" } catch (e: Exception) { "" }
@@ -747,7 +747,7 @@ class MainActivity : FragmentActivity() {
                                         qualities = sortQualities(newOptions)
                                     )
                                     activeTab.detectedVideos.add(0, detected)
-                                    Log.i("VideoSniffer", "Created new DetectedVideo from media_detected: ${detected.title} (${detected.qualities.size} streams)")
+                                    Log.i("VideoSniffer", "Created new DetectedVideo from media_detected (${detected.qualities.size} streams)")
                                 }
 
                                 // Trigger rich stream extraction for full quality and audio options
@@ -806,8 +806,19 @@ class MainActivity : FragmentActivity() {
         return com.browser.adfree.download.VideoQualityParser.sortQualities(list)
     }
 
-    /** A link, a file another app opened with Gecko, or text shared to it. */
-    private fun urlFromIntent(intent: Intent): String? = when (intent.action) {
+    /**
+     * A link, a file another app opened with Gecko, or text shared to it.
+     * Other apps never get to run script, open internal about: pages or read
+     * this app's own private files.
+     */
+    private fun urlFromIntent(intent: Intent): String? = rawUrlFromIntent(intent)?.trim()?.takeIf { raw ->
+        val lower = raw.lowercase()
+        !lower.startsWith("javascript:") && !lower.startsWith("about:") && !lower.startsWith("moz-extension:") &&
+            !lower.startsWith("resource:") && !lower.startsWith("chrome:") &&
+            !(lower.startsWith("file:") && (lower.contains("/data/") || lower.contains(packageName)))
+    }
+
+    private fun rawUrlFromIntent(intent: Intent): String? = when (intent.action) {
         Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)?.trim()?.let { text ->
             Regex("https?://\\S+").find(text)?.value ?: text
         }

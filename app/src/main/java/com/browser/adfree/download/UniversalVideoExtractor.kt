@@ -124,7 +124,7 @@ object UniversalVideoExtractor {
             val cookies = BrowserDownloadManager.cookieHeaderFor(pageUrl)
             val ytResult = YouTubeStreamExtractor.extract(pageUrl, cookies)
             if (ytResult != null && ytResult.qualities.isNotEmpty()) {
-                Log.i(TAG, "Successfully extracted via YouTubeStreamExtractor: ${ytResult.title}")
+                Log.i(TAG, "Successfully extracted via YouTubeStreamExtractor")
                 // Without cookies the PO-token-free TVHTML5 tier never ran, so the
                 // result is worth retrying once the cookie prefetch has landed.
                 if (cookies != null) cache[pageUrl] = Pair(System.currentTimeMillis(), ytResult)
@@ -136,7 +136,7 @@ object UniversalVideoExtractor {
         if (isInitialized && shouldRunYtDlp(pageUrl)) {
             val ytDlpResult = extractViaYtDlp(pageUrl)
             if (ytDlpResult != null && ytDlpResult.qualities.isNotEmpty()) {
-                Log.i(TAG, "Successfully extracted via yt-dlp: ${ytDlpResult.title} (${ytDlpResult.qualities.size} streams)")
+                Log.i(TAG, "Successfully extracted via yt-dlp (${ytDlpResult.qualities.size} streams)")
                 cache[pageUrl] = Pair(System.currentTimeMillis(), ytDlpResult)
                 return@withContext ytDlpResult
             }
@@ -303,7 +303,7 @@ object UniversalVideoExtractor {
                 qualities = sortedQualities
             )
         } catch (e: Exception) {
-            Log.d(TAG, "yt-dlp extraction failed for $pageUrl: ${e.message}")
+            Log.d(TAG, "yt-dlp extraction failed: ${e.message?.replace(Regex("https?://\\S+"), "<url>")?.take(200)}")
             null
         }
         } finally {

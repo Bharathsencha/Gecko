@@ -105,7 +105,7 @@ class SecurePasswordRepository(private val context: Context) {
             val decryptedBytes = cipher.doFinal(encryptedBytes)
             String(decryptedBytes, StandardCharsets.UTF_8)
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
             "• • • • • •"
         }
     }
@@ -131,7 +131,7 @@ class SecurePasswordRepository(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
         }
     }
 
@@ -185,11 +185,10 @@ class SecurePasswordRepository(private val context: Context) {
                 }
                 jsonArray.put(obj)
             }
-            val tempFile = File(context.filesDir, "secure_logins.json.tmp")
-            tempFile.writeText(jsonArray.toString())
-            tempFile.renameTo(file)
+            val json = jsonArray.toString()
+            DiskWriter.save(file) { json }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
         }
     }
 }

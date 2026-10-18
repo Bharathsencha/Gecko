@@ -499,7 +499,7 @@ class TabManager(private val context: Context) {
                         }
                         context.startActivity(chooser)
                     } catch (e: Exception) {
-                        e.printStackTrace()
+                        android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
                     }
                 }
                 return GeckoResult.fromValue(prompt.confirm(GeckoSession.PromptDelegate.SharePrompt.Result.SUCCESS))
@@ -712,12 +712,12 @@ class TabManager(private val context: Context) {
                         } else {
                             tab.detectedVideos.add(0, detected)
                         }
-                        Log.d("VideoSniffer", "Detected & Enriched media for tab: ${detected.title} (${detected.qualities.size} streams)")
+                        Log.d("VideoSniffer", "Detected & Enriched media for tab (${detected.qualities.size} streams)")
                     }
                     }
                 }
             } catch (e: Exception) {
-                Log.w("VideoSniffer", "Extraction failed for $capturedUrl: ${e.message}")
+                Log.w("VideoSniffer", "Extraction failed: ${e.message?.replace(Regex("https?://\\S+"), "<url>")?.take(200)}")
             } finally {
                 inFlightExtractions.remove(capturedUrl)
             }

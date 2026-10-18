@@ -753,6 +753,6 @@ private fun shareUrl(context: Context, title: String, url: String) {
         val shareIntent = Intent.createChooser(sendIntent, "Share Clean Link")
         context.startActivity(shareIntent)
     } catch (e: Exception) {
-        e.printStackTrace()
+        android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
     }
 }

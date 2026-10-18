@@ -53,7 +53,7 @@ class HistoryRepository(private val context: Context) {
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
         }
     }
 
@@ -121,22 +121,18 @@ class HistoryRepository(private val context: Context) {
     }
 
     private fun saveHistory() {
-        try {
+        val snapshot = history.toList()
+        DiskWriter.save(file) {
             val jsonArray = JSONArray()
-            for (item in history) {
-                val obj = JSONObject().apply {
+            for (item in snapshot) {
+                jsonArray.put(JSONObject().apply {
                     put("id", item.id)
                     put("title", item.title)
                     put("url", item.url)
                     put("timestamp", item.timestamp)
-                }
-                jsonArray.put(obj)
+                })
             }
-            val tempFile = File(context.filesDir, "history.json.tmp")
-            tempFile.writeText(jsonArray.toString())
-            tempFile.renameTo(file)
-        } catch (e: Exception) {
-            e.printStackTrace()
+            jsonArray.toString()
         }
     }
 }

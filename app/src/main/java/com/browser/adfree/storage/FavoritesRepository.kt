@@ -60,7 +60,7 @@ class FavoritesRepository(private val context: Context) {
                 saveFavorites()
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
             populateDefaults()
             saveFavorites()
         }
@@ -124,11 +124,10 @@ class FavoritesRepository(private val context: Context) {
                 }
                 jsonArray.put(obj)
             }
-            val tempFile = File(context.filesDir, "favorites.json.tmp")
-            tempFile.writeText(jsonArray.toString())
-            tempFile.renameTo(file)
+            val json = jsonArray.toString()
+            DiskWriter.save(file) { json }
         } catch (e: Exception) {
-            e.printStackTrace()
+            android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
         }
     }
 }

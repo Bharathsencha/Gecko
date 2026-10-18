@@ -173,7 +173,7 @@ object YouTubeStreamExtractor {
         }
 
         if (detected != null && detected.qualities.isNotEmpty()) {
-            Log.i(TAG, "Successfully extracted ${detected.qualities.size} streams for ${detected.title} [$videoId]")
+            Log.i(TAG, "Successfully extracted ${detected.qualities.size} streams")
         } else {
             Log.w(TAG, "All extraction tiers failed for $videoId")
         }

@@ -301,6 +301,6 @@ fun executeClearData(
             tabManager.sessionRepository.clearSession()
         }
     } catch (e: Exception) {
-        e.printStackTrace()
+        android.util.Log.w("GeckoApp", "Ignored ${e.javaClass.simpleName}")
     }
 }
