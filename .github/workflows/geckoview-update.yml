@@ -43,6 +43,8 @@ jobs:
           java-version: 21
       - uses: android-actions/setup-android@v3
         if: steps.v.outputs.latest != steps.v.outputs.current
+        with:
+          packages: platform-tools
       - name: Install SDK platform
         if: steps.v.outputs.latest != steps.v.outputs.current
         run: sdkmanager "platforms;android-37.1" "build-tools;37.0.0"
