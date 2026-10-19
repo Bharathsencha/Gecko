@@ -1,0 +1,747 @@
+/*
+ * Copyright (C) 2024-2026 Gibbly Gobbly <gibblygobbly@proton.me>
+ *
+ * This program is free software: you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation, either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program.  If not, see <https://www.gnu.org/licenses/>.
+ */
+
+/**
+ * App bridge: native request filter, proxy routing for the VPN, media
+ * detection and the messaging link to the app.
+ */
+
+let blockedRules = new Set();
+let tabBlockStats = {};
+let totalBlocked = 0;
+
+let adBlockingActive = true;
+let nativePort = null;
+let nativeBridgeUp = false;
+let nativeBridgeRetries = 0;
+
+// High-speed pre-compiled surrogate data URIs (0ms network time, fires script.onload without errors)
+const SURROGATE_JS_NOOP = "data:application/javascript;charset=utf-8,%2F*%20noop%20*%2F";
+const SURROGATE_ADSBYGOOGLE = "data:application/javascript;charset=utf-8,(function()%7Bwindow.adsbygoogle%3Dwindow.adsbygoogle%7C%7C%5B%5D%3Bwindow.adsbygoogle.loaded%3Dtrue%3Bwindow.adsbygoogle.push%3Dfunction(a)%7Bif(typeof%20a%3D%3D%3D'function')try%7Ba()%3B%7Dcatch(e)%7B%7D%7D%3B%7D)()%3B";
+const SURROGATE_GPT = "data:application/javascript;charset=utf-8,(function()%7Bwindow.googletag%3Dwindow.googletag%7C%7C%7Bcmd%3A%5B%5D%7D%3Bwindow.googletag.apiReady%3Dtrue%3Bwindow.googletag.pubads%3Dfunction()%7Breturn%7BaddEventListener%3Afunction()%7B%7D%2CenableSingleRequest%3Afunction()%7B%7D%2CsetTargeting%3Afunction()%7B%7D%2CcollapseEmptyDivs%3Afunction()%7B%7D%2CclearTargeting%3Afunction()%7B%7D%2Crefresh%3Afunction()%7B%7D%2CdisableInitialLoad%3Afunction()%7B%7D%2CgetSlots%3Afunction()%7Breturn%5B%5D%3B%7D%7D%3B%7D%3Bwindow.googletag.enableServices%3Dfunction()%7B%7D%3Bwindow.googletag.display%3Dfunction()%7B%7D%3Bwindow.googletag.defineSlot%3Dfunction()%7Breturn%7BaddService%3Afunction()%7Breturn%20this%3B%7D%2CsetTargeting%3Afunction()%7Breturn%20this%3B%7D%2CsetCollapseEmptyDiv%3Afunction()%7Breturn%20this%3B%7D%7D%3B%7D%3B%7D)()%3B";
+const SURROGATE_GA = "data:application/javascript;charset=utf-8,(function()%7Bwindow.ga%3Dwindow.ga%7C%7Cfunction()%7B%7D%3Bwindow.gtag%3Dwindow.gtag%7C%7Cfunction()%7B%7D%3Bwindow.dataLayer%3Dwindow.dataLayer%7C%7C%5B%5D%3B%7D)()%3B";
+const SURROGATE_FBQ = "data:application/javascript;charset=utf-8,(function()%7Bwindow.fbq%3Dwindow.fbq%7C%7Cfunction()%7B%7D%3Bwindow._fbq%3Dwindow._fbq%7C%7Cwindow.fbq%3B%7D)()%3B";
+const SURROGATE_1X1_GIF = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+
+// Built-in ad, tracker, popup and telemetry domains. Compiled with reference to
+// EasyList (https://easylist.to/), AdGuard filters (https://github.com/AdguardTeam/AdguardFilters),
+// the Firebog lists (https://firebog.net/) and d3ward's ad block test (https://github.com/d3ward/toolz).
+const coreBlocklist = [
+    // Amazon Ads & S3 Endpoints
+    "adtago.s3.amazonaws.com", "analyticsengine.s3.amazonaws.com", "advice-ads.s3.amazonaws.com",
+    "advertising-api-eu.amazon.com", "amazon-adsystem.com", "aax.amazon-adsystem.com",
+    "aan.amazon.com", "c.amazon-adsystem.com", "fls-na.amazon.com", "ir-na.amazon-adsystem.com",
+    "rcm-na.amazon-adsystem.com", "ws-na.amazon-adsystem.com", "s3-ads.amazonaws.com",
+
+    // Google Ads & DoubleClick
+    "pagead2.googlesyndication.com", "adservice.google.com", "googleadservices.com",
+    "pagead2.googleadservices.com", "afs.googlesyndication.com", "tpc.googlesyndication.com",
+    "googletagservices.com", "googleads.g.doubleclick.net", "googleads4.g.doubleclick.net",
+    "ad.doubleclick.net", "adclick.g.doubleclick.net", "cm.g.doubleclick.net",
+    "stats.g.doubleclick.net", "static.doubleclick.net", "m.doubleclick.net",
+    "mediavisor.doubleclick.net", "pubads.g.doubleclick.net", "securepubads.g.doubleclick.net",
+    "pagead.l.doubleclick.net", "doubleclick.net", "googlesyndication.com",
+
+    // Major Ad Networks & Exchanges
+    "media.net", "static.media.net", "contextual.media.net", "adservetx.media.net",
+    "ads30.adcolony.com", "adc3-launch.adcolony.com", "events3alt.adcolony.com", "wd.adcolony.com",
+    "androidads23.adcolony.com", "adcolony.com",
+    "criteo.com", "static.criteo.net", "bidder.criteo.com", "dis.criteo.com", "gum.criteo.com",
+    "sslwidget.criteo.com", "criteo.net",
+    "cdn.taboola.com", "trc.taboola.com", "images.taboola.com", "nr.taboola.com", "api.taboola.com", "taboola.com",
+    "log.outbrain.com", "widgets.outbrain.com", "odb.outbrain.com", "outbrain.com",
+    "mgid.com", "cdn.mgid.com", "servicer.mgid.com",
+    "bat.bing.com", "bingads.microsoft.com", "ads.microsoft.com", "c.bing.com",
+    "propellerads.com", "propellerclick.com", "onclickads.net",
+    "applovin.com", "d.applovin.com", "rt.applovin.com", "ms.applovin.com", "pdn.applovin.com",
+    "api.vungle.com", "vungle.com", "liftoff.io",
+    "adnxs.com", "ib.adnxs.com", "secure.adnxs.com", "acdn.adnxs.com", "prebid.adnxs.com", "sin3-ib.adnxs.com",
+    "pubmatic.com", "ads.pubmatic.com", "image6.pubmatic.com", "hbopenbid.pubmatic.com", "simage2.pubmatic.com",
+    "openx.net", "us-ads.openx.net", "rtb.openx.net", "u.openx.net", "oas.openx.net",
+    "rubiconproject.com", "pixel.rubiconproject.com", "fastlane.rubiconproject.com",
+    "optimized-by.rubiconproject.com", "spotxchange.com", "search.spotxchange.com",
+    "indexexchange.com", "casalemedia.com", "as.casalemedia.com", "cdn.indexexchange.com", "htlbid.com", "htlb.casalemedia.com",
+    "ads.yahoo.com", "analytics.yahoo.com", "geo.yahoo.com", "udc.yahoo.com", "udcm.yahoo.com",
+    "advertising.yahoo.com", "analytics.query.yahoo.com", "partnerads.ysm.yahoo.com", "log.fc.yahoo.com",
+    "gemini.yahoo.com", "adtech.yahooinc.com", "adserver.yahoo.com",
+    "auction.unityads.unity3d.com", "webview.unityads.unity3d.com", "config.unityads.unity3d.com",
+    "adserver.unityads.unity3d.com", "unityads.unity3d.com",
+    "metrika.yandex.ru", "adfox.yandex.ru", "adfstat.yandex.ru", "appmetrica.yandex.ru",
+    "extmaps-api.yandex.net", "offerwall.yandex.net", "mc.yandex.ru", "advertising.yandex.ru",
+    "an.yandex.ru", "yandex.ru/metrika",
+    "live.chartboost.com", "init.supersonicads.com", "api.fyber.com", "inmobi.com", "config.inmobi.com",
+    "ironsource.mobi", "outcome-ssp.supersonicads.com", "chartboost.com", "ironsrc.com", "supersonicads.com", "fyber.com",
+    "adsrvr.org", "insights.adsrvr.org", "match.adsrvr.org", "smartyads.com", "ad.gt", "contextweb.com",
+    "sharethrough.com", "stackadapt.com", "stickyadstv.com", "ads.stickyadstv.com", "eb2.3lift.com",
+    "tlx.3lift.com", "apex.go.sonobi.com", "c.gumgum.com", "a.teads.tv", "cdn.teads.tv", "cdn.kargo.com",
+    "sync.kargo.com", "triplelift.com", "yieldmo.com", "zemanta.com", "gumgum.com", "teads.tv",
+    "d.adroll.com", "s.adroll.com", "adroll.com",
+    "pangleglobal.com", "pangolin.snssdk.com", "pangle.io",
+    "doubleverify.com", "cdn.doubleverify.com", "tps.doubleverify.com", "pixel.adsafeprotected.com",
+    "static.adsafeprotected.com", "fw.adsafeprotected.com", "insightexpressai.com",
+    "mintegral.com", "smaato.net", "adsmol.com", "ad-delivery.net", "ad-maven.com",
+    "adpushup.com", "adskeeper.co.uk", "adthrive.com", "mediavine.com", "monetag.com",
+    "adtrue.com", "adblade.com", "richaudience.com", "sovrn.com", "undertone.com",
+
+    // Tracking, Telemetry & Analytics
+    "analytics.google.com", "region1.google-analytics.com", "click.googleanalytics.com",
+    "google-analytics.com", "ssl.google-analytics.com", "www.google-analytics.com",
+    "googletagmanager.com", "tagmanager.google.com", "www.googletagmanager.com",
+    "analytics.adobe.io", "omtrdc.net", "metrics.adobe.com",
+    "clarity.ms", "c.clarity.ms", "s.clarity.ms",
+    "adm.hotjar.com", "identify.hotjar.com", "insights.hotjar.com", "script.hotjar.com",
+    "surveys.hotjar.com", "careers.hotjar.com", "events.hotjar.io", "static.hotjar.com",
+    "vars.hotjar.com", "in.hotjar.com", "hotjar.com",
+    "cdn.mouseflow.com", "o2.mouseflow.com", "gtm.mouseflow.com", "api.mouseflow.com",
+    "tools.mouseflow.com", "cdn-test.mouseflow.com", "mouseflow.com",
+    "claritybt.freshmarketer.com", "fwtracks.freshmarketer.com", "freshmarketer.com",
+    "api.luckyorange.com", "realtime.luckyorange.com", "cdn.luckyorange.com", "w1.luckyorange.com",
+    "upload.luckyorange.net", "cs.luckyorange.net", "settings.luckyorange.net", "luckyorange.com", "luckyorange.net",
+    "stats.wp.com",
+    "cdn.heapanalytics.com", "heapanalytics.com",
+    "api.mixpanel.com", "api-js.mixpanel.com", "decide.mixpanel.com", "mixpanel.com", "cdn.mxpnl.com",
+    "api.amplitude.com", "api2.amplitude.com", "amplitude.com",
+    "cdn.segment.com", "api.segment.io", "events.segment.io", "segment.io",
+    "rs.fullstory.com", "edge.fullstory.com", "fullstory.com",
+    "quantserve.com", "pixel.quantserve.com", "quantcast.com", "edge.quantserve.com",
+    "sb.scorecardresearch.com", "b.scorecardresearch.com", "scorecardresearch.com",
+    "static.cloudflareinsights.com", "cloudflareinsights.com", "app.posthog.com",
+    "eu.posthog.com", "us.i.posthog.com", "posthog.com", "rudderstack.com",
+    "cdn.rudderlabs.com", "snowplowanalytics.com", "tracker.snowplowanalytics.com",
+
+    // Tracking & Fingerprinting
+    "fingerprintjs.com", "fpjs.io", "siftscience.com", "cdn.siftscience.com", "cdn.permutive.com", "permutive.com",
+    "bluekai.com", "tags.bluekai.com", "onetag-sys.com", "pippio.com", "id5-sync.com",
+    "sync.mathtag.com", "pixel.mathtag.com", "crwdcntrl.net", "bcp.crwdcntrl.net", "bidswitch.net",
+    "sync-tm.everesttech.net", "prod.uidapi.com", "everesttech.net", "uidapi.com",
+    "idsync.rlcdn.com", "api.rlcdn.com", "rlcdn.com",
+    "tags.crwdcntrl.net", "ad.crwdcntrl.net", "sync.crwdcntrl.net",
+    "app.appsflyer.com", "appsflyer.com", "app.adjust.com", "adjust.com", "api2.branch.io",
+    "branch.io", "cdn.branch.io", "bnc.lt", "kochava.com", "control.kochava.com",
+    "sdk-api-v1.singular.net", "singular.net", "wzrkt.com",
+
+    // Error Trackers
+    "notify.bugsnag.com", "sessions.bugsnag.com", "api.bugsnag.com", "app.bugsnag.com", "bugsnag.com",
+    "browser.sentry-cdn.com", "app.getsentry.com", "ingest.sentry.io", "o0.ingest.sentry.io",
+    "sentry.io", "js.sentry-cdn.com", "sentry-cdn.com",
+    "bam.nr-data.net", "bam-cell.nr-data.net", "js-agent.newrelic.com", "newrelic.com",
+    "browser-intake-datadoghq.com", "rum.browser-intake-datadoghq.com", "datadoghq.com",
+    "cdn.lr-ingest.com", "r.lr-ingest.com", "logrocket.io", "cdn.logrocket.io", "r.logrocket.io",
+    "raygun.io", "cdn.raygun.io", "api.raygun.io",
+
+    // Cryptominers, Popups & Malvertising
+    "coinimp.com", "www.coinimp.com", "webminepool.com", "minero.cc", "mineralt.io", "monerominer.rocks",
+    "coinhive.com", "crypto-loot.com", "coin-have.com", "minr.pw", "authedmine.com", "browser-mining.com",
+    "popads.net", "popcash.net", "popmyads.com", "clickadu.com", "trafficjunky.net", "trafficjunky.com",
+    "exoclick.com", "juicyads.com", "adsterra.com", "adcash.com", "hilltopads.net", "yllix.com",
+    "revenuehits.com", "bidvertiser.com", "chitika.com", "infolinks.com", "revcontent.com", "zergnet.com",
+    "statdynamic.com",
+
+    // Social Trackers
+    "pixel.facebook.com", "an.facebook.com", "connect.facebook.net", "graph.facebook.com", "tr.facebook.com",
+    "facebook.net", "facebook.com/tr",
+    "graph.instagram.com", "i.instagram.com",
+    "sc-static.net", "tr.snapchat.com", "ads.snapchat.com", "sc-analytics.appspot.com", "snapchat.com",
+    "ads.linkedin.com", "analytics.pointdrive.linkedin.com", "snap.licdn.com", "px.ads.linkedin.com",
+    "dc.ads.linkedin.com", "linkedin.com",
+    "static.ads-twitter.com", "ads-api.twitter.com", "ads-api.x.com", "analytics.twitter.com",
+    "analytics.x.com", "ads.x.com", "ads-twitter.com",
+    "events.reddit.com", "events.redditmedia.com", "pixel.redditmedia.com", "d.reddit.com",
+    "ads-api.tiktok.com", "analytics.tiktok.com", "ads-sg.tiktok.com", "analytics-sg.tiktok.com",
+    "business-api.tiktok.com", "ads.tiktok.com", "log.byteoversea.com", "mon.byteoversea.com",
+    "mcs-va.tiktokv.com", "mon.tiktokv.com",
+    "ads.pinterest.com", "ct.pinterest.com", "log.pinterest.com", "analytics.pinterest.com",
+    "trk.pinterest.com", "widgets.pinterest.com",
+    "pixel.quora.com", "qevents.quora.com", "px.srvcs.tumblr.com",
+    "ads.vk.com", "ad.mail.ru", "top-fwz1.mail.ru",
+
+    // OEM Vendors & Telemetry
+    "advertising.apple.com", "tr.iadsdk.apple.com", "iadsdk.apple.com", "metrics.icloud.com",
+    "metrics.apple.com", "metrics.mzstatic.com", "api-adservices.apple.com", "books-analytics-events.apple.com",
+    "notes-analytics-events.apple.com", "xp.apple.com",
+    "iot-eu-logser.realme.com", "iot-logser.realme.com", "bdapi-ads.realmemobile.com", "bdapi-in-ads.realmemobile.com",
+    "adsfs.oppomobile.com", "adx.ads.oppomobile.com", "ck.ads.oppomobile.com", "data.ads.oppomobile.com",
+    "click.oneplus.cn", "open.oneplus.net",
+    "metrics.data.hicloud.com", "metrics2.data.hicloud.com", "grs.hicloud.com", "logservice.hicloud.com",
+    "logservice1.hicloud.com", "logbak.hicloud.com", "ads.huawei.com",
+    "api.ad.xiaomi.com", "data.mistat.xiaomi.com", "data.mistat.india.xiaomi.com", "data.mistat.rus.xiaomi.com",
+    "sdkconfig.ad.xiaomi.com", "sdkconfig.ad.intl.xiaomi.com", "globalapi.ad.xiaomi.com",
+    "tracking.rus.miui.com", "tracking.miui.com",
+    "samsungads.com", "smetrics.samsung.com", "nmetrics.samsung.com", "samsung-com.112.2o7.net",
+    "analytics-api.samsunghealthcn.com", "config.samsungads.com",
+    "adlog.vivo.com", "ads-api.vivo.com", "a.lenovo.com",
+    "us.info.lgsmartad.com", "us.ibs.lgappstv.com", "ad.lgappstv.com", "info.lgsmartad.com",
+    "ngfts.lge.com", "yumenetworks.com", "smartclip.net", "smartclip.com",
+    "settings-win.data.microsoft.com", "vortex.data.microsoft.com", "vortex-win.data.microsoft.com",
+    "watson.telemetry.microsoft.com", "telemetry.microsoft.com", "browser.events.data.msn.com",
+    "device-metrics-us.amazon.com", "device-metrics-us-2.amazon.com", "mads-eu.amazon.com",
+    "logs.roku.com", "ads.roku.com", "amoeba.web.roku.com", "ads.vizio.com", "tvinteractive.tv", "tvpixel.com",
+    "firebase-settings.crashlytics.com",
+
+    // Consent Management & CMP
+    "cdn.cookielaw.org", "geolocation.onetrust.com", "privacyportal.onetrust.com",
+    "consent.cookiebot.com", "consentcdn.cookiebot.com", "cookiebot.com", "consent.trustarc.com",
+    "sdk.privacy-center.org", "cdn.privacy-mgmt.com", "app.usercentrics.eu", "cmp.usercentrics.eu",
+    "cmp.inmobi.com", "sourcepoint.mgr.consensu.org", "cmp.osano.com", "fundingchoicesmessages.google.com",
+    "onetrust.com", "cookielaw.org",
+
+    // Affiliate Networks
+    "www.anrdoezrs.net", "www.dpbolvw.net", "www.tkqlhce.com", "anrdoezrs.net", "dpbolvw.net", "tkqlhce.com",
+    "shareasale.com", "click.linksynergy.com", "ad.linksynergy.com", "track.linksynergy.com", "linksynergy.com",
+    "d.impactradius-event.com", "impactradius-event.com", "www.awin1.com", "zenaps.com", "prf.hn", "awin1.com",
+    "partnerstack.com", "api.partnerstack.com", "refersion.com", "t.pepperjamnetwork.com", "pepperjamnetwork.com",
+    "s.skimresources.com", "t.skimresources.com", "go.skimresources.com", "redirector.skimresources.com",
+    "go.redirectingat.com", "skimresources.com", "redirectingat.com",
+    "redirect.viglink.com", "cdn.viglink.com", "api.viglink.com", "viglink.com",
+
+    // A/B Testing & Email/Chat Trackers
+    "cdn.optimizely.com", "logx.optimizely.com", "api.optimizely.com", "cdn.dynamicyield.com",
+    "st.dynamicyield.com", "events.launchdarkly.com", "clientstream.launchdarkly.com",
+    "dynamicyield.com", "launchdarkly.com", "optimizely.com",
+    "list-manage.com", "track.hubspot.com", "munchkin.marketo.net", "click.mailchimp.com",
+    "widget.intercom.io", "js.driftt.com", "sdk.iad-01.braze.com", "cdn.onesignal.com",
+    "api.onesignal.com", "static.klaviyo.com", "a.klaviyo.com", "customer.io", "track.customer.io",
+
+    // Video Ads (VAST / VPAID / Players)
+    "dai.google.com", "g.jwpsrv.com", "ssl.p.jwpcdn.com", "prd.jwpltx.com", "jwpsrv.com", "jwpcdn.com", "jwpltx.com",
+    "mssl.fwmrm.net", "bea4.v.fwmrm.net", "2975c.v.fwmrm.net", "fwmrm.net",
+    "cd.connatix.com", "capi.connatix.com", "vid.connatix.com", "connatix.com",
+    "metrics.brightcove.com", "s.innovid.com", "innovid.com", "tremorhub.com", "ads.tremorhub.com"
+];
+
+// Initialize Set with core domains
+coreBlocklist.forEach(domain => blockedRules.add(domain.toLowerCase().trim()));
+
+// Load cached rules from storage
+try {
+    browser.storage.local.get(["cachedRules", "totalBlocked"], (res) => {
+        if (res && res.cachedRules && Array.isArray(res.cachedRules)) {
+            res.cachedRules.forEach(d => blockedRules.add(d.toLowerCase().trim()));
+        }
+        if (res && res.totalBlocked) {
+            totalBlocked = res.totalBlocked;
+        }
+    });
+} catch (e) {}
+
+// High-performance URL Inspection & Decision Engine
+const AD_PATTERN_PATH_LIST = [
+    "/ads", "/ad", "/adserver", "/adserver/ads", "/pagead", "/pagead/ads",
+    "/gampad/ads", "/doubleclick/ad", "/vast", "/vpaid", "/prebid", "/bidder",
+    "/hb", "/ads.js", "/ad.js", "/pagead.js", "/advertisement.js", "/adsbygoogle.js",
+    "/analytics/collect", "/tracking/pixel"
+];
+
+function shouldBlockOrRedirectUrl(urlStr, type) {
+    if (!adBlockingActive) return null;
+    let url;
+    try {
+        url = new URL(urlStr);
+    } catch (e) {
+        return null;
+    }
+    const host = url.hostname.toLowerCase();
+    const pathname = url.pathname.toLowerCase();
+
+    // Never block video playback streams
+    if (host.includes("googlevideo.com") || (host.includes("youtube.com") && (pathname.includes("/videoplayback") || pathname.includes("/watch") || pathname.includes("/s/")))) {
+        return null;
+    }
+
+    // 1. Scriptlet & Path Defusers (0ms surrogate responses to avoid broken page scripts)
+    if (pathname.endsWith("/ads.js") || 
+        pathname.endsWith("/pagead.js") || 
+        pathname.endsWith("/advertisement.js") || 
+        pathname.endsWith("/ad-banner.js") || 
+        pathname.endsWith("/prebid.js") || 
+        pathname.endsWith("/prebid-ads.js") ||
+        pathname.endsWith("/ad.js")) {
+        return { redirectUrl: SURROGATE_JS_NOOP };
+    }
+
+    if (host.includes("googlesyndication.com") && pathname.includes("/pagead/js/adsbygoogle.js")) {
+        return { redirectUrl: SURROGATE_ADSBYGOOGLE };
+    }
+
+    if (host.includes("googletagservices.com") && (pathname.includes("/gpt.js") || pathname.includes("/tag/js/gpt.js"))) {
+        return { redirectUrl: SURROGATE_GPT };
+    }
+
+    if ((host.includes("google-analytics.com") || host.includes("googletagmanager.com")) && 
+        (pathname.includes("/analytics.js") || pathname.includes("/gtag/js") || pathname.includes("/gtm.js"))) {
+        return { redirectUrl: SURROGATE_GA };
+    }
+
+    if (host.includes("connect.facebook.net") && pathname.includes("fbevents.js")) {
+        return { redirectUrl: SURROGATE_FBQ };
+    }
+
+    // 2. Direct & Suffix Domain Matching
+    const parts = host.split(".");
+    for (let i = 0; i < parts.length - 1; i++) {
+        const checkDomain = parts.slice(i).join(".");
+        if (blockedRules.has(checkDomain)) {
+            if (type === "image") return { redirectUrl: SURROGATE_1X1_GIF };
+            if (type === "script") return { redirectUrl: SURROGATE_JS_NOOP };
+            return { cancel: true };
+        }
+    }
+
+    // 3. Amazon S3 Ad/Analytics Buckets
+    if (host.endsWith(".amazonaws.com")) {
+        const s3Prefix = parts[0];
+        if (s3Prefix.includes("ad") || s3Prefix.includes("analytics") || s3Prefix.includes("telemetry") || s3Prefix.includes("tracker")) {
+            if (type === "image") return { redirectUrl: SURROGATE_1X1_GIF };
+            if (type === "script") return { redirectUrl: SURROGATE_JS_NOOP };
+            return { cancel: true };
+        }
+    }
+
+    // 4. Benchmark AD_PATTERN_PATHS checks (e.g. /gampad/ads, /tracking/pixel, etc.)
+    for (let p of AD_PATTERN_PATH_LIST) {
+        if (pathname.includes(p)) {
+            if (type === "image") return { redirectUrl: SURROGATE_1X1_GIF };
+            if (type === "script") return { redirectUrl: SURROGATE_JS_NOOP };
+            return { cancel: true };
+        }
+    }
+
+    // 5. Common Ad / Tracking file paths
+    if (pathname.includes("/pagead/") || pathname.includes("/adserver/") || pathname.includes("/pixel.gif") || pathname.includes("/beacon.gif")) {
+        if (type === "image") return { redirectUrl: SURROGATE_1X1_GIF };
+        if (type === "script") return { redirectUrl: SURROGATE_JS_NOOP };
+        return { cancel: true };
+    }
+
+    return null;
+}
+
+// YouTube detects request blocking and walls the player, so its pages get no
+// network filtering. content.js fast-forwards the ads there instead.
+const YOUTUBE_HOST_REGEX = /(^|\.)(youtube\.com|youtube-nocookie\.com|youtu\.be)$/i;
+
+function hostOf(urlStr) {
+    try { return new URL(urlStr).hostname; } catch (e) { return ""; }
+}
+
+function isYouTubeDocument(details) {
+    let top = details.documentUrl || details.originUrl || "";
+    if (details.frameAncestors && details.frameAncestors.length) {
+        top = details.frameAncestors[details.frameAncestors.length - 1].url;
+    } else if (details.type === "main_frame") {
+        top = details.url;
+    }
+    return YOUTUBE_HOST_REGEX.test(hostOf(top));
+}
+
+// Intercept WebRequests Before They Hit the Network
+if (browser.webRequest && browser.webRequest.onBeforeRequest) {
+    browser.webRequest.onBeforeRequest.addListener(
+        (details) => {
+            if (isYouTubeDocument(details)) return {};
+            const result = shouldBlockOrRedirectUrl(details.url, details.type);
+            if (result) {
+                totalBlocked++;
+                const tabId = details.tabId;
+                if (tabId && tabId >= 0) {
+                    tabBlockStats[tabId] = (tabBlockStats[tabId] || 0) + 1;
+                    notifyNative({
+                        action: "blocked_count",
+                        tabId: tabId,
+                        count: tabBlockStats[tabId],
+                        total: totalBlocked,
+                        host: hostOf(details.url),
+                        incognito: !!details.incognito
+                    });
+                }
+                return result;
+            }
+            return {};
+        },
+        { urls: ["<all_urls>"] },
+        ["blocking"]
+    );
+}
+
+// Reset tab stats on navigation
+if (browser.webNavigation && browser.webNavigation.onCommitted) {
+    browser.webNavigation.onCommitted.addListener((details) => {
+        if (details.frameId === 0 && details.tabId >= 0) {
+            tabBlockStats[details.tabId] = 0;
+            notifyNative({
+                action: "blocked_count",
+                tabId: details.tabId,
+                count: 0,
+                total: totalBlocked
+            });
+        }
+    });
+}
+
+// Universal Network Media Sniffer
+//
+// Detection is deliberately host-agnostic: a URL either looks like media
+// (extension or segmented/manifest path), is reported as media by Gecko, or is
+// answered with a video/audio content type. No allowlist of particular sites.
+const MEDIA_EXT_REGEX = /\.(mp4|webm|mkv|m4v|mov|m3u8|mpd|m4a|mp3|aac|opus|flv|f4v)($|\?|#)/i;
+// Pages and video usually share a CDN. Without this, a host that serves both
+// turns every .js/.json/.jpg into a fake "video" option.
+const NON_MEDIA_EXT_REGEX = /\.(js|mjs|css|json|xml|html|htm|png|jpe?g|gif|avif|webp|svg|ico|woff2?|ttf|otf|map|txt|vtt|srt|ass|ssa|ttml|dfxp)($|\?|#)/i;
+// Hover/streaming previews and thumbnail hosts carry real video bytes, but they
+// are the wrong file: a progressive preview wins the "first progressive"
+// default in the download sheet and lands as a short silent clip.
+const PREVIEW_REGEX = /(^|\/)(preview|sample|trailer|teaser|clips?)([-_.][^/?]*)?\.(mp4|webm|m4v|mov|m3u8|mpd)($|\?|#)/i;
+const THUMB_HOST_REGEX = /(^|\/\/)(thumb|thumbs|img|media-thumb)[-.]/i;
+// Streams without a media extension are recognised by path: segmented delivery,
+// playlists and manifests.
+const STREAM_PATH_REGEX = /(\/videoplayback|[?&]itag=\d+|\/hls(\/|$)|\.m3u8(\?|#|$)|\.mpd(\?|#|$)|\/manifest(\?|#|$))/i;
+const detectedMediaUrls = new Set();
+
+function isLikelyStream(url, type) {
+    // Top-level documents and iframes are pages, never streams.
+    if (type === "main_frame" || type === "sub_frame") return false;
+    if (NON_MEDIA_EXT_REGEX.test(url)) return false;
+    if (PREVIEW_REGEX.test(url) || THUMB_HOST_REGEX.test(url)) return false;
+    if (MEDIA_EXT_REGEX.test(url)) return true;
+    if (type === "media") return true;
+    return STREAM_PATH_REGEX.test(url);
+}
+
+// YouTube serves a *new* URL for every range request (rn=2, rn=3, ...), so a
+// plain URL set lets one playing video flood the app. Collapse those back to
+// the logical stream (video id + itag) before reporting.
+function mediaKey(url) {
+    if (url.includes("googlevideo.com/videoplayback")) {
+        const id = /[?&]id=([^&]+)/.exec(url);
+        const itag = /[?&]itag=(\d+)/.exec(url);
+        if (id && itag) return "yt:" + id[1] + ":" + itag[1];
+    }
+    return url.replace(/([?&])rn=\d+&?/, "$1").replace(/[?&]$/, "");
+}
+function rememberMedia(url) {
+    const key = mediaKey(url);
+    if (detectedMediaUrls.has(key)) return null;
+    // Bound the set so a long browsing session cannot grow it without limit.
+    if (detectedMediaUrls.size > 600) detectedMediaUrls.clear();
+    detectedMediaUrls.add(key);
+    return key;
+}
+
+// 1. Instant Request Sniffer (onBeforeRequest)
+if (browser.webRequest && browser.webRequest.onBeforeRequest) {
+    browser.webRequest.onBeforeRequest.addListener(
+        (details) => {
+            try {
+                if (!details || !details.url) return;
+                const url = details.url;
+                if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:")) return;
+                // YouTube streams come from the player response instead; the app ignores these.
+                if (url.includes("googlevideo.com/")) return;
+                if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) return;
+                const isM3u8 = url.includes(".m3u8");
+                const isAudio = url.includes("mime=audio") || url.includes(".m4a") || url.includes(".mp3") || url.includes(".aac");
+
+                if (isLikelyStream(url, details.type)) {
+                    if (rememberMedia(url) === null) return;
+                    notifyNative({
+                        action: "media_detected",
+                        tabId: details.tabId,
+                        url: url,
+                        mimeType: isM3u8 ? "application/x-mpegURL" : (isAudio ? "audio/mp4" : "video/mp4"),
+                        contentLength: 0,
+                        isAudio: isAudio,
+                        type: details.type || "media"
+                    });
+                }
+            } catch (e) {}
+            return {};
+        },
+        { urls: ["<all_urls>"] },
+        // Observe only: a blocking listener holds every media request until
+        // this script answers, which stalled YouTube's segment fetches.
+        []
+    );
+}
+
+// 2. Response Headers Inspector (onHeadersReceived)
+if (browser.webRequest && browser.webRequest.onHeadersReceived) {
+    browser.webRequest.onHeadersReceived.addListener(
+        (details) => {
+            try {
+                if (!details || !details.url) return;
+                const url = details.url;
+                if (url.startsWith("data:") || url.startsWith("blob:") || url.startsWith("about:")) return;
+                // YouTube streams come from the player response instead; the app ignores these.
+                if (url.includes("googlevideo.com/")) return;
+                if (url.includes(".ts?") || url.endsWith(".ts") || url.includes(".m4s?") || url.endsWith(".m4s")) return;
+
+                let contentType = "";
+                let contentLength = 0;
+
+                if (details.responseHeaders) {
+                    for (const header of details.responseHeaders) {
+                        const name = (header.name || "").toLowerCase();
+                        if (name === "content-type") {
+                            contentType = (header.value || "").toLowerCase();
+                        } else if (name === "content-length") {
+                            contentLength = parseInt(header.value, 10) || 0;
+                        }
+                    }
+                }
+
+                const isVideoMime = contentType.startsWith("video/") ||
+                                    contentType.includes("application/x-mpegurl") ||
+                                    contentType.includes("vnd.apple.mpegurl") ||
+                                    contentType.includes("application/dash+xml") ||
+                                    contentType.includes("video/mp4") ||
+                                    contentType.includes("video/webm");
+                const isAudioMime = contentType.startsWith("audio/") || contentType.includes("audio/x-m4a");
+                if (NON_MEDIA_EXT_REGEX.test(url) || PREVIEW_REGEX.test(url) || THUMB_HOST_REGEX.test(url)) return;
+                const isMediaExt = MEDIA_EXT_REGEX.test(url);
+
+                if (isLikelyStream(url, details.type) || isVideoMime || isAudioMime) {
+                    if (contentLength > 0 && contentLength < 30000 && !url.includes(".m3u8") && !url.includes(".mpd")) {
+                        return;
+                    }
+
+                    if (rememberMedia(url) !== null) {
+                        notifyNative({
+                            action: "media_detected",
+                            tabId: details.tabId,
+                            url: url,
+                            mimeType: contentType || (isMediaExt ? "video/mp4" : "application/x-mpegURL"),
+                            contentLength: contentLength,
+                            isAudio: isAudioMime && !isVideoMime,
+                            type: details.type || "media"
+                        });
+                    }
+                }
+            } catch (e) {}
+            return {};
+        },
+        { urls: ["<all_urls>"] },
+        ["responseHeaders"]
+    );
+}
+
+if (browser.webNavigation && browser.webNavigation.onCommitted) {
+    browser.webNavigation.onCommitted.addListener((details) => {
+        if (details.frameId === 0) {
+            detectedMediaUrls.clear();
+        }
+    });
+}
+
+if (browser.webNavigation && browser.webNavigation.onHistoryStateUpdated) {
+    browser.webNavigation.onHistoryStateUpdated.addListener((details) => {
+        if (details.frameId === 0) {
+            detectedMediaUrls.clear();
+        }
+    });
+}
+
+// Proxy routing for the in-app VPN (Tor or a verified SOCKS5 relay).
+// Fails closed: with the proxy enabled there is no direct fallback, so a dead
+// relay shows an error page instead of leaking the real address.
+let proxyConfig = { enabled: false, type: "socks", host: "", port: 0 };
+
+function isLoopback(urlStr) {
+    const h = hostOf(urlStr);
+    return h === "localhost" || h === "127.0.0.1" || h === "[::1]";
+}
+
+if (browser.proxy && browser.proxy.onRequest) {
+    browser.proxy.onRequest.addListener((info) => {
+        if (!proxyConfig.enabled || isLoopback(info.url)) {
+            return { type: "direct" };
+        }
+        return {
+            type: proxyConfig.type,
+            host: proxyConfig.host,
+            port: proxyConfig.port,
+            proxyDNS: proxyConfig.type === "socks",
+            failoverTimeout: 15
+        };
+    }, { urls: ["<all_urls>"] });
+
+    if (browser.proxy.onError) {
+        browser.proxy.onError.addListener((err) => {
+            notifyNative({ action: "vpn_error", message: String((err && err.message) || err) });
+        });
+    }
+}
+
+// Native Messaging Bridge for GeckoView Android
+function notifyNative(msg) {
+    if (!msg) return;
+    try {
+        if (browser.runtime && browser.runtime.sendNativeMessage) {
+            browser.runtime.sendNativeMessage("browser_app", msg).catch(() => {});
+        }
+    } catch (e) {}
+}
+
+function handleConfigUpdate(msg) {
+    if (!msg) return;
+
+    if (msg.action === "set_vpn_config") {
+        proxyConfig = {
+            enabled: !!msg.enabled && !!msg.host && msg.port > 0,
+            type: msg.type === "http" ? "http" : "socks",
+            host: msg.host || "",
+            port: msg.port | 0
+        };
+        notifyNative({ action: "vpn_applied", enabled: proxyConfig.enabled });
+    }
+
+    if (msg.action === "set_ad_blocking") {
+        adBlockingActive = !!msg.enabled;
+    }
+
+    // Flags read by content.js at document_start
+    if (msg.action === "set_content_flags") {
+        const flags = {
+            blockAi: msg.blockAi !== false,
+            cosmetic: msg.cosmetic !== false,
+            dark: !!msg.dark
+        };
+        browser.storage.local.set({ contentFlags: flags }).catch(() => {});
+    }
+}
+
+// Listen for messages from content scripts (download_blob, share_payload, video_detected, etc.) and forward to native app
+browser.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+    if (msg) {
+        if (msg.action === "clear_detected_media") {
+            detectedMediaUrls.clear();
+        }
+        if (sender && sender.tab && sender.tab.id >= 0 && !msg.tabId) {
+            msg.tabId = sender.tab.id;
+        }
+        notifyNative(msg);
+    }
+    return true;
+});
+
+/**
+ * Native port used for app -> extension requests (config toggles, cookie reads).
+ * `connectToNativeBridge` is invoked at load time below; it must exist or the
+ * ReferenceError aborts the remainder of this background script.
+ * `nativePort` is declared with the other module state near the top of the file.
+ */
+function connectToNativeBridge() {
+    try {
+        if (!browser.runtime || !browser.runtime.connectNative) return;
+        if (nativePort) {
+            try { nativePort.disconnect(); } catch (e) {}
+            nativePort = null;
+        }
+        nativePort = browser.runtime.connectNative("browser_app");
+        nativePort.onMessage.addListener(function (msg) {
+            if (!msg) return;
+            nativeBridgeUp = true;
+            nativeBridgeRetries = 0;
+            if (msg.action === "get_cookies") {
+                collectCookiesFor(msg.url).then(function (header) {
+                    try {
+                        nativePort.postMessage({
+                            action: "cookies_result",
+                            url: msg.url,
+                            cookieHeader: header
+                        });
+                    } catch (e) {}
+                });
+            } else {
+                handleConfigUpdate(msg);
+            }
+        });
+        nativePort.onDisconnect.addListener(function () {
+            nativePort = null;
+            scheduleNativeBridgeRetry();
+        });
+        scheduleNativeBridgeRetry();
+    } catch (e) {
+        scheduleNativeBridgeRetry();
+    }
+}
+
+/**
+ * The app installs its MessageDelegate only after ensureBuiltIn() resolves, so a
+ * connect issued during background-script load can be dropped. Retry a bounded
+ * number of times until the app talks back (syncExtensionConfig posts on connect).
+ */
+function scheduleNativeBridgeRetry() {
+    if (nativeBridgeUp || nativeBridgeRetries >= 10) return;
+    nativeBridgeRetries++;
+    setTimeout(function () {
+        if (!nativeBridgeUp) connectToNativeBridge();
+    }, 3000);
+}
+
+async function collectCookiesFor(url) {
+    if (!url || !browser.cookies || !browser.cookies.getAll) return "";
+    try {
+        const cookies = await browser.cookies.getAll({ url: url });
+        if (!cookies || !cookies.length) return "";
+        return cookies
+            .map(function (c) { return c.name + "=" + c.value; })
+            .join("; ");
+    } catch (e) {
+        return "";
+    }
+}
+
+connectToNativeBridge();
+
+// Remote Blocklist Auto-Update (24h TTL)
+async function fetchRemoteBlocklistUpdate() {
+    const CACHE_KEY = "remote_blocklist_cache";
+    const TS_KEY = "remote_blocklist_ts";
+    const TTL = 24 * 60 * 60 * 1000;
+    const UPDATE_URL = "https://raw.githubusercontent.com/Bharathsencha/Gecko/main/blocklist-update.json";
+
+    try {
+        const stored = await browser.storage.local.get([CACHE_KEY, TS_KEY]);
+        const cachedTs = stored[TS_KEY] || 0;
+        const now = Date.now();
+
+        if (stored[CACHE_KEY] && (now - cachedTs) < TTL) {
+            applyRemoteBlocklist(stored[CACHE_KEY]);
+            return;
+        }
+
+        const response = await fetch(UPDATE_URL, { cache: "no-store" });
+        if (!response.ok) return;
+        const data = await response.json();
+
+        await browser.storage.local.set({ [CACHE_KEY]: data, [TS_KEY]: now });
+        applyRemoteBlocklist(data);
+    } catch (e) {}
+}
+
+function applyRemoteBlocklist(data) {
+    if (!data) return;
+    if (Array.isArray(data.domains)) {
+        data.domains.forEach(d => {
+            if (typeof d === "string" && d.length > 0) {
+                blockedRules.add(d.toLowerCase().trim());
+            }
+        });
+    }
+}
+
+fetchRemoteBlocklistUpdate();

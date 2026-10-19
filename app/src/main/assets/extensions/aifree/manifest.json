@@ -1,0 +1,41 @@
+{
+  "manifest_version": 2,
+  "name": "AI Overview Blocker",
+  "version": "2.0.0",
+  "description": "App bridge: proxy routing, AI Overview removal, reader extraction, media detection",
+  "permissions": [
+    "proxy",
+    "storage",
+    "cookies",
+    "webRequest",
+    "webRequestBlocking",
+    "webNavigation",
+    "nativeMessaging",
+    "nativeMessagingFromContent",
+    "geckoViewAddons",
+    "<all_urls>"
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": true,
+      "match_about_blank": false
+    }
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "aifree-embedded@browser.adfree"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+build/
+*/build/
+app/build/
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+*.apk
+*.aab
+
+
+# Release signing (never commit)
+keystore.properties
+*.jks
+*.keystore
+
+# Copied from the repository root at build time
+app/src/main/assets/legal/
