@@ -4,7 +4,7 @@
 #   feat!: ... or a BREAKING CHANGE footer   -> first number up, second back to 0
 #   feat, fix, perf, refactor, style,
 #   "chore: update GeckoView"                -> second number up
-#   docs, ci, test, other chore only         -> no release
+#   docs, ci, test, other chore only         -> no release (except the very first run)
 # Run it by hand (Actions > Release > Run workflow) to force a major or minor bump.
 #
 # Needs these repository secrets (Settings > Secrets and variables > Actions):
@@ -71,6 +71,8 @@ jobs:
           elif grep -qE '^(feat|fix|perf|refactor|style)(\([^)]*\))?:|^chore: update GeckoView' <<< "$subjects"; then
             bump=minor
           fi
+          # Nothing is released yet: the first run always publishes, whatever the commits say.
+          if [ "$bump" = none ] && [ -z "$last" ]; then bump=minor; fi
           if [ -n "${BUMP_INPUT:-}" ] && [ "$BUMP_INPUT" != auto ]; then bump="$BUMP_INPUT"; fi
 
           IFS=. read -r ma mi _ <<< "$base"
@@ -136,6 +138,13 @@ jobs:
           sha256sum "$out" > "$out.sha256"
           echo "file=$out" >> "$GITHUB_OUTPUT"
           rm -f keystore.properties "$RUNNER_TEMP/release.jks"
+
+      - name: Keep the APK with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.file }}
+          path: ${{ steps.apk.outputs.file }}
+          retention-days: 30
 
       - uses: softprops/action-gh-release@v2
         with:
