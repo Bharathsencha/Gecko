@@ -4,6 +4,7 @@
 
 A privacy-first Android browser built on Mozilla GeckoView: ad and tracker blocking, uniform anti-fingerprinting, a built-in Tor and free-proxy VPN, private tabs that leave nothing behind, and a video and audio downloader.
 
+Website: https://bharathsencha.github.io/Gecko/
 Author: Gibbly Gobbly <gibblygobbly@proton.me>
 License: GNU General Public License v3.0 or later
 
