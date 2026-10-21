@@ -1,10 +1,9 @@
-# Unit tests and a compile check on every push and pull request.
+# Unit tests and a compile check, run by hand only (Actions > CI > Run workflow).
+# Pushes do not start it; the Release workflow runs the tests when a version is released.
 name: CI
 
 on:
-  push:
-    branches: [main]
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test:

@@ -1,11 +1,7 @@
-# Every push to main that changes the app builds a signed APK and publishes it as a
-# GitHub Release. The version has two numbers, MAJOR.MINOR, and is worked out from the
-# newest vX.Y tag and the commit messages since it:
-#   feat!: ... or a BREAKING CHANGE footer   -> first number up, second back to 0
-#   feat, fix, perf, refactor, style,
-#   "chore: update GeckoView"                -> second number up
-#   docs, ci, test, other chore only         -> no release (except the very first run)
-# Run it by hand (Actions > Release > Run workflow) to force a major or minor bump.
+# Builds a signed APK and publishes it as a GitHub Release, only when a version tag is
+# pushed (git tag v1.2.1 && git push origin v1.2.1) or when run by hand
+# (Actions > Release > Run workflow, with the version). Ordinary pushes build nothing.
+# The tag is the version: v1.2.1 gives versionName 1.2.1 and versionCode 10201.
 #
 # Needs these repository secrets (Settings > Secrets and variables > Actions):
 #   KEYSTORE_BASE64   base64 of the release .jks   (base64 -w0 gecko-release.jks)
@@ -14,23 +10,18 @@ name: Release
 
 on:
   push:
-    branches: [main]
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
   workflow_dispatch:
     inputs:
-      bump:
-        description: "Version bump"
-        type: choice
-        options: [auto, minor, major]
-        default: auto
+      version:
+        description: "Version to release, like 1.2.1"
+        type: string
+        required: true
 
-# One release at a time, so two quick pushes never pick the same version.
+# One release at a time.
 concurrency:
   group: release
   cancel-in-progress: false
-
-env:
-  # The version before the first tag exists; the first release is the next one up.
-  BASE_VERSION: "1.1"
 
 jobs:
   version:
@@ -44,59 +35,29 @@ jobs:
       code: ${{ steps.ver.outputs.code }}
       tag: ${{ steps.ver.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
       - name: Work out the version
         id: ver
         env:
-          BUMP_INPUT: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          last=$(git tag --list 'v[0-9]*' --sort=-v:refname | head -n1 || true)
-          if [ -n "$last" ]; then base="${last#v}"; range="$last..HEAD"; else base="$BASE_VERSION"; range="HEAD"; fi
-
-          if git tag --points-at HEAD | grep -q '^v[0-9]'; then
-            echo "This commit is already released."
-            echo "release=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          raw="${INPUT_VERSION:-$GITHUB_REF_NAME}"
+          name="${raw#v}"
+          if ! grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$' <<< "$name"; then
+            echo "Version must look like 1.2.1, got '$raw'"; exit 1
           fi
-
-          subjects=$(git log --format=%s "$range")
-          bodies=$(git log --format=%b "$range")
-          bump=none
-          if grep -qE '^[a-z]+(\([^)]*\))?!:' <<< "$subjects" || grep -qE '^BREAKING[ -]CHANGE' <<< "$bodies"; then
-            bump=major
-          elif grep -qE '^(feat|fix|perf|refactor|style)(\([^)]*\))?:|^chore: update GeckoView' <<< "$subjects"; then
-            bump=minor
-          fi
-          # Nothing is released yet: the first run always publishes, whatever the commits say.
-          if [ "$bump" = none ] && [ -z "$last" ]; then bump=minor; fi
-          if [ -n "${BUMP_INPUT:-}" ] && [ "$BUMP_INPUT" != auto ]; then bump="$BUMP_INPUT"; fi
-
-          IFS=. read -r ma mi _ <<< "$base"
-          case "$bump" in
-            major) ma=$(( ma + 1 )); mi=0 ;;
-            minor) mi=$(( mi + 1 )) ;;
-            *)
-              echo "Nothing to release since ${last:-the start}."
-              echo "release=false" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
-          name="$ma.$mi"
-          echo "Releasing $name (was $base, $bump bump)"
+          IFS=. read -r ma mi pa <<< "$name"
+          echo "Releasing $name"
           {
             echo "release=true"
             echo "name=$name"
             echo "tag=v$name"
-            echo "code=$(( ma * 10000 + mi ))"
+            echo "code=$(( ma * 10000 + mi * 100 + pa ))"
           } >> "$GITHUB_OUTPUT"
 
   release:
     needs: version
-    if: needs.version.outputs.release == 'true' && github.ref == 'refs/heads/main'
+    if: needs.version.outputs.release == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
