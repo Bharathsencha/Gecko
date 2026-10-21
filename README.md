@@ -68,7 +68,7 @@ npm install
 npm run build   # writes ../docs
 ```
 
-Commit the rebuilt `docs/` folder. To publish it: Settings > Pages > Build and deployment > Source "Deploy from a branch", branch `main`, folder `/docs`.
+Commit the rebuilt `docs/` folder. Pushes do not publish it; run Actions > Pages > Run workflow (`pages.yml`) when you want the site updated. One-time setup: Settings > Pages > Build and deployment > Source = "GitHub Actions".
 
 ## Privacy and terms
 
