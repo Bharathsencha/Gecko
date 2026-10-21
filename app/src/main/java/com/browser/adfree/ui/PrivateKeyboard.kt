@@ -27,13 +27,13 @@ import androidx.compose.ui.platform.PlatformTextInputMethodRequest
 import org.mozilla.geckoview.GeckoView
 
 /**
- * Incognito keyboard everywhere: IME_FLAG_NO_PERSONALIZED_LEARNING asks the
+ * Private keyboard everywhere: IME_FLAG_NO_PERSONALIZED_LEARNING asks the
  * keyboard not to learn words, store history or send what is typed for
  * suggestions. Applied to every Compose text field and to web page inputs.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
-fun IncognitoKeyboard(enabled: Boolean, content: @Composable () -> Unit) {
+fun PrivateKeyboard(enabled: Boolean, content: @Composable () -> Unit) {
     if (!enabled) {
         content()
         return
@@ -51,8 +51,8 @@ fun IncognitoKeyboard(enabled: Boolean, content: @Composable () -> Unit) {
     )
 }
 
-/** GeckoView that requests the incognito keyboard for normal tabs too (Gecko only does it for private ones). */
-class IncognitoGeckoView(context: Context) : GeckoView(context) {
+/** GeckoView that requests the private keyboard for normal tabs too (Gecko only does it for private ones). */
+class PrivateGeckoView(context: Context) : GeckoView(context) {
     override fun onCreateInputConnection(outAttrs: EditorInfo): InputConnection? {
         val connection = super.onCreateInputConnection(outAttrs)
         if (enabled) outAttrs.imeOptions = outAttrs.imeOptions or EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING

@@ -77,7 +77,7 @@ fun GeckoViewContainer(
 
     AndroidView(
         factory = { context ->
-            val geckoView = com.browser.adfree.ui.IncognitoGeckoView(context).apply {
+            val geckoView = com.browser.adfree.ui.PrivateGeckoView(context).apply {
                 setSession(session)
             }
 

@@ -18,6 +18,24 @@
 package com.browser.adfree.ui.components
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.widthIn
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,7 +62,7 @@ import com.browser.adfree.ui.theme.*
 /** CHANGE verifies the current PIN; the caller then switches to CREATE. */
 enum class PinMode { CREATE, VERIFY, CHANGE }
 
-/** 4-digit PIN entry for the password vault: create (with confirmation) or verify. */
+/** Passcode entry for the password vault (6 letters or digits): create (with confirmation) or verify. */
 @Composable
 fun PinDialog(
     mode: PinMode,
@@ -55,35 +73,57 @@ fun PinDialog(
     var pin by remember { mutableStateOf("") }
     var firstPin by remember { mutableStateOf<String?>(null) }
     var message by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+
+    // An older 4-digit passcode is still checked as 4 digits; a new one is always 6 characters.
+    val length = if (mode == PinMode.CREATE) VaultLock.PASSCODE_LENGTH else vaultLock.passcodeLength
+    val digitsOnly = mode != PinMode.CREATE && vaultLock.isLegacyPin
 
     val title = when {
-        mode == PinMode.VERIFY -> "Enter your PIN"
-        mode == PinMode.CHANGE -> "Enter your current PIN"
-        firstPin == null -> "Create a 4-digit PIN"
-        else -> "Confirm your PIN"
+        mode == PinMode.VERIFY -> "Enter your passcode"
+        mode == PinMode.CHANGE -> "Enter your current passcode"
+        firstPin == null -> "Create a $length-character passcode"
+        else -> "Confirm your passcode"
     }
 
     fun submit() {
-        if (pin.length != 4) {
-            message = "Enter all 4 digits."
+        if (busy) return
+        if (pin.length != length) {
+            message = "Enter all $length characters."
             return
         }
+        val entered = pin
         when (mode) {
-            PinMode.VERIFY, PinMode.CHANGE -> when (val r = vaultLock.checkPin(pin)) {
-                VaultLock.PinResult.Ok -> onUnlocked()
-                is VaultLock.PinResult.Wrong -> { message = "Wrong PIN. ${r.attemptsLeft} tries left before a lockout."; pin = "" }
-                is VaultLock.PinResult.LockedOut -> { message = "Too many wrong tries. Try again in ${r.seconds} s."; pin = "" }
+            PinMode.VERIFY, PinMode.CHANGE -> {
+                busy = true
+                scope.launch {
+                    // Argon2id is deliberately slow and memory hungry.
+                    val r = withContext(Dispatchers.IO) { vaultLock.checkPin(entered) }
+                    busy = false
+                    when (r) {
+                        VaultLock.PinResult.Ok -> onUnlocked()
+                        is VaultLock.PinResult.Wrong -> { message = "Wrong passcode. ${r.attemptsLeft} tries left before a lockout."; pin = "" }
+                        is VaultLock.PinResult.LockedOut -> { message = "Too many wrong tries. Try again in ${r.seconds} s."; pin = "" }
+                    }
+                }
             }
             PinMode.CREATE -> {
                 val first = firstPin
                 if (first == null) {
-                    firstPin = pin; pin = ""; message = null
-                } else if (first == pin) {
-                    vaultLock.setPin(pin)
-                    vaultLock.method = VaultLock.Method.PIN
-                    onUnlocked()
+                    firstPin = entered; pin = ""; message = null
+                } else if (first == entered) {
+                    busy = true
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            vaultLock.setPin(entered)
+                            vaultLock.method = VaultLock.Method.PIN
+                        }
+                        busy = false
+                        onUnlocked()
+                    }
                 } else {
-                    firstPin = null; pin = ""; message = "The PINs did not match. Start again."
+                    firstPin = null; pin = ""; message = "The passcodes did not match. Start again."
                 }
             }
         }
@@ -97,33 +137,58 @@ fun PinDialog(
         dismissLabel = "Cancel"
     ) {
         Text(
-            if (mode == PinMode.CREATE) "Used to open saved passwords when fingerprint or a screen lock is not set up." else "Saved passwords are locked.",
+            if (mode == PinMode.CREATE) "Letters and numbers. Used to open saved passwords when fingerprint or a screen lock is not set up." else "Saved passwords are locked.",
             color = TextSecondary,
             fontSize = 13.sp
         )
         Spacer(Modifier.height(14.dp))
-        // Four boxes mirror the hidden field below them.
-        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), modifier = Modifier.fillMaxWidth()) {
-            repeat(4) { i ->
-                Box(
-                    modifier = Modifier
-                        .size(48.dp)
-                        .brutalBox(fill = if (i < pin.length) AccentCyan else SurfaceCard, border = BorderSubtle, shape = RoundedCornerShape(5.dp)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    if (i < pin.length) Box(Modifier.size(12.dp).brutalBox(fill = InkBlack, border = InkBlack, shape = RoundedCornerShape(2.dp)))
+        // The four boxes are the input: tapping one opens the keyboard and digits fill them in turn.
+        val focusRequester = remember { FocusRequester() }
+        var focused by remember { mutableStateOf(false) }
+        LaunchedEffect(Unit) { focusRequester.requestFocus() }
+        BasicTextField(
+            value = pin,
+            onValueChange = { v ->
+                if (busy) return@BasicTextField
+                pin = v.filter { if (digitsOnly) it in '0'..'9' else it in '0'..'9' || it in 'a'..'z' || it in 'A'..'Z' }.take(length)
+                message = null
+            },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = if (digitsOnly) KeyboardType.NumberPassword else KeyboardType.Password,
+                imeAction = ImeAction.Done,
+                autoCorrect = false
+            ),
+            keyboardActions = KeyboardActions(onDone = { submit() }),
+            textStyle = TextStyle(color = Color.Transparent),
+            cursorBrush = SolidColor(Color.Transparent),
+            modifier = Modifier
+                .fillMaxWidth()
+                .focusRequester(focusRequester)
+                .onFocusChanged { focused = it.isFocused }
+                .semantics { contentDescription = "Passcode, ${pin.length} of $length characters entered" },
+            decorationBox = {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    repeat(length) { i ->
+                        val active = focused && i == pin.length.coerceAtMost(length - 1)
+                        Box(
+                            modifier = Modifier
+                                .weight(1f, fill = false)
+                                .widthIn(max = 48.dp)
+                                .aspectRatio(1f)
+                                .brutalBox(
+                                    fill = if (i < pin.length) AccentCyan else SurfaceCard,
+                                    border = if (active) TextPrimary else BorderSubtle,
+                                    borderWidth = if (active) 3.dp else 2.dp,
+                                    shape = RoundedCornerShape(5.dp)
+                                ),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (i < pin.length) Box(Modifier.size(12.dp).brutalBox(fill = InkBlack, border = InkBlack, shape = RoundedCornerShape(2.dp)))
+                        }
+                    }
                 }
             }
-        }
-        Spacer(Modifier.height(12.dp))
-        BrutalTextField(
-            value = pin,
-            onValueChange = { v -> pin = v.filter { it.isDigit() }.take(4); message = null },
-            label = "PIN",
-            isPassword = true,
-            keyboardType = KeyboardType.NumberPassword,
-            imeAction = ImeAction.Done,
-            onImeAction = { submit() }
         )
         message?.let {
             Spacer(Modifier.height(8.dp))

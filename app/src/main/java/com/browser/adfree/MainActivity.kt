@@ -332,8 +332,8 @@ class MainActivity : FragmentActivity() {
                 runtime.settings.preferredColorScheme =
                     if (darkTheme) GeckoRuntimeSettings.COLOR_SCHEME_DARK else GeckoRuntimeSettings.COLOR_SCHEME_LIGHT
             }
-            com.browser.adfree.ui.IncognitoGeckoView.enabled = preferencesRepo.incognitoKeyboard
-            com.browser.adfree.ui.IncognitoKeyboard(enabled = preferencesRepo.incognitoKeyboard || tabManager.activeTab?.isPrivate == true) {
+            com.browser.adfree.ui.PrivateGeckoView.enabled = preferencesRepo.privateKeyboard
+            com.browser.adfree.ui.PrivateKeyboard(enabled = preferencesRepo.privateKeyboard || tabManager.activeTab?.isPrivate == true) {
             BrowserTheme(
                 themeMode = preferencesRepo.themeMode,
                 accentColor = preferencesRepo.accentColor

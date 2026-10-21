@@ -22,7 +22,7 @@ License: GNU General Public License v3.0 or later
 - **Works like a normal browser:** links that open a new tab or window do so, long-press menus for links, images, video and audio (open in new or private tab, copy, share, save), PDFs open in the built-in viewer, any file a site serves can be downloaded with its cookies intact, `mailto:`, `tel:` and app links open the right app, and other apps can open pages, PDFs, images, text and shared links in Gecko.
 - **Tab groups:** file tabs under named groups, collapse them, or close a whole group at once.
 - **Site permissions:** a site asking for location, camera, microphone, notifications or similar is asked about once. Change the answer from the shield in the address bar or in Settings > Site permissions.
-- **Incognito keyboard:** every text field, in the app and on web pages, asks the keyboard not to learn or store what you type.
+- **Private keyboard:** every text field, in the app and on web pages, asks the keyboard not to learn or store what you type.
 - **Downloads:** an optional download button (off by default) saves video and audio from the page you are on: direct, HLS and split streams, remuxed on device. Audio is saved as a real `.m4a` or `.opus` file.
 - **Password vault:** AES-256-GCM with the key held in the Android Keystore. Opening it needs your fingerprint, the phone's screen lock or a 4-digit app PIN (checked against a hardware-held key, with lockouts).
 - **Clear button:** wipes history, cookies, cache and tabs behind one of five animations (Fire, Flood, Sweep, Shred, Pixel), chosen in Settings.

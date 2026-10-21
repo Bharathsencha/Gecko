@@ -460,11 +460,11 @@ private fun MainSettings(
             )
             BrutalHairline(startIndent = 64.dp)
             BrutalListRow(
-                title = "Incognito keyboard",
+                title = "Private keyboard",
                 subtitle = "Ask the keyboard not to learn or remember what you type. Always on in private tabs",
                 icon = Icons.Default.Keyboard,
-                checked = preferencesRepo.incognitoKeyboard,
-                onCheckedChange = { preferencesRepo.setIncognitoKeyboardPreference(it) }
+                checked = preferencesRepo.privateKeyboard,
+                onCheckedChange = { preferencesRepo.setPrivateKeyboardPreference(it) }
             )
             BrutalHairline(startIndent = 64.dp)
             BrutalListRow(
@@ -696,8 +696,8 @@ private fun MainSettings(
             )
             BrutalHairline(startIndent = 16.dp)
             ChoiceRow(
-                title = "Unlock with app PIN",
-                subtitle = if (vaultLock.hasPin) "4 digits. Tap to change" else "4 digits, set the first time you open passwords",
+                title = "Unlock with app passcode",
+                subtitle = if (vaultLock.hasPin) "6 letters or numbers. Tap to change" else "6 letters or numbers, set the first time you open passwords",
                 selected = unlockMethod == com.browser.adfree.storage.VaultLock.Method.PIN || !vaultLock.systemAvailable,
                 onClick = {
                     vaultLock.method = com.browser.adfree.storage.VaultLock.Method.PIN

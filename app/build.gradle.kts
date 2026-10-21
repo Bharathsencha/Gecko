@@ -112,6 +112,8 @@ dependencies {
 
     // Fingerprint / screen-lock prompt for the password vault
     implementation("androidx.biometric:biometric:1.1.0")
+    // Argon2id for the vault passcode
+    implementation("org.bouncycastle:bcprov-jdk18on:1.78.1")
     implementation("androidx.fragment:fragment-ktx:1.9.1")
 
     // NewPipeExtractor for YouTube stream extraction fallback

@@ -36,6 +36,11 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.drawscope.translate
+import androidx.compose.ui.graphics.drawOutline
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -82,6 +87,8 @@ fun TopAddressBar(
     onOpenTabs: () -> Unit = {},
     onReload: () -> Unit = {},
     onOpenShields: () -> Unit = {},
+    onSwipeLeft: () -> Unit = {},
+    onSwipeRight: () -> Unit = {},
     isBookmarked: Boolean = false,
     onToggleBookmark: () -> Unit = {},
     historySuggestions: List<HistoryItem> = emptyList(),
@@ -98,6 +105,7 @@ fun TopAddressBar(
     val focusRequester = remember { FocusRequester() }
     val fieldInteraction = remember { MutableInteractionSource() }
     val isStartPage = urlInput == "about:home" || urlInput.isBlank()
+    var swipeOffset by remember { mutableFloatStateOf(0f) }
 
     val currentDisplayText = if (urlInput == "about:home") "" else urlInput
     var textFieldValue by remember {
@@ -148,6 +156,7 @@ fun TopAddressBar(
 
     val privateFill = PrivatePurple
     val chipGreen = Color(0xFF7FDCA4)
+    val focusShadow = if (isPrivate) privateFill else HardShadow
     // Private mode: the night field from the private start page, the same in both themes.
     val fieldInk = if (isPrivate) PrivateNightInk else TextPrimary
     val fieldInkDim = if (isPrivate) PrivateNightMuted else TextSecondary
@@ -167,6 +176,17 @@ fun TopAddressBar(
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .padding(start = 4.dp, end = 4.dp, top = 6.dp, bottom = 8.dp)
+                .pointerInput(Unit) {
+                    detectHorizontalDragGestures(
+                        onDragStart = { swipeOffset = 0f },
+                        onDragEnd = {
+                            if (swipeOffset < -60f) onSwipeLeft() else if (swipeOffset > 60f) onSwipeRight()
+                            swipeOffset = 0f
+                        },
+                        onDragCancel = { swipeOffset = 0f },
+                        onHorizontalDrag = { _, dragAmount -> swipeOffset += dragAmount }
+                    )
+                }
         ) {
             BrutalIconButton(
                 icon = clearStyleIcon(clearStyle),
@@ -188,11 +208,18 @@ fun TopAddressBar(
                 modifier = Modifier
                     .weight(1f)
                     .height(44.dp)
+                    // Drawn from state in the draw phase: toggling a shadow modifier in and out of
+                    // the chain on focus change recreated the field and dropped focus and the keyboard.
+                    .drawBehind {
+                        if (isFocused) {
+                            val outline = BrutalShape.createOutline(size, layoutDirection, this)
+                            val px = 3.dp.toPx()
+                            translate(px, px) { drawOutline(outline, focusShadow) }
+                        }
+                    }
                     .brutalBox(
                         fill = if (isPrivate) PrivateNight else SurfaceElevated,
-                        border = BorderSubtle,
-                        shadow = if (isFocused) (if (isPrivate) privateFill else HardShadow) else null,
-                        shadowOffset = 3.dp
+                        border = BorderSubtle
                     )
                     .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { focusField() }
                     .padding(horizontal = 10.dp),
@@ -254,7 +281,7 @@ fun TopAddressBar(
                         Spacer(modifier = Modifier.width(8.dp))
                     }
 
-                    // Incognito keyboard: no autocorrect or suggestions
+                    // Private keyboard: no autocorrect or suggestions
                     BasicTextField(
                         value = textFieldValue,
                         onValueChange = { newValue ->

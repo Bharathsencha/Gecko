@@ -143,11 +143,11 @@ class BrowserPreferencesRepository(context: Context) {
     }
 
     /** Ask keyboards not to learn or store typing (always on in private tabs). */
-    var incognitoKeyboard by mutableStateOf(prefs.getBoolean("incognito_keyboard", true))
+    var privateKeyboard by mutableStateOf(prefs.getBoolean("incognito_keyboard", true))
         private set
 
-    fun setIncognitoKeyboardPreference(enabled: Boolean) {
-        incognitoKeyboard = enabled
+    fun setPrivateKeyboardPreference(enabled: Boolean) {
+        privateKeyboard = enabled
         prefs.edit().putBoolean("incognito_keyboard", enabled).apply()
     }
 

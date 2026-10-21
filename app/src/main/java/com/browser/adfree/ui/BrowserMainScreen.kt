@@ -184,9 +184,15 @@ fun BrowserMainScreen(
     // default, normal tabs when the user asks for it.
     val isPrivateActive = activeTab?.isPrivate == true
     val secure = if (isPrivateActive) preferencesRepo.blockScreenshotsPrivate else preferencesRepo.blockScreenshots
-    DisposableEffect(secure) {
+    // Changing the flag recreates the window surface, which would cut the clear animation short
+    // when wiping a private tab drops back to a normal one, so it waits for the animation to end.
+    var appliedSecure by remember { mutableStateOf(secure) }
+    LaunchedEffect(secure, pendingWipe == null) {
+        if (pendingWipe == null) appliedSecure = secure
+    }
+    DisposableEffect(appliedSecure) {
         val window = (context as? android.app.Activity)?.window
-        if (secure) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
+        if (appliedSecure) window?.addFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         else window?.clearFlags(android.view.WindowManager.LayoutParams.FLAG_SECURE)
         onDispose { }
     }
@@ -272,6 +278,8 @@ fun BrowserMainScreen(
                     onOpenHistory = { showHistoryPage = true },
                     onOpenTabs = { showTabSwitcher = true },
                     onOpenShields = { showShieldsSheet = true },
+                    onSwipeLeft = { tabManager.nextTab() },
+                    onSwipeRight = { tabManager.previousTab() },
                     onReload = {
                         activeTab?.session?.reload()
                     },
@@ -588,7 +596,8 @@ fun BrowserMainScreen(
                 mode = mode,
                 vaultLock = vaultLock,
                 onUnlocked = {
-                    if (mode == PinMode.CHANGE) {
+                    // An older 4-digit passcode is replaced by a 6-character one after it unlocks.
+                    if (mode == PinMode.CHANGE || (mode == PinMode.VERIFY && vaultLock.isLegacyPin)) {
                         pinMode = PinMode.CREATE
                     } else {
                         pinMode = null
