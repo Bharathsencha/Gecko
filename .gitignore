@@ -22,3 +22,5 @@ keystore.properties
 
 # Copied from the repository root at build time
 app/src/main/assets/legal/
+
+site/node_modules/

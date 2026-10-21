@@ -24,7 +24,7 @@ License: GNU General Public License v3.0 or later
 - **Site permissions:** a site asking for location, camera, microphone, notifications or similar is asked about once. Change the answer from the shield in the address bar or in Settings > Site permissions.
 - **Private keyboard:** every text field, in the app and on web pages, asks the keyboard not to learn or store what you type.
 - **Downloads:** an optional download button (off by default) saves video and audio from the page you are on: direct, HLS and split streams, remuxed on device. Audio is saved as a real `.m4a` or `.opus` file.
-- **Password vault:** AES-256-GCM with the key held in the Android Keystore. Opening it needs your fingerprint, the phone's screen lock or a 4-digit app PIN (checked against a hardware-held key, with lockouts).
+- **Password vault:** AES-256-GCM with the key held in the Android Keystore. Opening it needs your fingerprint, the phone's screen lock or a 6-character app passcode (Argon2id, then checked against a hardware-held key, with lockouts).
 - **Clear button:** wipes history, cookies, cache and tabs behind one of five animations (Fire, Flood, Sweep, Shred, Pixel), chosen in Settings.
 - **Start page:** block compositions, patterns, solid colours, gradients or your own photo, plus a built-in designer for making and naming your own block layouts.
 - **Look:** neo-brutalist light and dark themes with the Space Grotesk typeface. Pages render at the screen's full resolution and refresh rate.
@@ -51,11 +51,23 @@ On first launch Gecko offers to become the default browser. You can also do this
 
 ## Releases and updates
 
-- **Every push and pull request** runs the unit tests (`.github/workflows/ci.yml`).
+- **Pushes build nothing.** CI (`ci.yml`) runs only when started by hand from the Actions tab.
 - **Every Monday** a workflow checks Mozilla for a newer stable GeckoView, bumps it, runs the tests and opens a pull request (`geckoview-update.yml`). Engine updates carry Firefox security fixes, so merge them quickly. It can also be started by hand from the Actions tab.
-- **Releases** are automatic. Every push to `main` with a `feat`, `fix`, `perf`, `refactor` or `style` commit builds a signed APK and publishes it with its SHA-256 checksum as a GitHub Release (`release.yml`). The version is `MAJOR.MINOR`: the second number goes up with each release, the first only for a breaking change (`feat!:` or a `BREAKING CHANGE:` footer), and Actions > Release > Run workflow can force either. Docs, CI and test-only pushes do not release. The signing key comes from the repository secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`; it is never stored in the repository.
+- **Releases** are made by pushing a version tag: `git tag v1.2.1 && git push origin v1.2.1`. The tag is the version (`v1.2.1` gives versionName 1.2.1 and versionCode 10201). The workflow runs the tests, builds a signed APK and publishes it with its SHA-256 checksum as a GitHub Release (`release.yml`); Actions > Release > Run workflow does the same with a typed version. The signing key comes from the repository secrets `KEYSTORE_BASE64`, `KEYSTORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD`; it is never stored in the repository.
 
 Run the tests locally with `./gradlew :app:testDebugUnitTest`.
+
+## Website
+
+The download page is a small Svelte site in `site/`, built into `docs/` and served by GitHub Pages. Its download button looks up the newest GitHub Release when the page loads, so it never needs editing for a new version.
+
+```bash
+cd site
+npm install
+npm run build   # writes ../docs
+```
+
+Commit the rebuilt `docs/` folder. To publish it: Settings > Pages > Build and deployment > Source "Deploy from a branch", branch `main`, folder `/docs`.
 
 ## Privacy and terms
 

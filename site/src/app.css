@@ -1,0 +1,42 @@
+@font-face {
+  font-family: 'Space Grotesk';
+  src: url('/SpaceGrotesk.ttf') format('truetype');
+  font-weight: 300 700;
+  font-display: swap;
+}
+
+:root {
+  --paper: #f4f1ea;
+  --surface: #ffffff;
+  --ink: #111111;
+  --muted: #4d4a42;
+  --accent: #ffd84d;
+  --on-accent: #111111;
+  --radius: 6px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #111111;
+    --surface: #1a1a1a;
+    --ink: #ede8dc;
+    --muted: #aaa598;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+}
+
+a { color: var(--ink); text-underline-offset: 3px; }
+
+:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
