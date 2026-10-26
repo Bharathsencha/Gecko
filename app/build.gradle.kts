@@ -101,7 +101,7 @@ dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
 
     // Mozilla GeckoView Engine
-    implementation("org.mozilla.geckoview:geckoview:157.0.20261005135250")
+    implementation("org.mozilla.geckoview:geckoview:158.0.20261021001945")
 
     // youtubedl-android (yt-dlp wrapper) for video/audio extraction across 1800+ sites
     implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")

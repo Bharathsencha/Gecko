@@ -12,7 +12,7 @@ License: GNU General Public License v3.0 or later
 
 ## Features
 
-- **Engine:** Mozilla GeckoView 157 with strict Enhanced Tracking Protection, Global Privacy Control and cookie-banner rejection.
+- **Engine:** Mozilla GeckoView 158 with strict Enhanced Tracking Protection, Global Privacy Control and cookie-banner rejection.
 - **Ad blocking:** uBlock Origin 1.75 bundled, plus a native request filter.
 - **Anti-fingerprinting:** Gecko's fingerprinting protection with every resistFingerprinting target enabled (uniform user agent, screen, timezone, fonts, canvas and WebGL), except that sites still see your light or dark theme. WebRTC never exposes local or real addresses.
 - **VPN:**
